@@ -89,35 +89,49 @@ set_property(TARGET owe-script PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 
 # ---------------------------------------------------------------------------
-# owe-parse (Pkg/Parse/* + Puppet)
+# owe-parse
 # ---------------------------------------------------------------------------
 add_library(owe-parse STATIC
   Pkg/SceneObj/FieldBinding.cpp
   Pkg/SceneObj/ImageObject.cpp
   Pkg/SceneObj/LightObject.cpp
   Pkg/SceneObj/Material.cpp
-  Pkg/Parse/WPMdlParser.cpp
-  Pkg/Parse/WPParticleEmitter.cpp
-  Pkg/Parse/WPParticleRawGenerator.cpp
-  Pkg/Parse/WPParticleRuntime.cpp
+  Pkg/SceneObj/Object.cpp
+  Pkg/Parse/Puppet/MdlParser.cpp
+  Pkg/Parse/Particle/ParticleEmitter.cpp
+  Pkg/Parse/Particle/ParticleRawGenerator.cpp
+  Pkg/Parse/Particle/ParticleRuntime.cpp
   Pkg/SceneObj/ParticleObject.cpp
-  Pkg/Parse/WPParticleParser.cpp
-  Pkg/Parse/WPPuppet.cpp
-  Pkg/Parse/Uniform/WPUniformSource.cpp
+  Pkg/Parse/Particle/ParticleParser.cpp
+  Pkg/Parse/Puppet/Puppet.cpp
+  Pkg/Parse/Uniform/UniformSource.cpp
   Pkg/SceneObj/SceneDocument.cpp
-  Pkg/Parse/WPSceneParser.cpp
-  Pkg/Parse/WPShaderParser.cpp
-  Pkg/Parse/WPShaderAnnot.cpp
-  Pkg/Parse/WPUniform.cpp
-  Pkg/Parse/WPSoundParser.cpp
-  Pkg/Parse/WPTexImageParser.cpp
+  Pkg/Parse/Scene/SceneAnimationBinding.cpp
+  Pkg/Parse/Scene/SceneContext.cpp
+  Pkg/Parse/Scene/SceneDynamicAsset.cpp
+  Pkg/Parse/Scene/SceneFinalize.cpp
+  Pkg/Parse/Scene/SceneGeometryBuilder.cpp
+  Pkg/Parse/Image/SceneImageObjectParser.cpp
+  Pkg/Parse/Scene/SceneMaterialBuilder.cpp
+  Pkg/Parse/Scene/SceneObjectExpansion.cpp
+  Pkg/Parse/Scene/SceneObjectParsers.cpp
+  Pkg/Parse/Particle/SceneParticleObjectParser.cpp
+  Pkg/Parse/Scene/ScenePostProcess.cpp
+  Pkg/Parse/Scene/SceneScriptBinding.cpp
+  Pkg/Parse/Scene/SceneTextObjectParser.cpp
+  Pkg/Parse/Scene/SceneParser.cpp
+  Pkg/Parse/Shader/ShaderParser.cpp
+  Pkg/Parse/Shader/ShaderAnnot.cpp
+  Pkg/Parse/Uniform/Uniform.cpp
+  Pkg/Parse/Sound/SoundParser.cpp
+  Pkg/Parse/Image/TexImageParser.cpp
   Text/Text.cpp)
 target_sources(owe-parse
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          Pkg/Parse/mod.cppm
          Pkg/Parse/Compat.cppm
-         Pkg/Parse/PuppetCompat.cppm
-         Pkg/Parse/WPParticleRuntime.cppm
+         Pkg/Parse/Puppet/PuppetCompat.cppm
+         Pkg/Parse/Particle/ParticleRuntime.cppm
          Pkg/SceneObj/mod.cppm
          Pkg/SceneObj/AnimationLayer.cppm
          Pkg/SceneObj/FieldBinding.cppm
@@ -125,22 +139,26 @@ target_sources(owe-parse
          Pkg/SceneObj/ImageObject.cppm
          Pkg/SceneObj/LightObject.cppm
          Pkg/SceneObj/Material.cppm
-         Pkg/Parse/WPMdlParser.cppm
+         Pkg/Parse/Puppet/MdlParser.cppm
          Pkg/SceneObj/MiscObject.cppm
          Pkg/SceneObj/ParticleObject.cppm
-         Pkg/Parse/WPParticleParser.cppm
-         Pkg/Parse/WPPuppet.cppm
-         Pkg/Parse/Uniform/WPUniformSource.cppm
+         Pkg/Parse/Particle/ParticleParser.cppm
+         Pkg/Parse/Puppet/Puppet.cppm
+         Pkg/Parse/Uniform/UniformSource.cppm
          Pkg/SceneObj/SceneDocument.cppm
-         Pkg/Parse/SceneStages.cppm
-         Pkg/Parse/WPSceneParser.cppm
-         Pkg/Parse/ShaderLex.cppm
-         Pkg/Parse/WPShaderParser.cppm
+         Pkg/Parse/Scene/SceneStages.cppm
+         Pkg/Parse/Scene/SceneParser.cppm
+         Pkg/Parse/Shader/ShaderLex.cppm
+         Pkg/Parse/Shader/ShaderParser.cppm
          Pkg/SceneObj/SoundObject.cppm
-         Pkg/Parse/WPSoundParser.cppm
-         Pkg/Parse/WPTexImageParser.cppm
-         Pkg/Parse/WPUniform.cppm
+         Pkg/SceneObj/Object.cppm
+         Pkg/Parse/Sound/SoundParser.cppm
+         Pkg/Parse/Image/TexImageParser.cppm
+         Pkg/Parse/Uniform/Uniform.cppm
          Text/Text.cppm)
+target_sources(owe-parse
+  PRIVATE FILE_SET internal_cxx_modules TYPE CXX_MODULES FILES
+          Pkg/Parse/Scene/SceneContext.cppm)
 target_link_libraries(owe-parse
   PUBLIC owe-base owe-load-bench owe-shader-compile owe-script
   PRIVATE ${LZ4_LIBRARIES} Freetype::Freetype PkgConfig::FONTCONFIG)

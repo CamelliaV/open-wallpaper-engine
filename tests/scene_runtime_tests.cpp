@@ -130,16 +130,16 @@ auto Capture(const owe::SceneFrame& frame, const Source& source, Output output)
 
 } // namespace scene_test
 
-TEST(WPTransformUniformSource, DescribesModelAsMat4) {
-    auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+TEST(TransformUniformSource, DescribesModelAsMat4) {
+    auto state = Arc<owe::UniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     auto camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1.0, 1.0, -1.0, 1.0));
-    auto resolver   = Arc<owe::WPUniformCameraResolver>::make(rstd::move(camera));
+    auto resolver   = Arc<owe::UniformCameraResolver>::make(rstd::move(camera));
     auto scene_node = Arc<owe::SceneNode>::make();
-    auto node = Arc<owe::WPUniformNodeState>::make(rstd::move(scene_node), rstd::move(resolver));
-    owe::WPTransformUniformSource source(rstd::move(state), rstd::move(node));
-    scene_test::ShapeSink         sink_impl;
-    auto                          sink = rstd::dyn<owe::UniformBindingSink>::from_ref(sink_impl);
+    auto node = Arc<owe::UniformNodeState>::make(rstd::move(scene_node), rstd::move(resolver));
+    owe::TransformUniformSource source(rstd::move(state), rstd::move(node));
+    scene_test::ShapeSink       sink_impl;
+    auto                        sink = rstd::dyn<owe::UniformBindingSink>::from_ref(sink_impl);
 
     auto result = source.Describe(sink.as_mut_ref());
 
@@ -150,11 +150,11 @@ TEST(WPTransformUniformSource, DescribesModelAsMat4) {
     EXPECT_EQ(sink_impl.model_shape.columns, rstd::u32(4));
 }
 
-TEST(WPTransformUniformSource, AppliesGeometryTransformAfterNodeTransform) {
-    auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+TEST(TransformUniformSource, AppliesGeometryTransformAfterNodeTransform) {
+    auto state = Arc<owe::UniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     auto camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1.0, 1.0, -1.0, 1.0));
-    auto resolver = Arc<owe::WPUniformCameraResolver>::make(rstd::move(camera));
+    auto resolver = Arc<owe::UniformCameraResolver>::make(rstd::move(camera));
     auto node     = Arc<owe::SceneNode>::make();
     node->SetTranslate({ 100.0f, 200.0f, 0.0f });
     node->SetScale({ 2.0f, 3.0f, 1.0f });
@@ -162,30 +162,30 @@ TEST(WPTransformUniformSource, AppliesGeometryTransformAfterNodeTransform) {
     mesh->SetGeometryTransform(
         Eigen::Affine3d(Eigen::Translation3d(Eigen::Vector3d(10.0, -20.0, 0.0))).matrix());
     node->AddMesh(mesh);
-    auto node_state = Arc<owe::WPUniformNodeState>::make(node.clone(), rstd::move(resolver));
-    owe::WPTransformUniformSource source(state.clone(), rstd::move(node_state));
+    auto node_state = Arc<owe::UniformNodeState>::make(node.clone(), rstd::move(resolver));
+    owe::TransformUniformSource source(state.clone(), rstd::move(node_state));
 
     auto model =
-        scene_test::Capture(owe::SceneFrame {}, source, owe::WPTransformUniformOutput::Model);
+        scene_test::Capture(owe::SceneFrame {}, source, owe::TransformUniformOutput::Model);
 
     ASSERT_GT(model.size().to_primitive(), 13u);
     EXPECT_NEAR(model[usize(12)], 120.0f, 1e-5f);
     EXPECT_NEAR(model[usize(13)], 140.0f, 1e-5f);
 }
 
-TEST(WPTransformUniformSource, UsesResolvedPerspectiveCameraEyePosition) {
-    auto state  = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+TEST(TransformUniformSource, UsesResolvedPerspectiveCameraEyePosition) {
+    auto state  = Arc<owe::UniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     auto camera = Arc<owe::SceneCamera>::make(
         owe::SceneCamera::MakePerspective(16.0 / 9.0, 0.1, 10000.0, 60.0));
     camera->SetLookAt(
         Eigen::Vector3d { -0.25, 0.5, 3.25 }, Eigen::Vector3d::Zero(), Eigen::Vector3d::UnitY());
-    auto resolver   = Arc<owe::WPUniformCameraResolver>::make(rstd::move(camera));
+    auto resolver   = Arc<owe::UniformCameraResolver>::make(rstd::move(camera));
     auto scene_node = Arc<owe::SceneNode>::make();
-    auto node = Arc<owe::WPUniformNodeState>::make(rstd::move(scene_node), rstd::move(resolver));
-    owe::WPTransformUniformSource source(rstd::move(state), rstd::move(node));
+    auto node = Arc<owe::UniformNodeState>::make(rstd::move(scene_node), rstd::move(resolver));
+    owe::TransformUniformSource source(rstd::move(state), rstd::move(node));
 
     auto eye =
-        scene_test::Capture(owe::SceneFrame {}, source, owe::WPTransformUniformOutput::EyePosition);
+        scene_test::Capture(owe::SceneFrame {}, source, owe::TransformUniformOutput::EyePosition);
 
     ASSERT_EQ(eye.size(), usize(3));
     EXPECT_FLOAT_EQ(eye[usize()], -0.25f);
@@ -193,20 +193,20 @@ TEST(WPTransformUniformSource, UsesResolvedPerspectiveCameraEyePosition) {
     EXPECT_FLOAT_EQ(eye[usize(2)], 3.25f);
 }
 
-TEST(WPTransformUniformSource, UsesConfiguredEyePositionBeforePerspectiveCamera) {
-    auto state  = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+TEST(TransformUniformSource, UsesConfiguredEyePositionBeforePerspectiveCamera) {
+    auto state  = Arc<owe::UniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     auto camera = Arc<owe::SceneCamera>::make(
         owe::SceneCamera::MakePerspective(16.0 / 9.0, 0.1, 10000.0, 60.0));
     camera->SetLookAt(
         Eigen::Vector3d { 1.0, 2.0, 3.0 }, Eigen::Vector3d::Zero(), Eigen::Vector3d::UnitY());
-    auto resolver   = Arc<owe::WPUniformCameraResolver>::make(rstd::move(camera));
+    auto resolver   = Arc<owe::UniformCameraResolver>::make(rstd::move(camera));
     auto scene_node = Arc<owe::SceneNode>::make();
-    auto node = Arc<owe::WPUniformNodeState>::make(rstd::move(scene_node), rstd::move(resolver));
+    auto node = Arc<owe::UniformNodeState>::make(rstd::move(scene_node), rstd::move(resolver));
     node->eye_position_override = Some(array<float, 3> { 4.0f, 5.0f, 6.0f });
-    owe::WPTransformUniformSource source(rstd::move(state), rstd::move(node));
+    owe::TransformUniformSource source(rstd::move(state), rstd::move(node));
 
     auto eye =
-        scene_test::Capture(owe::SceneFrame {}, source, owe::WPTransformUniformOutput::EyePosition);
+        scene_test::Capture(owe::SceneFrame {}, source, owe::TransformUniformOutput::EyePosition);
 
     ASSERT_EQ(eye.size(), usize(3));
     EXPECT_FLOAT_EQ(eye[usize()], 4.0f);
@@ -214,8 +214,8 @@ TEST(WPTransformUniformSource, UsesConfiguredEyePositionBeforePerspectiveCamera)
     EXPECT_FLOAT_EQ(eye[usize(2)], 6.0f);
 }
 
-TEST(WPAudioUniformSource, ExposesLogicalSpectrumValues) {
-    auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+TEST(AudioUniformSource, ExposesLogicalSpectrumValues) {
+    auto state = Arc<owe::UniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     rstd::array<float, 64> left {};
     rstd::array<float, 64> right {};
     for (usize band {}; band < usize(16); ++band) {
@@ -224,7 +224,7 @@ TEST(WPAudioUniformSource, ExposesLogicalSpectrumValues) {
         }
     }
     state->SetAudioSpectrum(left.as_slice(), right.as_slice());
-    owe::WPAudioUniformSource source(state.clone());
+    owe::AudioUniformSource source(state.clone());
 
     scene_test::ShapeSink shape_sink_impl;
     auto shape_sink = rstd::dyn<owe::UniformBindingSink>::from_ref(shape_sink_impl);
@@ -237,7 +237,7 @@ TEST(WPAudioUniformSource, ExposesLogicalSpectrumValues) {
     EXPECT_EQ(shape_sink_impl.spectrum_shape.max_elements, rstd::u32(16));
 
     owe::SceneFrame frame;
-    auto value = scene_test::Capture(frame, source, owe::WPAudioUniformOutput::Spectrum16Left);
+    auto value = scene_test::Capture(frame, source, owe::AudioUniformOutput::Spectrum16Left);
     ASSERT_EQ(value.size(), usize(16));
     EXPECT_EQ(value.View().layout.kind, owe::UniformValueKind::Linear);
     for (usize band {}; band < usize(16); ++band) {
@@ -245,10 +245,10 @@ TEST(WPAudioUniformSource, ExposesLogicalSpectrumValues) {
     }
 }
 
-TEST(WPLightUniformSource, ExposesLogicalVec3Array) {
-    auto                      lights = Vec<ref<owe::SceneLight>>::make();
-    owe::WPLightUniformSource source(rstd::move(lights));
-    scene_test::ShapeSink     shape_sink_impl;
+TEST(LightUniformSource, ExposesLogicalVec3Array) {
+    auto                    lights = Vec<ref<owe::SceneLight>>::make();
+    owe::LightUniformSource source(rstd::move(lights));
+    scene_test::ShapeSink   shape_sink_impl;
     auto shape_sink = rstd::dyn<owe::UniformBindingSink>::from_ref(shape_sink_impl);
     auto described  = source.Describe(shape_sink.as_mut_ref());
 
@@ -259,12 +259,12 @@ TEST(WPLightUniformSource, ExposesLogicalVec3Array) {
     EXPECT_EQ(shape_sink_impl.light_position_shape.max_elements, rstd::u32(12));
 
     owe::SceneFrame frame;
-    auto            value = scene_test::Capture(frame, source, owe::WPLightUniformOutput::Position);
+    auto            value = scene_test::Capture(frame, source, owe::LightUniformOutput::Position);
     ASSERT_EQ(value.size(), usize(12));
     for (usize index {}; index < value.size(); ++index) EXPECT_FLOAT_EQ(value[index], 0.0f);
 }
 
-TEST(WPLightUniformSource, PublishesWorldDirectionAndType) {
+TEST(LightUniformSource, PublishesWorldDirectionAndType) {
     auto parent = Arc<owe::SceneNode>::make();
     parent->SetTranslate({ 10.0f, 20.0f, 30.0f });
     parent->SetRotation({ 0.0f, 0.0f, -0.25f });
@@ -282,39 +282,39 @@ TEST(WPLightUniformSource, PublishesWorldDirectionAndType) {
 
     auto lights = Vec<ref<owe::SceneLight>>::make();
     lights.push(ref<owe::SceneLight>::from_raw_parts(rstd::addressof(light)));
-    owe::WPLightUniformSource source(rstd::move(lights));
-    owe::SceneFrame           frame;
+    owe::LightUniformSource source(rstd::move(lights));
+    owe::SceneFrame         frame;
 
-    auto position = scene_test::Capture(frame, source, owe::WPLightUniformOutput::Position);
+    auto position = scene_test::Capture(frame, source, owe::LightUniformOutput::Position);
     ASSERT_EQ(position.size(), usize(12));
     EXPECT_NEAR(position[usize()], 10.0f + 2.0f * std::cos(0.25f), 1e-5f);
     EXPECT_NEAR(position[usize(1)], 20.0f - 2.0f * std::sin(0.25f), 1e-5f);
     EXPECT_NEAR(position[usize(2)], 30.0f, 1e-5f);
 
-    auto direction = scene_test::Capture(frame, source, owe::WPLightUniformOutput::DirectionType);
+    auto direction = scene_test::Capture(frame, source, owe::LightUniformOutput::DirectionType);
     ASSERT_EQ(direction.size(), usize(16));
     EXPECT_NEAR(direction[usize()], -std::cos(0.25f), 1e-5f);
     EXPECT_NEAR(direction[usize(1)], std::sin(0.25f), 1e-5f);
     EXPECT_NEAR(direction[usize(2)], 0.0f, 1e-5f);
     EXPECT_FLOAT_EQ(direction[usize(3)], static_cast<float>(owe::SceneLightType::Directional));
 
-    auto color = scene_test::Capture(frame, source, owe::WPLightUniformOutput::ColorRadius);
+    auto color = scene_test::Capture(frame, source, owe::LightUniformOutput::ColorRadius);
     ASSERT_EQ(color.size(), usize(16));
     EXPECT_FLOAT_EQ(color[usize()], 0.5f);
     EXPECT_FLOAT_EQ(color[usize(1)], 1.0f);
     EXPECT_FLOAT_EQ(color[usize(2)], 2.0f);
 
-    auto cast_shadow = scene_test::Capture(frame, source, owe::WPLightUniformOutput::CastShadow);
+    auto cast_shadow = scene_test::Capture(frame, source, owe::LightUniformOutput::CastShadow);
     ASSERT_EQ(cast_shadow.size(), usize(4));
     EXPECT_FLOAT_EQ(cast_shadow[usize()], 1.0f);
 }
 
-TEST(WPTextureUniformSource, StaticTextureUsesIdentityTransform) {
+TEST(TextureUniformSource, StaticTextureUsesIdentityTransform) {
     owe::SceneFrame                    frame;
     scene_test::StaticTextureResources resources;
     scene_test::UpdateContext          context_impl(frame, resources);
-    owe::WPTextureUniformSource        source;
-    scene_test::UniformSink            sink_impl(owe::WPTextureRotationOutput(0));
+    owe::TextureUniformSource          source;
+    scene_test::UniformSink            sink_impl(owe::TextureRotationOutput(0));
     auto context = rstd::dyn<owe::UniformUpdateContext>::from_ref(context_impl);
     auto sink    = rstd::dyn<owe::UniformValueSink>::from_ref(sink_impl);
 
@@ -364,7 +364,7 @@ TEST(SceneAudioAverage, SharesAtomicStateWithStreamOwner) {
     EXPECT_FLOAT_EQ(scene.AudioAverage(usize(3)).to_primitive(), 0.75f);
 }
 
-TEST(WPSceneParserSoundScript, UserPropertyCanStartSilentSoundFromVolumeField) {
+TEST(SceneParserSoundScript, UserPropertyCanStartSilentSoundFromVolumeField) {
     auto document = owe::wpscene::ParseSceneDocumentJson(
         R"JSON({
             "camera": {},
@@ -394,7 +394,7 @@ TEST(WPSceneParserSoundScript, UserPropertyCanStartSilentSoundFromVolumeField) {
 
     owe::fs::VFS                vfs;
     wavsen::audio::SoundManager sound_manager;
-    owe::WPSceneParser          parser;
+    owe::SceneParser            parser;
     auto                        parsed = parser.Parse(
         "sound-script"_str,
         ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
@@ -417,7 +417,7 @@ TEST(WPSceneParserSoundScript, UserPropertyCanStartSilentSoundFromVolumeField) {
     EXPECT_FLOAT_EQ(controller->Volume(), 0.35f);
 }
 
-TEST(WPSceneParserText, EmptyStaticTextPreservesLayerHierarchy) {
+TEST(SceneParserText, EmptyStaticTextPreservesLayerHierarchy) {
     auto document = owe::wpscene::ParseSceneDocumentJson(
         R"JSON({
             "camera": {},
@@ -444,7 +444,7 @@ TEST(WPSceneParserText, EmptyStaticTextPreservesLayerHierarchy) {
 
     owe::fs::VFS                vfs;
     wavsen::audio::SoundManager sound_manager;
-    owe::WPSceneParser          parser;
+    owe::SceneParser            parser;
     auto                        parsed = parser.Parse(
         "empty-text-parent"_str,
         ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
@@ -460,7 +460,7 @@ TEST(WPSceneParserText, EmptyStaticTextPreservesLayerHierarchy) {
     EXPECT_EQ(child->Parent(), parent);
 }
 
-TEST(WPSceneParserText, ScriptSceneExposesTextWritesWithoutSourceInspection) {
+TEST(SceneParserText, ScriptSceneExposesTextWritesWithoutSourceInspection) {
     auto document = owe::wpscene::ParseSceneDocumentJson(
         R"JSON({
             "camera": {},
@@ -489,7 +489,7 @@ TEST(WPSceneParserText, ScriptSceneExposesTextWritesWithoutSourceInspection) {
 
     owe::fs::VFS                vfs;
     wavsen::audio::SoundManager sound_manager;
-    owe::WPSceneParser          parser;
+    owe::SceneParser            parser;
     auto                        parsed = parser.Parse(
         "runtime-text-write"_str,
         ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
@@ -625,15 +625,15 @@ TEST(SceneCameraPath, UserBindingMutatesRegisteredArc) {
     EXPECT_TRUE(path->enabled);
 }
 
-TEST(WPUniformSourceRuntimeAlpha, Color4UsesBaseColorAndRuntimeAlpha) {
+TEST(UniformSourceRuntimeAlpha, Color4UsesBaseColorAndRuntimeAlpha) {
     owe::Scene scene;
     auto       node = Arc<owe::SceneNode>::make();
     node->SetBaseColor({ 0.25f, 0.5f, 0.75f }, 0.8f);
     node->SetUserAlpha(0.125f);
 
-    owe::WPColorUniformSource source(node.clone());
-    const auto                color =
-        scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
+    owe::ColorUniformSource source(node.clone());
+    const auto              color =
+        scene_test::Capture(scene.Runtime().Frame(), source, owe::ColorUniformOutput::Color4);
     ASSERT_EQ(color.size().to_primitive(), 4u);
     EXPECT_FLOAT_EQ(color[rstd::usize()], 0.25f);
     EXPECT_FLOAT_EQ(color[rstd::usize(1)], 0.5f);
@@ -641,33 +641,33 @@ TEST(WPUniformSourceRuntimeAlpha, Color4UsesBaseColorAndRuntimeAlpha) {
     EXPECT_FLOAT_EQ(color[rstd::usize(3)], 0.125f);
 }
 
-TEST(WPUniformSourceRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
+TEST(UniformSourceRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
     owe::Scene scene;
     auto       node = Arc<owe::SceneNode>::make();
     node->SetBaseColor({ 0.0f, 0.0f, 0.0f }, 0.35f);
-    owe::WPColorUniformSource source(node.clone());
+    owe::ColorUniformSource source(node.clone());
 
     node->SetVisible(true);
     auto visible =
-        scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
+        scene_test::Capture(scene.Runtime().Frame(), source, owe::ColorUniformOutput::Color4);
     ASSERT_EQ(visible.size().to_primitive(), 4u);
     EXPECT_FLOAT_EQ(visible[rstd::usize(3)], 0.35f);
 
     node->SetVisible(false);
     auto hidden =
-        scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
+        scene_test::Capture(scene.Runtime().Frame(), source, owe::ColorUniformOutput::Color4);
     ASSERT_EQ(hidden.size().to_primitive(), 4u);
     EXPECT_FLOAT_EQ(hidden[rstd::usize(3)], 0.0f);
 
     node->SetVisible(true);
     auto restored =
-        scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
+        scene_test::Capture(scene.Runtime().Frame(), source, owe::ColorUniformOutput::Color4);
     ASSERT_EQ(restored.size().to_primitive(), 4u);
     EXPECT_FLOAT_EQ(restored[rstd::usize(3)], 0.35f);
 }
 
-TEST(WPUniformSourceParallax, UserPropertiesDriveEveryParallaxField) {
-    auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+TEST(UniformSourceParallax, UserPropertiesDriveEveryParallaxField) {
+    auto state = Arc<owe::UniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     state->CameraParallax() = { true, 0.03f, 0.1f, 0.36f };
 
     auto disable = owe::ParseJson(R"({"value":false})").unwrap();
@@ -691,7 +691,7 @@ TEST(WPUniformSourceParallax, UserPropertiesDriveEveryParallaxField) {
     EXPECT_FLOAT_EQ(state->CameraParallax().mouse_influence, 0.75f);
 }
 
-TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
+TEST(UniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     owe::Scene scene;
     scene.SetOrtho({ i32(3840), i32(2160) });
 
@@ -722,22 +722,22 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     scene.RebuildResourceIndex();
     effect->SetParentAnchor(child.as_ptr());
 
-    auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+    auto state = Arc<owe::UniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     state->CameraParallax() = { true, 0.03f, 0.0f, 0.36f };
     state->SetOrtho(3840.0f, 2160.0f);
     state->SetPointerInput(0.0, 1.0);
     state->Advance(owe::SceneFrame {});
 
-    auto camera_resolver = Arc<owe::WPUniformCameraResolver>::make(camera.clone());
+    auto camera_resolver = Arc<owe::UniformCameraResolver>::make(camera.clone());
     camera_resolver->Add(String::make("default"_str), camera.clone());
 
-    auto parent_state = Arc<owe::WPUniformNodeState>::make(parent.clone(), camera_resolver.clone());
+    auto parent_state = Arc<owe::UniformNodeState>::make(parent.clone(), camera_resolver.clone());
     parent_state->propagated_parallax_depth      = { -1.56f, -0.79f };
     parent_state->propagate_parallax_to_children = true;
-    auto child_state = Arc<owe::WPUniformNodeState>::make(child.clone(), camera_resolver.clone());
+    auto child_state = Arc<owe::UniformNodeState>::make(child.clone(), camera_resolver.clone());
     child_state->propagated_parallax_depth      = { -1.12f, -1.36f };
     child_state->propagate_parallax_to_children = true;
-    auto effect_state = Arc<owe::WPUniformNodeState>::make(effect.clone(), camera_resolver.clone());
+    auto effect_state = Arc<owe::UniformNodeState>::make(effect.clone(), camera_resolver.clone());
     effect_state->propagated_parallax_depth      = { 0.0f, 0.0f };
     effect_state->propagate_parallax_to_children = true;
     state->SetNodeState({ .index = rstd::u32(1), .generation = rstd::u32(1) },
@@ -745,11 +745,11 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     state->SetNodeState({ .index = rstd::u32(2), .generation = rstd::u32(1) }, child_state.clone());
     state->SetNodeState({ .index = rstd::u32(3), .generation = rstd::u32(1) },
                         effect_state.clone());
-    owe::WPTransformUniformSource source(state.clone(), effect_state.clone());
+    owe::TransformUniformSource source(state.clone(), effect_state.clone());
 
     auto capture_mvp = [&]() {
         return scene_test::Capture(
-            scene.Runtime().Frame(), source, owe::WPTransformUniformOutput::ModelViewProjection);
+            scene.Runtime().Frame(), source, owe::TransformUniformOutput::ModelViewProjection);
     };
     auto expected_translation = [](Eigen::Vector2f base, Eigen::Vector2f depth) {
         const Eigen::Vector2f camera_pos { 1920.0f, 1080.0f };

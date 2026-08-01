@@ -402,7 +402,7 @@ TEST(TexSchema, SpriteHeaderAndMip0DimsArePositive) {
 }
 
 // Production parity: for every texture the test's binary reader can
-// read fully, run WPTexImageParser::ParseHeader and verify its derived
+// read fully, run TexImageParser::ParseHeader and verify its derived
 // `mipmap_pow2` / `mipmap_larger` fields match values computed directly
 // from the authoritative mip0 dims. Cross-implementation check that
 // catches production-side layout bugs which fixture-only tests can't
@@ -415,7 +415,7 @@ TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
     const auto& scan = AllScans();
     ASSERT_FALSE(scan.metas.empty());
 
-    // Production formulas (mirrored from WPTexImageParser.cpp's
+    // Production formulas (mirrored from TexImageParser.cpp's
     // SetHeaderPow2 + the sprite-path inline computation):
     //   non-sprite mipmap_pow2:   IsPowOfTwo(mip0_w) || IsPowOfTwo(mip0_h)
     //   non-sprite mipmap_larger: mip0_w * mip0_h > map_w * map_h
@@ -433,8 +433,8 @@ TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
         std::string name = TexNameFromPkgPath(m.pkg_path);
         if (name.empty()) continue;
 
-        owe::WPTexImageParser parser(&vfs);
-        owe::ImageHeader      h;
+        owe::TexImageParser parser(&vfs);
+        owe::ImageHeader    h;
         try {
             auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name).unwrap());
             if (parsed.is_err()) continue;
@@ -479,7 +479,7 @@ TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
               << " parity_fail=" << parity_fail << " (sprite=" << parity_fail_sprite << ")\n";
 }
 
-// Full pixel-decode end-to-end. Runs WPTexImageParser::Parse (not just
+// Full pixel-decode end-to-end. Runs TexImageParser::Parse (not just
 // ParseHeader) on a sample of the corpus and asserts the returned Image
 // has plausible slot / mipmap data. Covers the production paths that
 // ParseHeader never reaches:
@@ -524,8 +524,8 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
         std::string name = TexNameFromPkgPath(m.pkg_path);
         if (name.empty()) continue;
 
-        owe::WPTexImageParser parser(&vfs);
-        owe::ImageHeader      h;
+        owe::TexImageParser parser(&vfs);
+        owe::ImageHeader    h;
         try {
             auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name).unwrap());
             if (parsed.is_err()) continue;
@@ -624,8 +624,8 @@ TEST(TexSchema, FormatCodeMapsToExpectedTextureFormat) {
         std::string name = TexNameFromPkgPath(m.pkg_path);
         if (name.empty()) continue;
 
-        owe::WPTexImageParser parser(&vfs);
-        owe::ImageHeader      h;
+        owe::TexImageParser parser(&vfs);
+        owe::ImageHeader    h;
         try {
             auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name).unwrap());
             if (parsed.is_err()) continue;

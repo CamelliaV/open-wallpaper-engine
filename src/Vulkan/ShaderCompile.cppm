@@ -106,9 +106,4 @@ bool CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> compUnits, const 
 // preprocessor. On failure returns false and leaves `out` untouched.
 bool Preprocess(std::string_view src, ShaderType stage, SourceLang lang, std::string& out);
 
-// glslang::InitializeProcess / FinalizeProcess wrappers. Init must be
-// called once before any compile; Finalize at shutdown.
-void InitProcess();
-void FinalizeProcess();
-
 } // namespace owe::vulkan

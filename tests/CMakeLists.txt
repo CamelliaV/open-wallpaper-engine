@@ -96,21 +96,21 @@ set_target_properties(scene_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 # Unit coverage for the WE shader annotation parser. Verifies dead-branch
 # tolerance, comment handling, and the [COMBO] / texture / scalar / u_*
 # schemas.
-add_executable(wpshader_parse_tests wpshader_parse_tests.cpp)
-target_link_libraries(wpshader_parse_tests PRIVATE owe-parse GTest::gtest_main)
-set_target_properties(wpshader_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+add_executable(shader_parse_tests shader_parse_tests.cpp)
+target_link_libraries(shader_parse_tests PRIVATE owe-parse GTest::gtest_main)
+set_target_properties(shader_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
-add_executable(wpmaterial_parse_tests wpmaterial_parse_tests.cpp)
-target_link_libraries(wpmaterial_parse_tests PRIVATE owe-parse GTest::gtest_main)
-set_target_properties(wpmaterial_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+add_executable(material_parse_tests material_parse_tests.cpp)
+target_link_libraries(material_parse_tests PRIVATE owe-parse GTest::gtest_main)
+set_target_properties(material_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 add_executable(text_geometry_tests text_geometry_tests.cpp)
 target_link_libraries(text_geometry_tests PRIVATE owe-parse GTest::gtest_main)
 set_target_properties(text_geometry_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
-add_executable(wpmdl_mesh_tests wpmdl_mesh_tests.cpp)
-target_link_libraries(wpmdl_mesh_tests PRIVATE wescene_test_lib GTest::gtest_main)
-set_target_properties(wpmdl_mesh_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+add_executable(mdl_mesh_tests mdl_mesh_tests.cpp)
+target_link_libraries(mdl_mesh_tests PRIVATE wescene_test_lib GTest::gtest_main)
+set_target_properties(mdl_mesh_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 add_executable(scene_runtime_tests scene_runtime_tests.cpp)
 target_link_libraries(scene_runtime_tests PRIVATE wescene_test_lib owe-script GTest::gtest_main)
@@ -163,7 +163,7 @@ set_target_properties(scene_schema_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Same idea, applied to the binary .tex container's (texv, texi, texb,
 # texs) sub-version tuples. Asserts every observed tuple parses and is
-# in the supported set documented by WPTexFormatVersion.
+# in the supported set documented by TexFormatVersion.
 add_executable(tex_schema_tests tex_schema_tests.cpp)
 target_link_libraries(tex_schema_tests PRIVATE wescene_test_lib GTest::gtest_main)
 set_target_properties(tex_schema_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
@@ -223,12 +223,12 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 gtest_discover_tests(
-    wpshader_parse_tests
+    shader_parse_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 30
 )
 gtest_discover_tests(
-    wpmaterial_parse_tests
+    material_parse_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 30
 )
@@ -238,7 +238,7 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 30
 )
 gtest_discover_tests(
-    wpmdl_mesh_tests
+    mdl_mesh_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 30
 )

@@ -12,14 +12,14 @@ using namespace rstd::literals;
 export namespace owe::wpscene
 {
 
-inline void ReadPuppetAnimationLayers(const owe::Json&                            json,
-                                      std::vector<WPPuppetLayer::AnimationLayer>& out) {
+inline void ReadPuppetAnimationLayers(const owe::Json&                          json,
+                                      std::vector<PuppetLayer::AnimationLayer>& out) {
     auto layers = json.get("animationlayers"_str);
     if (layers.is_none()) return;
     auto array = (*layers)->as_array();
     if (array.is_none()) return;
     for (const auto& jLayer : **array) {
-        WPPuppetLayer::AnimationLayer layer;
+        PuppetLayer::AnimationLayer layer;
         owe::GetJsonValue(jLayer, "animation", layer.id);
         owe::GetJsonValue(jLayer, "blend", layer.blend);
         owe::GetJsonValue(jLayer, "rate", layer.rate);

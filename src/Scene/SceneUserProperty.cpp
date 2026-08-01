@@ -262,8 +262,8 @@ bool ApplyShaderCombos(Scene& scene, const std::string& key, const Json& propert
     if (bindings.is_empty()) return false;
     scene.ClearUserPropertyDiagnostics(as_str(key).unwrap());
 
-    WPShaderCache* shader_cache = nullptr;
-    if (auto cache = scene.ExtensionMut<Arc<WPShaderCache>>(); cache.is_some()) {
+    ShaderCache* shader_cache = nullptr;
+    if (auto cache = scene.ExtensionMut<Arc<ShaderCache>>(); cache.is_some()) {
         shader_cache = (**cache).as_ptr();
     }
     auto vfs = scene.ExtensionMut<fs::VFS>();
@@ -317,7 +317,7 @@ bool ApplyShaderCombos(Scene& scene, const std::string& key, const Json& propert
             current != current_variant.resolved_combos.end() && current->second == next_value)
             continue;
 
-        auto compiled = WPShaderParser::CompileSceneShaderVariant(
+        auto compiled = ShaderParser::CompileSceneShaderVariant(
             current_variant, **vfs, { { combo, next_value } }, shader_cache);
         if (! compiled.ok || ! compiled.shader) {
             rstd_warn("user property '{}' skipped: shader combo '{}' compile failed: {}",

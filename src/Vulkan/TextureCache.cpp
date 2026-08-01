@@ -525,7 +525,7 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::AllocateTexture(Texture
 /* ===========================================================================
  * Video-tex pipeline
  *
- * When WPTexImageParser detects an MP4 / WebM container inlined in a
+ * When TexImageParser detects an MP4 / WebM container inlined in a
  * .tex body (header.type == ImageType::VIDEO), it doesn't decompress
  * pixels. It stores a typed read range in ImageData instead. CreateTex
  * routes those Images here:

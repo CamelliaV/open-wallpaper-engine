@@ -38,7 +38,7 @@ namespace owe
 class RenderMsg final {
     RSTD_ENUM(RenderMsg,
               (Init, (Box<RenderInitInfo> info; Option<SceneLoadBenchHandle> load_bench;)),
-              (SetScene, (Box<Scene> scene; Arc<WPUniformRuntimeInput> uniform_input;
+              (SetScene, (Box<Scene> scene; Arc<UniformRuntimeInput> uniform_input;
                           Option<SceneLoadBenchHandle> load_bench; Option<u64> random_seed;)),
               (SetFillMode, (FillMode mode;)), (SetSpeed, (f32 speed;)),
               (SetUserProperty, (std::string key; Json property;)),
@@ -381,11 +381,11 @@ private:
 
     SceneRuntimeController& m_main;
 
-    Box<vulkan::VulkanRender>          m_render;
-    Option<Box<Scene>>                 m_scene_owner;
-    Scene*                             m_scene { nullptr };
-    Option<Arc<WPUniformRuntimeInput>> m_uniform_input_owner;
-    WPUniformRuntimeInput*             m_uniform_input { nullptr };
+    Box<vulkan::VulkanRender>        m_render;
+    Option<Box<Scene>>               m_scene_owner;
+    Scene*                           m_scene { nullptr };
+    Option<Arc<UniformRuntimeInput>> m_uniform_input_owner;
+    UniformRuntimeInput*             m_uniform_input { nullptr };
     // Identity snapshot owned by the compiled render graph.
     RenderSceneSnapshot                 m_render_scene;
     Option<Box<rg::RenderGraph>>        m_rg;
@@ -1312,8 +1312,8 @@ void SceneRuntimeController::loadScene() {
                 Some(rstd::path::PathBuf::from(rstd::cppstd::as_str(m_config.cache_dir).unwrap()));
             rstd_info("shader cache folder: {}", m_config.cache_dir);
         }
-        WPSceneParser parser;
-        auto          parsed = parser.Parse(
+        SceneParser parser;
+        auto        parsed = parser.Parse(
             rstd::cppstd::as_str(scene_id).unwrap(),
             rstd::ref<wpscene::SceneDocument>::from_raw_parts(scene_doc.get()),
             rstd::mut_ref<fs::VFS>::from_raw_parts(&vfs),

@@ -6,7 +6,7 @@
 // (Meyer's singleton) so it's safe to call from INSTANTIATE_TEST_SUITE_P
 // at static-init time.
 //
-// Skipped workshops (e.g. ones that hang WPMdlParser::Parse) are listed
+// Skipped workshops (e.g. ones that hang MdlParser::Parse) are listed
 // in kSkipIds and never parsed.
 
 module;
@@ -103,8 +103,8 @@ struct DumpFlags {
     bool tex { true };      // emit "textures" array (ReadTexMeta)
     bool shader { false };  // emit "shaders" array (CompileMaterialShader)
     bool mdl { true };      // emit "puppets" array
-    bool mdl_full { true }; // puppets entries via full WPMdlParser::Parse;
-                            // false ⇒ just the WPMdlHeader fields
+    bool mdl_full { true }; // puppets entries via full MdlParser::Parse;
+                            // false ⇒ just the MdlHeader fields
 };
 
 // Per-workshop JSON snapshot used by `wescene-test valid`, by
@@ -239,8 +239,8 @@ TexMeta ReadTexMeta(owe::fs::VFS& vfs, const std::string& pkg_path) {
     std::string name =
         pkg_path.substr(prefix.size(), pkg_path.size() - prefix.size() - suffix.size());
 
-    owe::WPTexImageParser parser(&vfs);
-    owe::ImageHeader      h;
+    owe::TexImageParser parser(&vfs);
+    owe::ImageHeader    h;
     try {
         auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name).unwrap());
         if (parsed.is_err()) return meta;
@@ -753,7 +753,7 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
             auto                             jmat = parsed_material.unwrap();
             owe::CompileMaterialShaderResult r;
             try {
-                r = owe::WPShaderParser::CompileMaterialShader(jmat, vfs, pkg_id);
+                r = owe::ShaderParser::CompileMaterialShader(jmat, vfs, pkg_id);
             } catch (const std::exception& ex) {
                 r.ok    = false;
                 r.error = ex.what();
@@ -790,10 +790,10 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
             if (! ends_with(e.path, ".mdl")) continue;
             std::string rel = e.path;
             if (! rel.empty() && rel.front() == '/') rel.erase(0, 1);
-            WPMdlHeader h;
-            bool        ok = false;
+            MdlHeader h;
+            bool      ok = false;
             try {
-                ok = owe::WPMdlParser::ParseHeader(rstd::cppstd::as_str(rel).unwrap(), vfs, h);
+                ok = owe::MdlParser::ParseHeader(rstd::cppstd::as_str(rel).unwrap(), vfs, h);
             } catch (const std::exception&) {
                 ok = false;
             }
@@ -813,14 +813,14 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
 
     for (const auto& e : pkg_entries) {
         if (! ends_with(e.path, ".mdl")) continue;
-        // WPMdlParser::Parse expects a path relative to /assets without the
+        // MdlParser::Parse expects a path relative to /assets without the
         // leading slash.
         std::string rel = e.path;
         if (! rel.empty() && rel.front() == '/') rel.erase(0, 1);
-        WPMdl mdl;
-        bool  ok = false;
+        Mdl  mdl;
+        bool ok = false;
         try {
-            ok = owe::WPMdlParser::Parse(rstd::cppstd::as_str(rel).unwrap(), vfs, mdl);
+            ok = owe::MdlParser::Parse(rstd::cppstd::as_str(rel).unwrap(), vfs, mdl);
         } catch (const std::exception&) {
             ok = false;
         }
@@ -833,7 +833,7 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
         SetSnapshot(jm, "mesh_count", static_cast<int64_t>(mdl.header.mesh_count));
         SetSnapshot(jm, "mdls", mdl.mdls);
         SetSnapshot(jm, "mdla", mdl.mdla);
-        const WPMdl::Mesh* m0 = mdl.meshes.is_empty() ? nullptr : &mdl.meshes[usize()];
+        const Mdl::Mesh* m0 = mdl.meshes.is_empty() ? nullptr : &mdl.meshes[usize()];
         SetSnapshot(jm,
                     "mat_json_file",
                     m0 && ! m0->mat_json_files.is_empty() ? m0->mat_json_files[usize()].as_str()

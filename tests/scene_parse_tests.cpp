@@ -8,7 +8,7 @@
 // what was previously parseable.
 //
 // Deliberately does not depend on Corpus / DumpWorkshop — those exercise
-// WPMdlParser / WPTexImageParser too, which can hit unrelated assertions
+// MdlParser / TexImageParser too, which can hit unrelated assertions
 // on rare .mdl inputs and would mask scene.json regressions.
 
 #include <gtest/gtest.h>
@@ -134,6 +134,122 @@ TEST(SceneObjectExpansion, PreservesHiddenTextLayers) {
     EXPECT_FALSE(objects[rstd::usize()].as_Text().value.visible);
 }
 
+TEST(SceneDocumentObjects, PreservesDeclarationOrderAndObjectKinds) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({
+            "camera": {},
+            "general": {},
+            "objects": [
+                {"id": 10, "name": "Group", "parent": 0},
+                {"id": 11, "name": "Shape", "shape": "quad", "parent": 10},
+                {"id": 12, "name": "Text", "text": "hello", "parent": 10}
+            ]
+        })JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+    ASSERT_EQ(document->objects.len(), rstd::usize(3));
+    EXPECT_EQ(document->objects[rstd::usize()].metadata.id, 10);
+    EXPECT_EQ(document->objects[rstd::usize()].metadata.kind,
+              owe::wpscene::SceneObjectKind::Container);
+    EXPECT_EQ(document->objects[rstd::usize(1)].metadata.id, 11);
+    EXPECT_EQ(document->objects[rstd::usize(1)].metadata.kind,
+              owe::wpscene::SceneObjectKind::Shape);
+    EXPECT_EQ(document->objects[rstd::usize(2)].metadata.id, 12);
+    EXPECT_EQ(document->objects[rstd::usize(2)].metadata.kind, owe::wpscene::SceneObjectKind::Text);
+}
+
+TEST(SceneDocumentObjects, RejectsNonArrayObjectsAtTheCanonicalParseEntry) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({"camera": {}, "general": {}, "objects": {}})JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+    ASSERT_FALSE(document->objects_are_array);
+
+    owe::fs::VFS                vfs;
+    wavsen::audio::SoundManager sound_manager;
+    owe::SceneParser            parser;
+    auto                        parsed = parser.Parse(
+        "invalid-objects"_str,
+        rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        rstd::mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)),
+        rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(rstd::addressof(sound_manager)));
+    ASSERT_TRUE(parsed.is_err());
+    EXPECT_EQ(parsed.unwrap_err().kind, owe::SceneParseErrorKind::ObjectExpansion);
+}
+
+TEST(SceneDocumentObjects, CapturesAuthoredAutoOrthoCanvas) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({
+            "camera": {},
+            "general": {"orthogonalprojection": {"auto": true}},
+            "objects": [
+                {"id": 1, "image": "small", "size": "640 480"},
+                {"id": 2, "image": "canvas", "size": "1920 1080"}
+            ]
+        })JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document->metadata.canvas_extent.has_value());
+    EXPECT_EQ((*document->metadata.canvas_extent)[0], 1920u);
+    EXPECT_EQ((*document->metadata.canvas_extent)[1], 1080u);
+}
+
+TEST(SceneObjectExpansion, AutoOrthoExtentUsesDecodedImageSize) {
+    owe::wpscene::SceneMetadata metadata;
+    metadata.general.orthogonalprojection.auto_ = true;
+    metadata.canvas_extent                      = std::array<std::uint32_t, 2> { 640, 480 };
+
+    owe::wpscene::ImageObject image;
+    image.size = { 1920.0f, 1080.0f };
+    rstd::vec::Vec<owe::SceneObjectVar> objects;
+    objects.push(owe::SceneObjectVar::Image(rstd::move(image)));
+
+    auto extent = owe::ResolveOrthoProjectionExtent(metadata, objects.as_slice());
+    EXPECT_EQ(extent[rstd::usize()], 1920);
+    EXPECT_EQ(extent[rstd::usize(1)], 1080);
+}
+
+TEST(SceneObjectExpansion, IgnoresContainerWithoutAuthoredId) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({
+            "camera": {},
+            "general": {},
+            "objects": [
+                {"name": "Missing Id"},
+                {"id": 7, "name": "Valid Container"}
+            ]
+        })JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+
+    owe::fs::VFS vfs;
+    auto         objects = owe::wpscene::DecodeSceneObjects(
+        rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        rstd::mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)));
+
+    ASSERT_EQ(objects.len(), rstd::usize(1));
+    ASSERT_TRUE(objects[rstd::usize()].is_Container());
+    EXPECT_EQ(objects[rstd::usize()].as_Container().value.id, 7);
+}
+
+TEST(SceneObjectExpansion, PreservesHiddenSourceReferencedByContainer) {
+    auto parsed = owe::ParseJson(R"JSON({
+        "objects": [
+            {"id": 7, "name": "Hidden Source", "sound": [], "visible": false},
+            {"id": 8, "name": "Container", "dependencies": [7]}
+        ]
+    })JSON");
+    ASSERT_TRUE(parsed.is_ok());
+
+    owe::fs::VFS vfs;
+    auto objects = owe::ExpandObjects(parsed.unwrap(), vfs, owe::wpscene::kSceneVersionUnknown);
+
+    ASSERT_EQ(objects.len(), rstd::usize(2));
+    ASSERT_TRUE(objects[rstd::usize()].is_Sound());
+    EXPECT_TRUE(objects[rstd::usize()].as_Sound().value.visible);
+    EXPECT_TRUE(objects[rstd::usize(1)].is_Container());
+}
+
 TEST(SceneObjectExpansion, ShapeOwnsItsWallpaperLayerIdentity) {
     auto document = owe::wpscene::ParseSceneDocumentJson(
         R"JSON({
@@ -174,7 +290,7 @@ TEST(SceneObjectExpansion, ShapeOwnsItsWallpaperLayerIdentity) {
     ASSERT_TRUE(vfs.mount("/assets"_str, std::move(effect_assets).unwrap_unchecked()).is_ok());
 
     wavsen::audio::SoundManager sound_manager;
-    owe::WPSceneParser          parser;
+    owe::SceneParser            parser;
     auto                        parsed = parser.Parse(
         "shape-layer-identity"_str,
         rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
@@ -211,7 +327,7 @@ TEST(ImageColorBlendParsing, LinearDodgeUsesAdditiveAttachmentOwner) {
     ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets).unwrap_unchecked()).is_ok());
 
     wavsen::audio::SoundManager sound_manager;
-    owe::WPSceneParser          parser;
+    owe::SceneParser            parser;
     auto                        parsed = parser.Parse(
         "linear-dodge-owner"_str,
         rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
@@ -257,7 +373,7 @@ TEST(ImageColorBlendParsing, EffectLayerPreservesLinearDodgeAttachmentOwner) {
     ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets).unwrap_unchecked()).is_ok());
 
     wavsen::audio::SoundManager sound_manager;
-    owe::WPSceneParser          parser;
+    owe::SceneParser            parser;
     auto                        parsed = parser.Parse(
         "linear-dodge-effect-owner"_str,
         rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
@@ -313,7 +429,7 @@ TEST(SceneLightParsing, RecognizesPrefixedKindsAndFullConeAngles) {
     ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets).unwrap_unchecked()).is_ok());
 
     wavsen::audio::SoundManager sound_manager;
-    owe::WPSceneParser          parser;
+    owe::SceneParser            parser;
     auto                        parsed = parser.Parse(
         "prefixed-light-kinds"_str,
         rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
@@ -363,7 +479,7 @@ TEST(SceneCameraParsing, PerspectiveOverridePreservesTheOrthographicReferencePla
     ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets).unwrap_unchecked()).is_ok());
 
     wavsen::audio::SoundManager sound_manager;
-    owe::WPSceneParser          parser;
+    owe::SceneParser            parser;
     auto                        parsed = parser.Parse(
         "perspective-override"_str,
         rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),

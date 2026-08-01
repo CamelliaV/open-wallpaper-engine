@@ -181,6 +181,8 @@ SceneObjectKind object_kind(const owe::Json& obj) {
     if (! obj.is_object()) return SceneObjectKind::Unknown;
     if (auto value = obj.get("image"_str); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Image;
+    if (auto value = obj.get("shape"_str); value.is_some() && ! (*value)->is_null())
+        return SceneObjectKind::Shape;
     if (auto value = obj.get("particle"_str); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Particle;
     if (auto value = obj.get("sound"_str); value.is_some() && ! (*value)->is_null())
@@ -202,10 +204,11 @@ SceneObjectMetadata parse_object_metadata(const owe::Json& obj, std::size_t raw_
     metadata.kind      = object_kind(obj);
     if (! obj.is_object()) return metadata;
 
-    owe::GetJsonValue(obj, "id", metadata.id, false);
+    metadata.has_id = owe::GetJsonValue(obj, "id", metadata.id, false);
     owe::GetJsonValue(obj, "name", metadata.name, false);
-    owe::GetJsonValue(obj, "visible", metadata.visible, false);
+    ReadVisibleProperty(obj, metadata.visible, metadata.visible_user);
     owe::GetJsonValue(obj, "parent", metadata.parent, false);
+    owe::GetJsonValue(obj, "solid", metadata.solid, false);
 
     std::array<float, 2> size {};
     if (owe::GetJsonValue(obj, "size", size, false) && size[0] > 0.0f && size[1] > 0.0f) {
@@ -214,17 +217,24 @@ SceneObjectMetadata parse_object_metadata(const owe::Json& obj, std::size_t raw_
     return metadata;
 }
 
-std::vector<SceneObjectMetadata> parse_objects_metadata(const owe::Json& root) {
-    std::vector<SceneObjectMetadata> objects;
-    auto                             raw_objects = root.get("objects"_str);
+Vec<SceneObjectRecord> parse_object_records(const owe::Json& root, bool& objects_are_array) {
+    Vec<SceneObjectRecord> objects;
+    auto                   raw_objects = root.get("objects"_str);
     if (raw_objects.is_none()) return objects;
 
     auto array = (*raw_objects)->as_array();
-    if (array.is_none()) return objects;
+    if (array.is_none()) {
+        objects_are_array = false;
+        return objects;
+    }
     const auto count = (*array)->len().to_primitive();
-    objects.reserve(count);
+    objects.reserve(rstd::usize(count));
     for (std::size_t i = 0; i < count; ++i) {
-        objects.push_back(parse_object_metadata((**array)[rstd::usize(i)], i));
+        const auto& authored = (**array)[rstd::usize(i)];
+        objects.push(SceneObjectRecord {
+            .metadata = parse_object_metadata(authored, i),
+            .authored = authored.clone(),
+        });
     }
     return objects;
 }
@@ -235,12 +245,11 @@ std::optional<std::array<uint32_t, 2>> image_extent(const SceneObjectMetadata& o
                                      static_cast<uint32_t>((*obj.size)[1]) };
 }
 
-std::optional<std::array<uint32_t, 2>>
-largest_image_extent(std::span<const SceneObjectMetadata> objects) {
+std::optional<std::array<uint32_t, 2>> largest_image_extent(const Vec<SceneObjectRecord>& objects) {
     std::optional<std::array<uint32_t, 2>> best;
     uint64_t                               best_area = 0;
-    for (const auto& obj : objects) {
-        auto extent = image_extent(obj);
+    for (const auto& record : objects) {
+        auto extent = image_extent(record.metadata);
         if (! extent) continue;
         const uint64_t area =
             static_cast<uint64_t>((*extent)[0]) * static_cast<uint64_t>((*extent)[1]);
@@ -252,9 +261,8 @@ largest_image_extent(std::span<const SceneObjectMetadata> objects) {
     return best;
 }
 
-std::optional<std::array<uint32_t, 2>>
-scene_canvas_extent(const SceneMetadata&                 metadata,
-                    std::span<const SceneObjectMetadata> objects_metadata) {
+std::optional<std::array<uint32_t, 2>> scene_canvas_extent(const SceneMetadata&          metadata,
+                                                           const Vec<SceneObjectRecord>& objects) {
     const auto& general = metadata.general;
     if (! general.isOrtho) return std::nullopt;
 
@@ -264,7 +272,7 @@ scene_canvas_extent(const SceneMetadata&                 metadata,
         return std::array<uint32_t, 2> { static_cast<uint32_t>(ortho.width),
                                          static_cast<uint32_t>(ortho.height) };
     }
-    return largest_image_extent(objects_metadata);
+    return largest_image_extent(objects);
 }
 
 } // namespace
@@ -307,18 +315,25 @@ bool SceneMetadata::FromJson(const owe::Json& json, SceneVersion v) {
 namespace owe::wpscene
 {
 
+Vec<SceneObjectRecord> ParseSceneObjectRecords(const owe::Json& root, bool& objects_are_array) {
+    return parse_object_records(root, objects_are_array);
+}
+
 std::optional<SceneDocument> ParseSceneDocumentJson(std::string_view buf,
                                                     SceneVersion     pkg_version) {
-    SceneDocument doc;
-    auto          parsed = owe::ParseJson(buf);
+    auto parsed = owe::ParseJson(buf);
     if (parsed.is_err()) {
         rstd_error("Can't parse scene json: {}", parsed.unwrap_err());
         return std::nullopt;
     }
-    doc.root_json = parsed.unwrap();
-    if (! doc.metadata.FromJson(doc.root_json, pkg_version)) return std::nullopt;
-    doc.objects_metadata       = parse_objects_metadata(doc.root_json);
-    doc.metadata.canvas_extent = scene_canvas_extent(doc.metadata, doc.objects_metadata);
+    return ParseSceneDocumentValue(parsed.unwrap(), pkg_version);
+}
+
+std::optional<SceneDocument> ParseSceneDocumentValue(owe::Json root, SceneVersion pkg_version) {
+    SceneDocument doc;
+    if (! doc.metadata.FromJson(root, pkg_version)) return std::nullopt;
+    doc.objects                = ParseSceneObjectRecords(root, doc.objects_are_array);
+    doc.metadata.canvas_extent = scene_canvas_extent(doc.metadata, doc.objects);
     return doc;
 }
 

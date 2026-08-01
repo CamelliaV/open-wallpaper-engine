@@ -5,6 +5,7 @@ export import rstd.json;
 import wescene.fs;
 
 using namespace rstd::prelude;
+using rstd::mtp::is_const;
 
 export namespace owe
 {
@@ -25,7 +26,7 @@ struct JsonFileError {
 template<typename T>
 struct JsonTemplateTypeCheck {
     using type = bool;
-    static_assert(! std::is_const_v<T>, "GetJsonValue need a non const value");
+    static_assert(! is_const<T>, "GetJsonValue need a non const value");
 };
 
 template<typename T>

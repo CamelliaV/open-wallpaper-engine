@@ -19,12 +19,15 @@ using namespace rstd::literals;
 export namespace owe
 {
 
-inline constexpr std::array WE_GLTEX_NAMES { BASE_GLTEX_NAMES() };
-inline constexpr std::array WE_GLTEX_RESOLUTION_NAMES { BASE_GLTEX_NAMES(Resolution) };
-inline constexpr std::array WE_GLTEX_ROTATION_NAMES { BASE_GLTEX_NAMES(Rotation) };
-inline constexpr std::array WE_GLTEX_TRANSLATION_NAMES { BASE_GLTEX_NAMES(Translation) };
-inline constexpr std::array WE_GLTEX_MIPMAPINFO_NAMES { BASE_GLTEX_NAMES(MipMapInfo) };
-inline constexpr std::array WE_GLTEX_TEXEL_NAMES { BASE_GLTEX_NAMES(Texel) };
+inline constexpr array<std::string_view, 13> WE_GLTEX_NAMES { BASE_GLTEX_NAMES() };
+inline constexpr array<std::string_view, 13> WE_GLTEX_RESOLUTION_NAMES { BASE_GLTEX_NAMES(
+    Resolution) };
+inline constexpr array<std::string_view, 13> WE_GLTEX_ROTATION_NAMES { BASE_GLTEX_NAMES(Rotation) };
+inline constexpr array<std::string_view, 13> WE_GLTEX_TRANSLATION_NAMES { BASE_GLTEX_NAMES(
+    Translation) };
+inline constexpr array<std::string_view, 13> WE_GLTEX_MIPMAPINFO_NAMES { BASE_GLTEX_NAMES(
+    MipMapInfo) };
+inline constexpr array<std::string_view, 13> WE_GLTEX_TEXEL_NAMES { BASE_GLTEX_NAMES(Texel) };
 
 inline constexpr ref<str> WE_SPEC_PREFIX = "_rt_"_str;
 // --- Names that originate from Wallpaper Engine content
@@ -222,20 +225,20 @@ inline std::string GenLinkTex(std::ptrdiff_t id) {
 inline bool IsImageLayerComposite(ref<str> name) {
     return name.starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX);
 }
-// Parse <id> from `_rt_imageLayerComposite_<id>[_a|_b]`; nullopt when it isn't a
+// Parse <id> from `_rt_imageLayerComposite_<id>[_a|_b]`; None when it isn't a
 // composite ref or no id digits follow the prefix.
-inline std::optional<std::uint32_t> ParseImageLayerCompositeId(ref<str> name) {
+inline Option<u32> ParseImageLayerCompositeId(ref<str> name) {
     auto rest = name.strip_prefix(WE_IMAGE_LAYER_COMPOSITE_PREFIX);
-    if (rest.is_none()) return std::nullopt;
-    usize         i {};
-    std::uint32_t id = 0;
+    if (rest.is_none()) return None();
+    usize i {};
+    u32   id {};
     for (; i < rest->size(); ++i) {
         auto value = (*rest)[i].to_primitive();
         if (value < '0' || value > '9') break;
-        id = id * 10u + std::uint32_t(value - '0');
+        id = id * u32(10) + u32(value - '0');
     }
-    if (i == usize()) return std::nullopt;
-    return id;
+    if (i == usize()) return None();
+    return Some(id);
 }
 
 } // namespace owe

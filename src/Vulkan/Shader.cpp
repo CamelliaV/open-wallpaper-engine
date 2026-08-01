@@ -22,6 +22,26 @@ using namespace owe::vulkan;
 namespace
 {
 
+struct GlslangProcessRuntime {
+    GlslangProcessRuntime(): active(glslang::InitializeProcess()) { rstd_assert(active); }
+    GlslangProcessRuntime(const GlslangProcessRuntime&) = delete;
+    GlslangProcessRuntime(GlslangProcessRuntime&& other) noexcept: active(other.active) {
+        other.active = false;
+    }
+    ~GlslangProcessRuntime() {
+        if (active) glslang::FinalizeProcess();
+    }
+
+    bool active { false };
+};
+
+void EnsureGlslangProcess() {
+    static const rstd::sync::OnceLock<GlslangProcessRuntime> runtime;
+    (void)runtime.get_or_init([] {
+        return GlslangProcessRuntime {};
+    });
+}
+
 ShaderScalarKind ReflectedScalarKind(const SpvReflectBlockVariable& variable) {
     if (variable.type_description == nullptr) return ShaderScalarKind::Unknown;
     const auto flags = variable.type_description->type_flags;
@@ -335,9 +355,6 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
     return true;
 }
 
-void owe::vulkan::InitProcess() { glslang::InitializeProcess(); }
-void owe::vulkan::FinalizeProcess() { glslang::FinalizeProcess(); }
-
 namespace
 {
 
@@ -372,6 +389,7 @@ constexpr EShMessages kCompileMessages =
 
 bool owe::vulkan::Preprocess(std::string_view src, ShaderType stage, SourceLang lang,
                              std::string& out) {
+    EnsureGlslangProcess();
     glslang::TShader shader(ToEShLanguage(stage));
     std::string      src_copy(src);
     const char*      data = src_copy.c_str();
@@ -407,6 +425,7 @@ bool owe::vulkan::Preprocess(std::string_view src, ShaderType stage, SourceLang 
 bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> compUnits,
                                             const ShaderCompOpt&            opt,
                                             std::vector<Uni_ShaderSpv>&     spvs) {
+    EnsureGlslangProcess();
     spvs.clear();
     spvs.reserve(compUnits.size());
 

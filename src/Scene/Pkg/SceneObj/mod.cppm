@@ -10,3 +10,4 @@ export import :light_object;
 export import :misc_object;
 export import :particle_object;
 export import :sound_object;
+export import :object;

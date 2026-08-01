@@ -258,7 +258,7 @@ static void CheckMdlInvariants(const Corpus::MdlRef& ref) {
                       ? rstd::cppstd::to_string(*(*path)->as_str())
                       : ""));
     // Failed parses are tolerated (some .mdl files are non-puppet 3D
-    // models that WPMdlParser intentionally rejects), but the version
+    // models that MdlParser intentionally rejects), but the version
     // stamps must still be readable.
     auto mdlv = m.get("mdlv"_str);
     auto mdls = m.get("mdls"_str);

@@ -126,8 +126,8 @@ TEST(ImageParser, TextureHeaderExposesFourthPackedComponent) {
     owe::fs::VFS vfs;
     ASSERT_TRUE(vfs.mount("/assets"_str, rstd::move(physical).unwrap_unchecked()).is_ok());
 
-    owe::WPTexImageParser parser(&vfs);
-    auto                  parsed = parser.ParseHeader("mask"_str);
+    owe::TexImageParser parser(&vfs);
+    auto                parsed = parser.ParseHeader("mask"_str);
     ASSERT_TRUE(parsed.is_ok());
     auto header = rstd::move(parsed).unwrap_unchecked();
     EXPECT_EQ(header.extraHeader.at("compo1").val, 0);

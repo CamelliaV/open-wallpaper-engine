@@ -33,7 +33,7 @@ struct WorkshopProbe {
 
 // Light-weight enumerator: walks `workshop_root` for direct subdirectories
 // containing `scene.pkg`, reads only the version stamp, and returns a
-// sorted list. Does NOT call DumpWorkshop / WPMdlParser / WPTexImageParser
+// sorted list. Does NOT call DumpWorkshop / MdlParser / TexImageParser
 // — safe to use even when the corpus has a workshop that crashes those.
 std::vector<WorkshopProbe> EnumerateWorkshopProbes(const std::string& workshop_root);
 

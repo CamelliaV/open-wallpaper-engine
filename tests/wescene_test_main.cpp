@@ -187,7 +187,7 @@ struct ScanOptions {
     bool                     p_tex { false };
     bool                     p_shader { false };
     bool                     p_mdl { false };      // header-only by default
-    bool                     p_mdl_full { false }; // upgrade to full WPMdlParser::Parse
+    bool                     p_mdl_full { false }; // upgrade to full MdlParser::Parse
     bool                     full { false };
     std::vector<std::string> name_filters;
     std::vector<unsigned>    pkgv_filters;
@@ -233,24 +233,24 @@ ScanArgs AddScanArgs(Command& command) {
     auto full = command.add_arg(
         Arg<bool>::flag("full"_str)
             .long_name("full"_str)
-            .help("run full WPSceneParser::Parse (shader compile, bloom inject, glslang) "
+            .help("run full SceneParser::Parse (shader compile, bloom inject, glslang) "
                   "instead of the cheap FromJson+ExpandObjects+AdjustAuto base"_str));
     auto parse_tex =
         command.add_arg(Arg<bool>::flag("parse-tex"_str)
                             .long_name("parse-tex"_str)
-                            .help("run WPTexImageParser on every /materials/**/*.tex"_str));
+                            .help("run TexImageParser on every /materials/**/*.tex"_str));
     auto parse_shader = command.add_arg(
         Arg<bool>::flag("parse-shader"_str)
             .long_name("parse-shader"_str)
-            .help("run WPShaderParser::CompileMaterialShader on every /materials/**/*.json"_str));
+            .help("run ShaderParser::CompileMaterialShader on every /materials/**/*.json"_str));
     auto parse_mdl = command.add_arg(
         Arg<bool>::flag("parse-mdl"_str)
             .long_name("parse-mdl"_str)
-            .help("run WPMdlParser::ParseHeader on every /models/**/*.mdl (header-only)"_str));
+            .help("run MdlParser::ParseHeader on every /models/**/*.mdl (header-only)"_str));
     auto parse_mdl_full = command.add_arg(
         Arg<bool>::flag("parse-mdl-full"_str)
             .long_name("parse-mdl-full"_str)
-            .help("upgrade --parse-mdl to full WPMdlParser::Parse (slow; some hang/reject)"_str));
+            .help("upgrade --parse-mdl to full MdlParser::Parse (slow; some hang/reject)"_str));
     auto parse_all =
         command.add_arg(Arg<bool>::flag("parse-all"_str)
                             .long_name("parse-all"_str)
@@ -347,25 +347,21 @@ bool RunSceneParseBase(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v, std:
         err = "scene.json not in pkg";
         return false;
     }
-    const std::string text   = stream->ReadAllStr();
-    auto              parsed = owe::ParseJson(text);
-    if (parsed.is_err()) {
-        err = "scene.json parse failed";
+    const std::string text     = stream->ReadAllStr();
+    auto              document = owe::wpscene::ParseSceneDocumentJson(text, pkg_v);
+    if (! document) {
+        err = "ParseSceneDocumentJson returned null";
         return false;
     }
-    auto                        j = parsed.unwrap();
-    owe::wpscene::SceneMetadata sc;
-    if (! sc.FromJson(j, pkg_v)) {
-        err = "SceneMetadata::FromJson returned false";
-        return false;
-    }
-    auto scene_objs = owe::ExpandObjects(j, vfs, pkg_v);
-    (void)owe::ResolveOrthoProjectionExtent(sc, scene_objs.as_slice());
+    auto scene_objs = owe::ExpandObjects(
+        rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        rstd::mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)));
+    (void)owe::ResolveOrthoProjectionExtent(document->metadata, scene_objs.as_slice());
     (void)scene_objs;
     return true;
 }
 
-// Runs the full WPSceneParser::Parse pipeline: scene parse + per-image
+// Runs the full SceneParser::Parse pipeline: scene parse + per-image
 // shader compile + bloom auto-injection + scene-graph allocation.
 // SoundManager is default-constructed but never activated, so Sound
 // objects parse without opening an audio device.
@@ -383,13 +379,13 @@ bool RunSceneParseFull(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v,
         return false;
     }
     wavsen::audio::SoundManager sm;
-    owe::WPSceneParser          parser;
+    owe::SceneParser            parser;
     auto parsed = parser.Parse(rstd::cppstd::as_str(pkg_id).unwrap(),
                                rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(&*document),
                                rstd::mut_ref<owe::fs::VFS>::from_raw_parts(&vfs),
                                rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(&sm));
     if (parsed.is_err()) {
-        err = "WPSceneParser::Parse returned an error";
+        err = "SceneParser::Parse returned an error";
         return false;
     }
     return true;
@@ -397,7 +393,7 @@ bool RunSceneParseFull(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v,
 
 void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::VFS& vfs,
                       const std::string& pkg_id, Counters& c, bool quiet, const JsonSink& sink) {
-    owe::WPTexImageParser      parser(&vfs);
+    owe::TexImageParser        parser(&vfs);
     constexpr std::string_view prefix = "/materials/";
     constexpr std::string_view suffix = ".tex";
     for (const auto& e : entries) {
@@ -490,7 +486,7 @@ void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries, owe::fs
         auto                             jmat = parsed.unwrap();
         owe::CompileMaterialShaderResult r;
         try {
-            r = owe::WPShaderParser::CompileMaterialShader(jmat, vfs, pkg_id);
+            r = owe::ShaderParser::CompileMaterialShader(jmat, vfs, pkg_id);
         } catch (const std::exception& ex) {
             r.ok    = false;
             r.error = ex.what();
@@ -528,14 +524,14 @@ void ValidateMdls(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::V
                   const std::string& pkg_id, Counters& c, bool quiet, const JsonSink& sink) {
     for (const auto& e : entries) {
         if (! EndsWith(e.path, ".mdl")) continue;
-        // WPMdlParser::Parse takes a path without /assets prefix.
+        // MdlParser::Parse takes a path without /assets prefix.
         std::string name(e.path.substr(1));
         bool        ok = false;
         std::string err;
         try {
-            owe::WPMdl mdl;
-            ok = owe::WPMdlParser::Parse(rstd::cppstd::as_str(name).unwrap(), vfs, mdl);
-            if (! ok) err = "WPMdlParser::Parse returned false";
+            owe::Mdl mdl;
+            ok = owe::MdlParser::Parse(rstd::cppstd::as_str(name).unwrap(), vfs, mdl);
+            if (! ok) err = "MdlParser::Parse returned false";
         } catch (const std::exception& ex) {
             err = ex.what();
         } catch (...) {
@@ -572,12 +568,12 @@ void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries, owe:
                         const std::string& pkg_id, Counters& c, bool quiet, const JsonSink& sink) {
     for (const auto& e : entries) {
         if (! EndsWith(e.path, ".mdl")) continue;
-        std::string      name(e.path.substr(1));
-        owe::WPMdlHeader h;
-        bool             ok = false;
-        std::string      err;
+        std::string    name(e.path.substr(1));
+        owe::MdlHeader h;
+        bool           ok = false;
+        std::string    err;
         try {
-            ok = owe::WPMdlParser::ParseHeader(rstd::cppstd::as_str(name).unwrap(), vfs, h);
+            ok = owe::MdlParser::ParseHeader(rstd::cppstd::as_str(name).unwrap(), vfs, h);
             if (! ok) err = "ParseHeader returned false";
         } catch (const std::exception& ex) {
             err = ex.what();
@@ -1441,7 +1437,7 @@ struct RendergraphArgs {
 };
 
 RendergraphArgs AddRendergraphArgs(Command& command) {
-    command.about("Parse one pkg with WPSceneParser::Parse and print every pass "
+    command.about("Parse one pkg with SceneParser::Parse and print every pass "
                   "sceneToRenderGraph would emit, in execution order: shader, output RT, "
                   "color-write mask, blend mode, sampled textures, resolved image-effect "
                   "chains, and the post-process chain. No Vulkan; pure structural dump."_str);
@@ -1679,13 +1675,13 @@ int CmdRendergraph(const Matches& matches, const RendergraphArgs& args) {
     }
 
     wavsen::audio::SoundManager sm;
-    owe::WPSceneParser          parser;
+    owe::SceneParser            parser;
     auto parsed = parser.Parse(rstd::cppstd::as_str(pkg_path).unwrap(),
                                rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(&*document),
                                rstd::mut_ref<owe::fs::VFS>::from_raw_parts(&vfs),
                                rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(&sm));
     if (parsed.is_err()) {
-        std::fprintf(stderr, "wescene-test rendergraph: WPSceneParser::Parse returned an error\n");
+        std::fprintf(stderr, "wescene-test rendergraph: SceneParser::Parse returned an error\n");
         return 1;
     }
     auto scene = rstd::move(parsed).unwrap().scene;

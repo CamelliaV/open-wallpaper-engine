@@ -839,7 +839,7 @@ public:
 
     // = glTF "primitive": one vertex-stream set + one index array + one
     // material slot. A SceneMesh holds >= 1 Submesh; today most paths emit
-    // exactly one (single-slot compat); WPSceneParser will emit N for
+    // exactly one (single-slot compat); SceneParser will emit N for
     // .mdl meshes with mesh_count > 1.
     struct Submesh {
         std::vector<SceneVertexArray> vertex_arrays;

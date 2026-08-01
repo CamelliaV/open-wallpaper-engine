@@ -1613,10 +1613,10 @@ void Scene::ResolveMaterialTextureSources(SceneMaterial& material) {
         if (texture.empty()) continue;
 
         auto name = rstd::cppstd::as_str(texture).unwrap();
-        if (auto linked = ParseImageLayerCompositeId(name); linked.has_value()) {
+        if (auto linked = ParseImageLayerCompositeId(name); linked.is_some()) {
             source.kind            = SceneMaterialTextureSourceKind::LayerOutput;
             source.wallpaper_layer = rstd::as_cast<i32>(*linked);
-            auto key               = GenLinkTex(*linked);
+            auto key               = GenLinkTex(linked->to_primitive());
             source.key             = String::make(rstd::cppstd::as_str(key).unwrap());
             source.layer =
                 RegisteredLayerLinkSourceId(WallpaperLayerId { .value = source.wallpaper_layer });

@@ -229,7 +229,7 @@ bool IsDirectChildOf(std::string_view prefix, std::string_view path) {
 
 // Parsed direct children of selected nested parents. Mirrors the parser
 // code paths (see SceneGeneral / ParticleObject / ImageObject /
-// WPPuppetLayer parsing). Used by ReportTopUnparsedNestedKeys.
+// PuppetLayer parsing). Used by ReportTopUnparsedNestedKeys.
 const std::map<std::string, std::set<std::string>>& kParsedNestedKeys() {
     using set                                 = std::set<std::string>;
     static const std::map<std::string, set> m = {

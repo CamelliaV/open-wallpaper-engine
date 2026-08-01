@@ -169,9 +169,9 @@ struct ModelObject {
     bool          perspective { false };
     bool          reflected { true };
 
-    std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
-    VisibleUserBinding                         visible_user;
-    std::string                                visible_user_key;
+    std::vector<PuppetLayer::AnimationLayer> puppet_layers;
+    VisibleUserBinding                       visible_user;
+    std::string                              visible_user_key;
 
     bool FromJson(const owe::Json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);

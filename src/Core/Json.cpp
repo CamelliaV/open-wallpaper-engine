@@ -9,6 +9,8 @@ import rstd.log;
 
 using namespace rstd::prelude;
 using namespace rstd::literals;
+using rstd::mtp::is_arithmetic;
+using rstd::mtp::same;
 
 namespace owe
 {
@@ -24,18 +26,28 @@ struct JsonArrayTarget {
 template<typename T>
 struct JsonArrayTarget<std::vector<T>> {
     static constexpr bool enabled = true;
+    static constexpr bool dynamic = true;
+    using value_type              = T;
+};
+
+template<typename T>
+struct JsonArrayTarget<Vec<T>> {
+    static constexpr bool enabled = true;
+    static constexpr bool dynamic = true;
     using value_type              = T;
 };
 
 template<typename T, std::size_t N>
 struct JsonArrayTarget<std::array<T, N>> {
     static constexpr bool enabled = true;
+    static constexpr bool dynamic = false;
     using value_type              = T;
 };
 
 template<typename T, rstd::size_t N>
 struct JsonArrayTarget<rstd::array<T, N>> {
     static constexpr bool enabled = true;
+    static constexpr bool dynamic = false;
     using value_type              = T;
 };
 
@@ -55,9 +67,9 @@ auto InitialJsonValue(const Json& json) -> const Json& {
 template<typename T>
 auto ParseNumber(std::string_view value) -> T {
     std::string text { value };
-    if constexpr (std::is_same_v<T, float>) {
+    if constexpr (same<T, float>) {
         return std::stof(text);
-    } else if constexpr (std::is_same_v<T, double>) {
+    } else if constexpr (same<T, double>) {
         return std::stod(text);
     } else if constexpr (std::is_signed_v<T>) {
         return static_cast<T>(std::stoll(text));
@@ -91,6 +103,21 @@ auto ConvertArray(std::string_view value, std::vector<T>& target) -> bool {
     std::transform(parts.begin(), parts.end(), target.begin(), [](std::string_view part) {
         return ParseNumber<T>(part);
     });
+    return true;
+}
+
+template<typename T>
+auto ConvertArray(std::string_view value, Vec<T>& target) -> bool {
+    target.clear();
+    while (true) {
+        const auto delimiter = value.find(' ');
+        if (delimiter == std::string_view::npos) {
+            target.push(ParseNumber<T>(value));
+            break;
+        }
+        target.push(ParseNumber<T>(value.substr(0, delimiter)));
+        value.remove_prefix(delimiter + 1);
+    }
     return true;
 }
 
@@ -140,18 +167,37 @@ auto ReadJsonValue(const Json& json, T& value) -> bool {
     if constexpr (JsonArrayTarget<T>::enabled) {
         using Value = typename JsonArrayTarget<T>::value_type;
         if (input.is_number()) {
-            if constexpr (requires { T::LENGTH; }) {
-                for (usize index {}; index < value.len(); ++index) value[index] = Value {};
-                if constexpr (T::LENGTH > 0) value[usize()] = ConvertNumber<Value>(input);
+            if constexpr (JsonArrayTarget<T>::dynamic) {
+                value.clear();
+                value.push_back(ConvertNumber<Value>(input));
             } else {
-                value = { ConvertNumber<Value>(input) };
+                bool first = true;
+                for (auto& item : value) {
+                    item  = first ? ConvertNumber<Value>(input) : Value {};
+                    first = false;
+                }
+            }
+            return true;
+        }
+        if (auto array = input.as_array(); array.is_some()) {
+            if constexpr (JsonArrayTarget<T>::dynamic) {
+                value.clear();
+                for (const auto& item : **array) value.push_back(ConvertNumber<Value>(item));
+            } else {
+                usize count {};
+                for (auto& item : value) {
+                    if (count >= (*array)->len()) throw WrongArraySize {};
+                    item = ConvertNumber<Value>((**array)[count]);
+                    ++count;
+                }
+                if (count != (*array)->len()) throw WrongArraySize {};
             }
             return true;
         }
         auto string = input.as_str();
         if (string.is_none()) throw WrongJsonType {};
         return ConvertArray(rstd::cppstd::as_string_view(*string), value);
-    } else if constexpr (std::is_same_v<T, bool>) {
+    } else if constexpr (same<T, bool>) {
         auto boolean = input.as_bool();
         if (boolean.is_none()) throw WrongJsonType {};
         value = *boolean;
@@ -161,11 +207,11 @@ auto ReadJsonValue(const Json& json, T& value) -> bool {
         value        = boolean.is_some() ? rstd::as_cast<T>(static_cast<rstd::uint8_t>(*boolean))
                                          : ConvertNumber<T>(input);
         return true;
-    } else if constexpr (std::is_arithmetic_v<T>) {
+    } else if constexpr (is_arithmetic<T>) {
         auto boolean = input.as_bool();
         value        = boolean.is_some() ? static_cast<T>(*boolean) : ConvertNumber<T>(input);
         return true;
-    } else if constexpr (std::is_same_v<T, std::string>) {
+    } else if constexpr (same<T, std::string>) {
         auto string = input.as_str();
         if (string.is_none()) throw WrongJsonType {};
         value = rstd::cppstd::to_string(*string);
@@ -263,6 +309,8 @@ OWE_IMPL_GET_JSON(double);
 OWE_IMPL_GET_JSON(std::string);
 OWE_IMPL_GET_JSON(std::vector<float>);
 OWE_IMPL_GET_JSON(std::vector<std::int32_t>);
+OWE_IMPL_GET_JSON(Vec<float>);
+OWE_IMPL_GET_JSON(Vec<std::int32_t>);
 
 using IntArray3   = std::array<int, 3>;
 using FloatArray2 = std::array<float, 2>;
