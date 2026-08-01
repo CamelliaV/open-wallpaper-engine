@@ -162,7 +162,13 @@ float cubic(float p0, float p1, float p2, float p3, float t) {
            t * t * t * p3;
 }
 
-float animation_frame(const SceneAnimationCurve& curve, double runtime) {
+struct AnimationFrame {
+    float current { 0.0f };
+    int   end { 0 };
+    bool  wraps { false };
+};
+
+AnimationFrame animation_frame(const SceneAnimationCurve& curve, double runtime) {
     float fps         = curve.fps > 0.0f ? curve.fps : 30.0f;
     float frame       = static_cast<float>(runtime) * fps;
     int   end         = curve.length;
@@ -172,26 +178,23 @@ float animation_frame(const SceneAnimationCurve& curve, double runtime) {
     absorb_last(curve.c0.as_slice());
     absorb_last(curve.c1.as_slice());
     absorb_last(curve.c2.as_slice());
-    if (end <= 0) return frame;
+    if (end <= 0) return { .current = frame, .end = end };
 
-    const float ef   = static_cast<float>(end);
-    bool        loop = curve.wraploop || curve.mode == "loop"_str || curve.mode == "repeat"_str;
-    if (loop) {
-        frame = std::fmod(frame, ef);
-        if (frame < 0.0f) frame += ef;
-        return frame;
-    }
-    // Mirror mode ping-pongs 0 -> end -> 0 with period 2*end. Without this it
-    // fell through to clamp(), pinning the value to the last keyframe forever
-    // after one forward pass — e.g. a blink's eye-closed pose (value=1 at the
-    // last key) would stick on, leaving the eye permanently transparent.
+    const float ef = static_cast<float>(end);
     if (curve.mode == "mirror"_str) {
         float period = 2.0f * ef;
         float m      = std::fmod(frame, period);
         if (m < 0.0f) m += period;
-        return m <= ef ? m : (period - m);
+        return { .current = m <= ef ? m : (period - m), .end = end };
     }
-    return std::clamp(frame, 0.0f, ef);
+
+    bool loop = curve.wraploop || curve.mode == "loop"_str || curve.mode == "repeat"_str;
+    if (loop) {
+        frame = std::fmod(frame, ef);
+        if (frame < 0.0f) frame += ef;
+        return { .current = frame, .end = end, .wraps = curve.wraploop };
+    }
+    return { .current = std::clamp(frame, 0.0f, ef), .end = end };
 }
 
 float eval_segment(const SceneAnimationKey& a, const SceneAnimationKey& b, float frame) {
@@ -224,14 +227,27 @@ float eval_segment(const SceneAnimationKey& a, const SceneAnimationKey& b, float
     return cubic(p0y, p1y, p2y, p3y, (lo + hi) * 0.5f);
 }
 
-float eval_axis(slice<SceneAnimationKey> keys, float frame) {
+float eval_axis(slice<SceneAnimationKey> keys, const AnimationFrame& frame) {
     if (keys.is_empty()) return 0.0f;
-    if (frame <= static_cast<float>(keys[usize()].frame)) return keys[usize()].value;
-    for (usize i(1); i < keys.len(); ++i) {
-        if (frame <= static_cast<float>(keys[i].frame))
-            return eval_segment(keys[i - usize(1)], keys[i], frame);
+    const auto& first = keys[usize()];
+    const auto& last  = keys[keys.len() - usize(1)];
+
+    if (frame.wraps && frame.current < static_cast<float>(first.frame)) {
+        auto previous = last;
+        previous.frame -= frame.end;
+        if (previous.frame < first.frame) return eval_segment(previous, first, frame.current);
     }
-    return keys[keys.len() - usize(1)].value;
+    if (frame.current <= static_cast<float>(first.frame)) return first.value;
+    for (usize i(1); i < keys.len(); ++i) {
+        if (frame.current <= static_cast<float>(keys[i].frame))
+            return eval_segment(keys[i - usize(1)], keys[i], frame.current);
+    }
+    if (frame.wraps) {
+        auto next = first;
+        next.frame += frame.end;
+        if (next.frame > last.frame) return eval_segment(last, next, frame.current);
+    }
+    return last.value;
 }
 
 Eigen::Vector3f lerp_vec3(const Eigen::Vector3f& a, const Eigen::Vector3f& b, float t) {
@@ -919,7 +935,7 @@ float SceneAnimationCurve::EvaluateScalar(float base, double runtime) const {
 Eigen::Vector3f SceneAnimationCurve::EvaluateVec3(const Eigen::Vector3f& base,
                                                   double                 runtime) const {
     if (Empty()) return base;
-    float           frame = animation_frame(*this, runtime);
+    AnimationFrame  frame = animation_frame(*this, runtime);
     Eigen::Vector3f value = base;
     if (! c0.is_empty())
         value.x() =

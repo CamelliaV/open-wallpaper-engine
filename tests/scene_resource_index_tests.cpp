@@ -1553,6 +1553,35 @@ TEST(SceneNodeFieldAnimation, AlphaAnimationTicksThroughScene) {
     EXPECT_FLOAT_EQ(node->EffectiveAlpha(), 0.0f);
 }
 
+TEST(SceneNodeFieldAnimation, WrapLoopReturnsSmoothlyToFirstKey) {
+    owe::SceneAnimationCurve curve;
+    curve.fps      = 1.0f;
+    curve.length   = 4;
+    curve.mode     = String::make("loop"_str);
+    curve.wraploop = true;
+    curve.c0.push({ .frame = 0, .value = 0.0f });
+    curve.c0.push({ .frame = 2, .value = 10.0f });
+
+    EXPECT_FLOAT_EQ(curve.EvaluateScalar(0.0f, 0.0), 0.0f);
+    EXPECT_FLOAT_EQ(curve.EvaluateScalar(0.0f, 2.0), 10.0f);
+    EXPECT_FLOAT_EQ(curve.EvaluateScalar(0.0f, 3.0), 5.0f);
+    EXPECT_FLOAT_EQ(curve.EvaluateScalar(0.0f, 4.0), 0.0f);
+}
+
+TEST(SceneNodeFieldAnimation, MirrorTakesPrecedenceOverWrapLoop) {
+    owe::SceneAnimationCurve curve;
+    curve.fps      = 1.0f;
+    curve.length   = 2;
+    curve.mode     = String::make("mirror"_str);
+    curve.wraploop = true;
+    curve.c0.push({ .frame = 0, .value = 0.0f });
+    curve.c0.push({ .frame = 2, .value = 10.0f });
+
+    EXPECT_FLOAT_EQ(curve.EvaluateScalar(0.0f, 2.0), 10.0f);
+    EXPECT_FLOAT_EQ(curve.EvaluateScalar(0.0f, 3.0), 5.0f);
+    EXPECT_FLOAT_EQ(curve.EvaluateScalar(0.0f, 4.0), 0.0f);
+}
+
 TEST(SceneMeshDirtyEvents, RoutesDataAndLayoutDirtyByOwner) {
     owe::Scene scene;
     scene.RootMut()->ID() = rstd::i32(1);
