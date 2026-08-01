@@ -193,6 +193,7 @@ struct ParseContext {
     HashMap<std::int32_t, String> system_media_image_fallbacks;
     HashSet<std::int32_t>         linked_source_ids;
     HashSet<std::int32_t>         hidden_link_source_ids;
+    bool                          scene_has_scripts { false };
     bool                          scene_layer_text_writes { false };
 
     bool IsLinkedSource(std::int32_t id) const { return linked_source_ids.contains(id); }

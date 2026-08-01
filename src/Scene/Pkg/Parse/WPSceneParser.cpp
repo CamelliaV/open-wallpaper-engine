@@ -177,6 +177,13 @@ bool SceneWritesLayerText(slice<SceneObjectVar> scene_objs) {
     return false;
 }
 
+bool SceneHasScripts(slice<SceneObjectVar> scene_objs) {
+    for (usize index {}; index < scene_objs.len(); ++index) {
+        if (! SceneObjectFieldBindings(scene_objs[index]).scripts.empty()) return true;
+    }
+    return false;
+}
+
 bool AppendLayerCompositePassthroughEffect(fs::VFS& vfs, wpscene::ImageObject& image) {
     wpscene::Material material;
     auto              json = LoadJsonFile(vfs, "/assets/materials/util/effectpassthrough.json");
@@ -4266,7 +4273,35 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             if (text.is_some()) s_text = rstd::cppstd::to_string(text->as_str());
         }
     }
-    if (s_text.empty() && ! wants_dynamic_text) return;
+    if (s_text.empty() && ! wants_dynamic_text) {
+        // Empty text layers can still be transform parents for authored child layers.
+        auto node  = Arc<SceneNode>::make(Vector3f(obj.origin.data()),
+                                          Vector3f(obj.scale.data()),
+                                          Vector3f(obj.angles.data()),
+                                          obj.name);
+        node->ID() = i32(obj.id);
+        node->SetSize({ obj.size[0], obj.size[1] });
+        node->SetReflected(obj.reflected);
+        AssignNodeFieldAnimations(*node.as_ptr(), obj.field_bindings);
+        WireFieldScripts(context, node, obj.field_bindings);
+        if (! obj.visible) node->SetVisible(false);
+        if (! obj.visible_user.empty())
+            node->SetVisibleUserBinding(ToSceneUserVisibilityBinding(obj.visible_user));
+
+        WPUniformNodeConfigDraft uniform_config;
+        uniform_config.parallax_depth            = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        uniform_config.propagated_parallax_depth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        SetWPUniformConfig(context, node, rstd::move(uniform_config));
+        RegisterNodeRef(context,
+                        obj.id,
+                        ParseContext::NodeRef {
+                            obj.parent,
+                            Some(node.clone()),
+                            None(),
+                            String::make(rstd::cppstd::as_str(obj.attachment).unwrap()),
+                        });
+        return;
+    }
 
     // --- font resolution: VFS first (WE shared /assets + pkg overlay),
     //     then host system font dirs.
@@ -4400,7 +4435,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         if (peak_quads == 0) return;
     }
 
-    auto sp_mesh = std::make_shared<SceneMesh>(/*dynamic=*/wants_dynamic_text);
+    const bool supports_runtime_text_write = wants_dynamic_text || context.scene_has_scripts;
+    auto       sp_mesh = std::make_shared<SceneMesh>(/*dynamic=*/supports_runtime_text_write);
     {
         SceneVertexArray vertex(MakeAttrSet({ VAttr::Position, VAttr::TexCoord, VAttr::Color }),
                                 usize(peak_quads * 4));
@@ -5060,7 +5096,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             });
         }
     }
-    if (wants_dynamic_text) {
+    if (supports_runtime_text_write) {
         EnsureScriptScene(context).runtime().RegisterTextSetter(layer_node.as_ptr(),
                                                                 [set_text](std::string_view s) {
                                                                     set_text(s);
@@ -6203,6 +6239,7 @@ auto WPSceneParser::Parse(ref<str> scene_id, ref<wpscene::SceneDocument> documen
                                             options.user_properties,
                                             rstd::move(options.shader_cache_dir));
     auto       runtime_input = Arc<WPUniformRuntimeInput>::make(context.uniform_state.clone());
+    context.scene_has_scripts       = SceneHasScripts(scene_objs.as_slice());
     context.scene_layer_text_writes = SceneWritesLayerText(scene_objs.as_slice());
     context.hidden_link_source_ids =
         CollectHiddenLinkedSourceIds(json, linked_source_ids, options.user_properties);

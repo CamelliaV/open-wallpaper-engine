@@ -52,6 +52,31 @@ TEST(SceneObjectClone, MembersProvideCloneTraitImplementation) {
     EXPECT_EQ(trait_material.shader, "generic");
 }
 
+TEST(ObjectInstanceJson, AppliesMaterialBindingOverridesBySlot) {
+    auto parsed = owe::ParseJson(R"({
+        "textures": [null, "linked"],
+        "usertextures": [null, "replacement"],
+        "combos": {"version": 2}
+    })");
+    ASSERT_TRUE(parsed.is_ok());
+
+    owe::wpscene::ObjectInstance instance;
+    ASSERT_TRUE(instance.FromJson(parsed.unwrap()));
+    owe::wpscene::Material material;
+    material.textures = { "base-0", "base-1" };
+    instance.ApplyTo(material);
+
+    ASSERT_EQ(material.textures.size(), 2u);
+    EXPECT_EQ(material.textures[0], "base-0");
+    EXPECT_EQ(material.textures[1], "linked");
+    ASSERT_EQ(material.usertextures.len(), rstd::usize(2));
+    EXPECT_TRUE(material.usertextures[rstd::usize()].is_null());
+    ASSERT_TRUE(material.usertextures[rstd::usize(1)].is_string());
+    EXPECT_EQ(rstd::cppstd::to_string(*material.usertextures[rstd::usize(1)].as_str()),
+              "replacement");
+    EXPECT_EQ(material.combos.at("version"), 2);
+}
+
 TEST(TextObjectJson, ReadsDirectUserValueBinding) {
     auto parsed = owe::ParseJson(R"({"text":{"user":"title","value":"default"}})");
     ASSERT_TRUE(parsed.is_ok());

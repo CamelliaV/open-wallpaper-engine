@@ -48,18 +48,21 @@ public:
     Material(Material&&) noexcept            = default;
     Material& operator=(Material&&) noexcept = default;
 
-    bool                                     FromJson(const owe::Json&);               // legacy
-    bool                                     FromJson(const owe::Json&, SceneVersion); // canonical
-    auto                                     clone() const -> Material;
-    void                                     MergePass(const MaterialPass&);
-    std::string                              blending { "translucent" };
-    std::string                              cullmode { "nocull" };
-    std::string                              shader;
-    std::string                              depthtest { "disabled" };
-    std::string                              depthwrite { "disabled" };
-    std::vector<std::string>                 textures;
-    rstd::json::Array                        usertextures;
-    std::unordered_map<std::string, int32_t> combos;
+    bool        FromJson(const owe::Json&);               // legacy
+    bool        FromJson(const owe::Json&, SceneVersion); // canonical
+    auto        clone() const -> Material;
+    void        MergePass(const MaterialPass&);
+    void        MergeBindingOverrides(const std::vector<std::string>&                 textures,
+                                      const rstd::json::Array&                        usertextures,
+                                      const std::unordered_map<std::string, int32_t>& combos);
+    std::string blending { "translucent" };
+    std::string cullmode { "nocull" };
+    std::string shader;
+    std::string depthtest { "disabled" };
+    std::string depthwrite { "disabled" };
+    std::vector<std::string>                            textures;
+    rstd::json::Array                                   usertextures;
+    std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     std::unordered_map<std::string, std::string>        constantshadervalues_user;
     std::unordered_map<std::string, AnimCurve>          constantshadervalues_animations;

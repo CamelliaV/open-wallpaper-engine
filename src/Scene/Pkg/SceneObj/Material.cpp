@@ -111,14 +111,7 @@ void MaterialPass::Update(const MaterialPass& p) {
 }
 
 void Material::MergePass(const MaterialPass& p) {
-    int32_t i = -1;
-    for (const auto& el : p.textures) {
-        i++;
-        if (p.textures.size() > textures.size()) textures.resize(p.textures.size());
-        if (! el.empty()) {
-            textures[i] = el;
-        }
-    }
+    MergeBindingOverrides(p.textures, p.usertextures, p.combos);
     for (const auto& el : p.constantshadervalues) {
         constantshadervalues[el.first] = el.second;
     }
@@ -132,9 +125,18 @@ void Material::MergePass(const MaterialPass& p) {
     for (const auto& el : p.user_shader_values) {
         user_shader_values[el.first] = el.second;
     }
-    MergeUserTextures(p.usertextures, usertextures);
-    for (const auto& el : p.combos) {
-        combos[el.first] = el.second;
+}
+
+void Material::MergeBindingOverrides(const std::vector<std::string>&                 textures,
+                                     const rstd::json::Array&                        usertextures,
+                                     const std::unordered_map<std::string, int32_t>& combos) {
+    if (textures.size() > this->textures.size()) this->textures.resize(textures.size());
+    for (std::size_t i = 0; i < textures.size(); ++i) {
+        if (! textures[i].empty()) this->textures[i] = textures[i];
+    }
+    MergeUserTextures(usertextures, this->usertextures);
+    for (const auto& el : combos) {
+        this->combos[el.first] = el.second;
     }
 }
 

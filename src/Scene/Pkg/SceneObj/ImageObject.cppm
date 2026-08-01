@@ -40,11 +40,11 @@ public:
 };
 
 // objects[].instance — PKGV0018+. Embedded WE-format material binding
-// (compiled-shader id + textures + combos). The renderer doesn't currently
-// substitute it, but the parser needs to accept the shape.
+// (compiled-shader id + textures + combos).
 class ObjectInstance {
 public:
     bool                                          FromJson(const owe::Json&);
+    void                                          ApplyTo(Material&) const;
     bool                                          present { false };
     std::uint32_t                                 id { 0 };
     std::unordered_map<std::string, std::int32_t> combos;

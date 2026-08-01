@@ -106,8 +106,10 @@ bool ObjectInstance::FromJson(const owe::Json& json) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& value : **array) {
-                auto texture = value.as_str();
-                if (texture.is_some()) textures.push_back(rstd::cppstd::to_string(*texture));
+                std::string texture;
+                auto        string = value.as_str();
+                if (string.is_some()) texture = rstd::cppstd::to_string(*string);
+                textures.push_back(std::move(texture));
             }
         }
     }
@@ -118,6 +120,10 @@ bool ObjectInstance::FromJson(const owe::Json& json) {
         }
     }
     return true;
+}
+
+void ObjectInstance::ApplyTo(Material& material) const {
+    material.MergeBindingOverrides(textures, usertextures, combos);
 }
 
 bool EffectFbo::FromJson(const owe::Json& json) {
@@ -352,6 +358,7 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     if (auto instance_json = json.get("instance"_str);
         instance_json.is_some() && (*instance_json)->is_object()) {
         instance.FromJson(**instance_json);
+        instance.ApplyTo(material);
     }
     AbsorbAllFieldBindings(json, field_bindings);
     return true;

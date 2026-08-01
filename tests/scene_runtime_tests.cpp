@@ -349,6 +349,96 @@ TEST(WPSceneParserSoundScript, UserPropertyCanStartSilentSoundFromVolumeField) {
     EXPECT_FLOAT_EQ(controller->Volume(), 0.35f);
 }
 
+TEST(WPSceneParserText, EmptyStaticTextPreservesLayerHierarchy) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({
+            "camera": {},
+            "general": {},
+            "objects": [
+                {
+                    "id": 1,
+                    "name": "Empty Text Parent",
+                    "text": "",
+                    "origin": [100, 200, 0],
+                    "scale": [2, 3, 1],
+                    "size": [400, 300]
+                },
+                {
+                    "id": 2,
+                    "name": "Authored Child",
+                    "parent": 1,
+                    "origin": [10, 20, 0]
+                }
+            ]
+        })JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+
+    owe::fs::VFS                vfs;
+    wavsen::audio::SoundManager sound_manager;
+    owe::WPSceneParser          parser;
+    auto                        parsed = parser.Parse(
+        "empty-text-parent"_str,
+        ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)),
+        mut_ref<wavsen::audio::SoundManager>::from_raw_parts(rstd::addressof(sound_manager)));
+    ASSERT_TRUE(parsed.is_ok());
+
+    auto scene  = rstd::move(parsed).unwrap();
+    auto parent = scene.scene->RootMut()->FindByName("Empty Text Parent");
+    auto child  = scene.scene->RootMut()->FindByName("Authored Child");
+    ASSERT_NE(parent, nullptr);
+    ASSERT_NE(child, nullptr);
+    EXPECT_EQ(child->Parent(), parent);
+}
+
+TEST(WPSceneParserText, ScriptSceneExposesTextWritesWithoutSourceInspection) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({
+            "camera": {},
+            "general": {},
+            "objects": [
+                {
+                    "id": 1,
+                    "name": "Controller",
+                    "text": "controller",
+                    "font": "systemfont_arial",
+                    "visible": {
+                        "value": false,
+                        "script": "let target; export function init(value) { target = thisScene['get' + 'Layer']('Value'); return value; } export function update(value) { target['te' + 'xt'] = '31'; return value; }"
+                    }
+                },
+                {
+                    "id": 2,
+                    "name": "Value",
+                    "text": "00",
+                    "font": "systemfont_arial"
+                }
+            ]
+        })JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+
+    owe::fs::VFS                vfs;
+    wavsen::audio::SoundManager sound_manager;
+    owe::WPSceneParser          parser;
+    auto                        parsed = parser.Parse(
+        "runtime-text-write"_str,
+        ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)),
+        mut_ref<wavsen::audio::SoundManager>::from_raw_parts(rstd::addressof(sound_manager)));
+    ASSERT_TRUE(parsed.is_ok());
+
+    auto scene = rstd::move(parsed).unwrap();
+    auto value = scene.scene->RootMut()->FindByName("Value");
+    ASSERT_NE(value, nullptr);
+    ASSERT_NE(value->Mesh(), nullptr);
+    value->Mesh()->ConsumeDirtyFlags();
+
+    owe::script::TickSceneScripts(*scene.scene, owe::script::FrameInputs {});
+    EXPECT_NE(value->Mesh()->DirtyFlags(), owe::SceneMeshDirtyNone);
+}
+
 TEST(SceneUserTextBinding, AppliesDescriptorPayloadToMatchingBindings) {
     owe::Scene  scene;
     std::string first;
