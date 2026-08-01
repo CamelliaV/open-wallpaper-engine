@@ -282,13 +282,59 @@ TEST(SceneLightParsing, RecognizesPrefixedKindsAndFullConeAngles) {
 }
 
 TEST(ModelObjectJson, ReadsMaterialSkin) {
-    auto parsed = owe::ParseJson(R"({"model":"models/prism.mdl","skin":2})");
+    auto parsed = owe::ParseJson(R"({"model":"models/prism.mdl","skin":2,"perspective":true})");
     ASSERT_TRUE(parsed.is_ok());
 
     owe::fs::VFS              vfs;
     owe::wpscene::ModelObject model;
     ASSERT_TRUE(model.FromJson(parsed.unwrap(), vfs));
     EXPECT_EQ(model.skin, 2u);
+    EXPECT_TRUE(model.perspective);
+}
+
+TEST(SceneCameraParsing, PerspectiveOverridePreservesTheOrthographicReferencePlane) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({
+            "camera": {},
+            "general": {
+                "nearz": 0.01,
+                "farz": 10000.0,
+                "perspectiveoverridefov": 21.0,
+                "orthogonalprojection": {"width": 7680, "height": 4320}
+            },
+            "objects": []
+        })JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+
+    auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
+    ASSERT_TRUE(assets.is_ok());
+    owe::fs::VFS vfs;
+    ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets).unwrap_unchecked()).is_ok());
+
+    wavsen::audio::SoundManager sound_manager;
+    owe::WPSceneParser          parser;
+    auto                        parsed = parser.Parse(
+        "perspective-override"_str,
+        rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        rstd::mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)),
+        rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(rstd::addressof(sound_manager)));
+    ASSERT_TRUE(parsed.is_ok());
+
+    auto scene  = rstd::move(parsed).unwrap();
+    auto camera = scene.scene->CameraMut("global_perspective"_str);
+    ASSERT_TRUE(camera.is_some());
+    EXPECT_DOUBLE_EQ((**camera).Fov(), 21.0);
+    const double expected_distance =
+        4320.0 / (2.0 * std::tan(21.0 * rstd::f64::consts::PI.to_primitive() / 360.0));
+    EXPECT_NEAR((**camera).GetPosition().z(), expected_distance, 1e-3);
+
+    const auto view_projection = (**camera).GetViewProjectionMatrix();
+    EXPECT_NEAR(view_projection(0, 0), 3.03497815, 1e-6);
+    EXPECT_NEAR(view_projection(1, 1), 5.39551687, 1e-6);
+    EXPECT_NEAR(view_projection(2, 2), 0.000333444477, 1e-9);
+    EXPECT_NEAR(view_projection(2, 3), 1.11559916, 1e-6);
+    EXPECT_NEAR(view_projection(3, 3), expected_distance, 1e-3);
 }
 
 TEST(ImageEffectJson, FailedEffectsAreAbsentFromParsedObjects) {

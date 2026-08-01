@@ -99,6 +99,7 @@ struct ParseContext {
     Option<Arc<WPParticleRuntime>>                 particle_runtime;
     std::int32_t                                   ortho_w { 0 };
     std::int32_t                                   ortho_h { 0 };
+    bool                                           orthographic_scene { false };
     wpscene::SceneVersion                          pkg_version { wpscene::kSceneVersionUnknown };
     fs::VFS*                                       vfs { nullptr };
     Option<ref<rstd::json::Map>>                   user_properties;

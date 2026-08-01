@@ -2354,16 +2354,33 @@ void ParseCamera(ParseContext& context, const wpscene::SceneMetadata& sc) {
     (void)scene.SetActiveCamera("global"_str);
     scene.RootMut()->AppendChild((*context.global_camera_node).clone());
 
-    auto perspective_camera = Arc<SceneCamera>::make(
+    const bool   override_perspective_fov = general.perspectiveoverridefov > 0.0f;
+    const double perspective_fov =
+        override_perspective_fov
+            ? static_cast<double>(general.perspectiveoverridefov)
+            : algorism::CalculatePersperctiveFov(1000.0, projection_extent[usize(1)]);
+    const double perspective_distance =
+        override_perspective_fov
+            ? algorism::CalculatePersperctiveDistance(perspective_fov, projection_extent[usize(1)])
+            : 1000.0;
+    // WE's perspective camera inside an orthographic scene uses reverse-Z over 5..15000.
+    const double perspective_near   = general.isOrtho ? 15000.0 : general.nearz;
+    const double perspective_far    = general.isOrtho ? 5.0 : general.farz;
+    auto         perspective_camera = Arc<SceneCamera>::make(
         SceneCamera::MakePerspective(static_cast<double>(context.ortho_w) / context.ortho_h,
-                                     general.nearz,
-                                     general.farz,
-                                     algorism::CalculatePersperctiveFov(1000.0f, context.ortho_h)));
+                                     perspective_near,
+                                     perspective_far,
+                                     perspective_fov));
 
     Vector3f cperori                       = cori;
-    cperori[2]                             = 1000.0f;
+    cperori[2]                             = static_cast<float>(perspective_distance);
     context.global_perspective_camera_node = Some(Arc<SceneNode>::make(cperori, cscale, cangle));
     perspective_camera->AttatchNode((*context.global_perspective_camera_node).as_ptr());
+    if (override_perspective_fov && general.isOrtho) {
+        const Vector3d eye { cperori.x(), cperori.y(), cperori.z() };
+        const Vector3d center { cori.x(), cori.y(), 0.0 };
+        perspective_camera->SetLookAt(eye, center, Vector3d::UnitY());
+    }
     scene.RegisterCamera(String::make("global_perspective"_str), perspective_camera.clone());
     scene.RootMut()->AppendChild((*context.global_perspective_camera_node).clone());
 
@@ -2490,8 +2507,9 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
     }
     scene.SetOrtho({ i32(ortho_extent[usize()]), i32(ortho_extent[usize(1)]) });
     scene.SetViewportScale(f32(sc.general.zoom));
-    context.ortho_w = ortho_extent[usize()];
-    context.ortho_h = ortho_extent[usize(1)];
+    context.ortho_w            = ortho_extent[usize()];
+    context.ortho_h            = ortho_extent[usize(1)];
+    context.orthographic_scene = sc.general.isOrtho;
 
     {
         auto& gb                                   = context.global_base_uniforms;
@@ -4096,6 +4114,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
                                       Vector3f(model_obj.angles.data()),
                                       model_obj.name);
     node->ID() = i32(model_obj.id);
+    node->SetPerspective(model_obj.perspective);
     node->SetReflected(model_obj.reflected);
     if (! model_obj.visible) {
         node->SetVisible(false);
@@ -4112,6 +4131,13 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
     svData.parallax_depth            = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
     svData.propagated_parallax_depth = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
     svData.use_camera_eye_position   = true;
+    if (context.orthographic_scene) {
+        svData.eye_position_override = Some(array<float, 3> {
+            static_cast<float>(context.ortho_w) * 0.5f,
+            static_cast<float>(context.ortho_h) * 0.5f,
+            2000.0f,
+        });
+    }
     Option<Arc<WPPuppetLayer>> model_puppet_layer;
     if (mdl.puppet.is_some() && ! (*mdl.puppet)->bones.is_empty()) {
         model_puppet_layer = Some(
@@ -5685,6 +5711,7 @@ bool RegisterWPUniformNodeSources(Scene& scene, const Arc<WPUniformSceneState>& 
     state->propagated_parallax_depth      = config.propagated_parallax_depth;
     state->propagate_parallax_to_children = config.propagate_parallax_to_children;
     state->use_camera_eye_position        = config.use_camera_eye_position;
+    state->eye_position_override          = config.eye_position_override;
     state->vertices_in_world_space        = config.vertices_in_world_space;
     state->effect_projection_size         = config.effect_projection_size;
     if (config.effect_projection_node.is_some())

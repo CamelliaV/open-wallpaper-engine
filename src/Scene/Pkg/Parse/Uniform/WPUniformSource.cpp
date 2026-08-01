@@ -195,6 +195,7 @@ auto WPUniformNodeConfigDraft::Clone() const -> WPUniformNodeConfigDraft {
         .propagated_parallax_depth      = propagated_parallax_depth,
         .propagate_parallax_to_children = propagate_parallax_to_children,
         .use_camera_eye_position        = use_camera_eye_position,
+        .eye_position_override          = eye_position_override,
         .vertices_in_world_space        = vertices_in_world_space,
         .effect_projection_node =
             effect_projection_node.is_some() ? Some((*effect_projection_node).clone()) : None(),
@@ -384,7 +385,9 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
     }
 
     writer.Write(Output::ViewProjection, ShaderValue::fromMatrix(view_projection));
-    if (m_node->use_camera_eye_position || camera.IsPerspective()) {
+    if (m_node->eye_position_override.is_some()) {
+        writer.Write(Output::EyePosition, *m_node->eye_position_override);
+    } else if (m_node->use_camera_eye_position || camera.IsPerspective()) {
         const auto position = camera.GetPosition(render_view).cast<float>();
         writer.Write(Output::EyePosition,
                      rstd::array<float, 3> { position.x(), position.y(), position.z() });
