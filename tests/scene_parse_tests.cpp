@@ -231,6 +231,56 @@ TEST(ImageColorBlendParsing, LinearDodgeUsesAdditiveAttachmentOwner) {
               "1");
 }
 
+TEST(ImageColorBlendParsing, EffectLayerPreservesLinearDodgeAttachmentOwner) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({
+            "camera": {},
+            "general": {"orthogonalprojection": {"width": 1920, "height": 1080}},
+            "objects": [{
+                "id": 31,
+                "name": "Linear Dodge Effect",
+                "image": "models/util/solidlayer.json",
+                "colorBlendMode": 31,
+                "effects": [{
+                    "file": "effects/scroll/effect.json",
+                    "visible": true
+                }],
+                "visible": true
+            }]
+        })JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+
+    auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
+    ASSERT_TRUE(assets.is_ok());
+    owe::fs::VFS vfs;
+    ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets).unwrap_unchecked()).is_ok());
+
+    wavsen::audio::SoundManager sound_manager;
+    owe::WPSceneParser          parser;
+    auto                        parsed = parser.Parse(
+        "linear-dodge-effect-owner"_str,
+        rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        rstd::mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)),
+        rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(rstd::addressof(sound_manager)));
+    ASSERT_TRUE(parsed.is_ok());
+
+    auto scene = rstd::move(parsed).unwrap();
+    auto node  = scene.scene->RootMut()->FindByName("Linear Dodge Effect");
+    ASSERT_NE(node, nullptr);
+    ASSERT_TRUE(node->HasLayer());
+
+    auto& layer = node->Layer();
+    layer->ResolveEffect(*scene.scene->DefaultEffectMesh(), "effect");
+    ASSERT_FALSE(layer->ResolvedEffects().empty());
+    auto* final_effect = layer->ResolvedEffects().back();
+    ASSERT_NE(final_effect, nullptr);
+    ASSERT_FALSE(final_effect->nodes.empty());
+    auto* final_material = final_effect->nodes.back().sceneNode->Mesh()->Material();
+    ASSERT_NE(final_material, nullptr);
+    EXPECT_EQ(final_material->blenmode, owe::BlendMode::Additive);
+}
+
 TEST(SceneLightParsing, RecognizesPrefixedKindsAndFullConeAngles) {
     auto document = owe::wpscene::ParseSceneDocumentJson(
         R"JSON({

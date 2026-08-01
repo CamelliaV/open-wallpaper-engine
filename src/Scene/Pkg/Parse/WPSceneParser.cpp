@@ -1387,15 +1387,17 @@ BlendMode ParseBlendMode(std::string_view str) {
     return bm;
 }
 
-void ApplyImageColorBlend(wpscene::Material& material, const wpscene::ImageObject& image) {
-    if (image.colorBlendMode == 0) return;
+Option<BlendMode> ApplyImageColorBlend(wpscene::Material&          material,
+                                       const wpscene::ImageObject& image) {
+    if (image.colorBlendMode == 0) return None<BlendMode>();
 
     if (image.colorBlendMode == 31) {
         material.combos.erase(rstd::cppstd::to_string(WE_CB_BLENDMODE));
         material.blending = "additive";
-        return;
+        return Some(BlendMode::Additive);
     }
     material.combos[rstd::cppstd::to_string(WE_CB_BLENDMODE)] = image.colorBlendMode;
+    return None<BlendMode>();
 }
 
 ShaderValueMap NeutralColorUniforms(ShaderValueMap values) {
@@ -2661,6 +2663,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         wpimgobj.colorBlendMode != 0 && layer_material_is_final;
     const bool append_color_blend_final_effect =
         wpimgobj.colorBlendMode != 0 && ! color_blend_uses_layer_material;
+    Option<BlendMode> color_blend_attachment_override;
     if (append_color_blend_final_effect) {
         wpscene::ImageEffect colorEffect;
         wpscene::Material    colorMat;
@@ -2670,7 +2673,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         }
         colorMat.FromJson(*json);
         colorMat.combos[rstd::cppstd::to_string(WE_CB_BONECOUNT)] = 1;
-        ApplyImageColorBlend(colorMat, wpimgobj);
+        color_blend_attachment_override = ApplyImageColorBlend(colorMat, wpimgobj);
         colorEffect.materials.push_back(std::move(colorMat));
         wpimgobj.effects.push_back(std::move(colorEffect));
     }
@@ -2904,6 +2907,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
     }
     // material blendmode for last step to use
     auto finalMaterialState = material;
+    if (color_blend_attachment_override.is_some())
+        finalMaterialState.blenmode = *color_blend_attachment_override;
     // disable img material blend, as it's the first effect node now
     SceneNodeLayer* image_effect_layer { nullptr };
     if (hasEffect) {
