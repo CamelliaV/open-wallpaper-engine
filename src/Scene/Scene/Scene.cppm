@@ -1811,6 +1811,8 @@ public:
         return m_final_resolve_effect || m_published_effect || m_visible_resolve_effect ||
                HasRuntimeVisibleEffect();
     }
+    void             SetSourceDraw(SceneNode& node);
+    void             ConfigureSourceDraw(bool intermediate);
     const auto&      FirstTarget() const { return m_pingpong_a; }
     SceneMesh&       FinalMesh() { return *m_final_mesh.get(); }
     const SceneMesh& FinalMesh() const { return *m_final_mesh.as_ptr(); }
@@ -1879,6 +1881,11 @@ public:
         m_resolved             = false;
     }
     bool RequiresSourceDraw() const { return m_requires_source_draw; }
+    void SetIntermediateSourceBlend(BlendMode value) {
+        m_intermediate_source_blend = Some(value);
+        m_resolved                  = false;
+    }
+    Option<BlendMode> IntermediateSourceBlend() const { return m_intermediate_source_blend; }
 
     // Idempotent: second and later calls are no-ops until any of the
     // mutating setters above (or AddEffect) flips m_resolved back to false.
@@ -1896,24 +1903,27 @@ private:
     };
 
     SceneNode*  m_worldNode;
+    SceneNode*  m_sourceNode;
     float       m_width { 1.0f };
     float       m_height { 1.0f };
     std::string m_pingpong_a;
     std::string m_pingpong_b;
+    std::string m_source_camera;
 
-    bool           fullscreen { false };
-    bool           m_final_local { false };
-    Box<SceneMesh> m_final_mesh;
-    BlendMode      m_final_blend;
-    bool           m_final_depth_test { false };
-    bool           m_final_depth_write { false };
-    CullMode       m_final_cull_mode { CullMode::None };
-    std::string    m_final_target { rstd::cppstd::to_string(SpecTex_Default) };
-    std::string    m_final_camera;
-    bool           m_skip_when_no_runtime_effect { false };
-    bool           m_requires_source_draw { true };
-    bool           m_visible_output_enabled { true };
-    bool           m_resolved { false };
+    bool              fullscreen { false };
+    bool              m_final_local { false };
+    Box<SceneMesh>    m_final_mesh;
+    BlendMode         m_final_blend;
+    bool              m_final_depth_test { false };
+    bool              m_final_depth_write { false };
+    CullMode          m_final_cull_mode { CullMode::None };
+    std::string       m_final_target { rstd::cppstd::to_string(SpecTex_Default) };
+    std::string       m_final_camera;
+    bool              m_skip_when_no_runtime_effect { false };
+    bool              m_requires_source_draw { true };
+    Option<BlendMode> m_intermediate_source_blend;
+    bool              m_visible_output_enabled { true };
+    bool              m_resolved { false };
 
     std::vector<std::shared_ptr<SceneImageEffect>>                    m_effects;
     std::shared_ptr<SceneImageEffect>                                 m_final_resolve_effect;
@@ -2642,8 +2652,9 @@ public:
     bool IsLayerVisibilityElidable(WallpaperLayerId id) const {
         return m_visibility_elidable_layer_ids.contains(id.value);
     }
-    void                     RegisterLayerLinkSource(WallpaperLayerId id, SceneNode& node);
-    SceneNode*               RegisteredLayerLinkSource(WallpaperLayerId id) const;
+    void       RegisterLayerLinkSource(WallpaperLayerId id, SceneNode& node);
+    void       RegisterLayerLinkSource(WallpaperLayerId id, SceneNode& node, array<i32, 2> extent);
+    SceneNode* RegisteredLayerLinkSource(WallpaperLayerId id) const;
     Option<SceneNodeId>      RegisteredLayerLinkSourceId(WallpaperLayerId id) const;
     Option<WallpaperLayerId> ResolveLayerLinkSource(const SceneNode& node) const;
     void                     RegisterRenderGroup(WallpaperLayerId id, String camera) {
@@ -2735,6 +2746,7 @@ private:
     HashMap<String, Vec<String>>                 m_linked_cameras;
     HashMap<i32, SceneNodeId>                    m_layer_link_source_ids;
     HashMap<i32, SceneNode*>                     m_layer_link_source_nodes;
+    HashMap<i32, array<i32, 2>>                  m_layer_link_source_extents;
     HashMap<rstd::uint64_t, WallpaperLayerId>    m_node_link_sources;
     Vec<SceneUserPropertyDiagnostic>             m_user_property_diagnostics;
     HashMap<String, SceneRenderTargetDirtyEvent> m_render_target_dirty_events;

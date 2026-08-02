@@ -901,8 +901,8 @@ TextGeometry ResolveTextGeometry(const TextGeometryPolicy& policy,
                                           : (policy.has_effect ? frame_h : src_bbox_h);
 
     TextGeometry out;
-    out.rt_width            = std::max(src_bbox_w, rt_max_w);
-    out.rt_height           = std::max(src_bbox_h, rt_max_h);
+    out.rt_width            = policy.frame_bound ? frame_w : std::max(src_bbox_w, rt_max_w);
+    out.rt_height           = policy.frame_bound ? frame_h : std::max(src_bbox_h, rt_max_h);
     out.effect_frame_width  = frame_w;
     out.effect_frame_height = frame_h;
 

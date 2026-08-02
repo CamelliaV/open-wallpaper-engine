@@ -1799,7 +1799,15 @@ void Scene::RegisterLayerLinkSource(WallpaperLayerId id, SceneNode& node) {
     if (previous.is_some()) (void)m_node_link_sources.remove(scene_id_key(**previous));
     (void)m_layer_link_source_ids.insert(id.value, node_id);
     (void)m_layer_link_source_nodes.insert(id.value, rstd::addressof(node));
+    (void)m_layer_link_source_extents.remove(id.value);
     (void)m_node_link_sources.insert(scene_id_key(node_id), id);
+}
+
+void Scene::RegisterLayerLinkSource(WallpaperLayerId id, SceneNode& node, array<i32, 2> extent) {
+    RegisterLayerLinkSource(id, node);
+    extent[usize()]  = rstd::cmp::max(extent[usize()], i32(1));
+    extent[usize(1)] = rstd::cmp::max(extent[usize(1)], i32(1));
+    (void)m_layer_link_source_extents.insert(id.value, rstd::move(extent));
 }
 
 SceneNode* Scene::RegisteredLayerLinkSource(WallpaperLayerId id) const {
@@ -2240,14 +2248,19 @@ std::string Scene::EnsureLinkRenderTarget(WallpaperLayerId source_layer,
                                           const SceneNode& source_node) {
     auto link_key = GenLinkTex(static_cast<std::ptrdiff_t>(source_layer.value.to_primitive()));
     if (RenderTarget(as_str(link_key).unwrap()).is_none()) {
-        auto sz = source_node.Size();
+        auto      sz     = source_node.Size();
+        auto      extent = m_layer_link_source_extents.get(source_layer.value);
+        const i32 width  = extent.is_some() ? (**extent)[usize()]
+                                            : i32(sz.x() > 0 ? static_cast<std::int32_t>(sz.x())
+                                                             : m_ortho[usize()].to_primitive());
+        const i32 height = extent.is_some() ? (**extent)[usize(1)]
+                                            : i32(sz.y() > 0 ? static_cast<std::int32_t>(sz.y())
+                                                             : m_ortho[usize(1)].to_primitive());
         RegisterRenderTarget(String::make(as_str(link_key).unwrap()),
                              SceneRenderTarget {
-                                 .width      = sz.x() > 0 ? static_cast<std::int32_t>(sz.x())
-                                                          : m_ortho[usize()].to_primitive(),
-                                 .height     = sz.y() > 0 ? static_cast<std::int32_t>(sz.y())
-                                                          : m_ortho[usize(1)].to_primitive(),
-                                 .allowReuse = false,
+                                 .width                  = width.to_primitive(),
+                                 .height                 = height.to_primitive(),
+                                 .allowReuse             = false,
                                  .initialize_transparent = true,
                              });
     }

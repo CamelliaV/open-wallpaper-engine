@@ -288,8 +288,10 @@ static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, Ext
 
     SceneNodeLayer* imgeff = nullptr;
     if (node->HasLayer()) {
-        auto* effect = node->Layer().get();
-        if (effect->RequiresIntermediateTarget()) {
+        auto*      effect       = node->Layer().get();
+        const bool intermediate = effect->RequiresIntermediateTarget();
+        effect->ConfigureSourceDraw(intermediate);
+        if (intermediate) {
             imgeff = effect;
             output = imgeff->FirstTarget();
         }
@@ -309,6 +311,14 @@ static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, Ext
         if (material_slot >= slots.size() || ! slots[material_slot]) continue;
         SceneMaterial* material = slots[material_slot].get();
         scene.ResolveMaterialTextureSources(*material);
+        std::shared_ptr<SceneMaterial> material_override;
+        if (imgeff != nullptr && submesh.output_override.empty()) {
+            auto source_blend = imgeff->IntermediateSourceBlend();
+            if (source_blend.is_some()) {
+                material_override           = std::make_shared<SceneMaterial>(*material);
+                material_override->blenmode = *source_blend;
+            }
+        }
         std::string passName = material->name;
         // Per-submesh output override (clipping-mask submeshes write into a
         // shared RT that the main puppet pass samples via g_Texture8).
@@ -322,15 +332,17 @@ static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, Ext
              node,
              smi,
              pass_output,
+             material_override,
              preserve_output = submesh.preserve_output,
              render_view,
              &scene,
              &extra](rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
-                const auto& pass       = builder.workPassNode();
-                pdesc.node             = Some(rstd::mut_ref<SceneNode>::from_raw_parts(node));
-                pdesc.submesh_index    = u32(static_cast<rstd::uint32_t>(smi));
-                pdesc.graph_pass_index = pass.pass.index;
-                pdesc.render_view      = render_view;
+                const auto& pass        = builder.workPassNode();
+                pdesc.node              = Some(rstd::mut_ref<SceneNode>::from_raw_parts(node));
+                pdesc.submesh_index     = u32(static_cast<rstd::uint32_t>(smi));
+                pdesc.graph_pass_index  = pass.pass.index;
+                pdesc.render_view       = render_view;
+                pdesc.material_override = material_override;
                 if (auto node_id = scene.ResourceIndex().nodeId(*node)) {
                     if (auto draw_item = scene.ResourceIndex().drawItemFor(
                             *node_id, u32(static_cast<rstd::uint32_t>(smi)))) {
@@ -378,10 +390,11 @@ static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, Ext
                 pdesc.clear_output =
                     ! preserve_output &&
                     ((first_output_write && output_target.bind.screen) || pdesc.transparent_clear);
-                pdesc.preserve_output = output_state->version > usize() &&
-                                        (output_target.preserve_on_write || preserve_output);
-                const bool uses_depth =
-                    output_target.withDepth && vulkan::UsesDepthAttachment(*material);
+                pdesc.preserve_output     = output_state->version > usize() &&
+                                            (output_target.preserve_on_write || preserve_output);
+                const auto* pass_material = material_override ? material_override.get() : material;
+                const bool  uses_depth =
+                    output_target.withDepth && vulkan::UsesDepthAttachment(*pass_material);
                 pdesc.has_depth_attachment = uses_depth;
                 if (uses_depth) {
                     auto depth_name = pass_output_s + "::depth";

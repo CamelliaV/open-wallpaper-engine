@@ -114,19 +114,9 @@ PassInvalidationFlags CustomShaderPass::finalizeResourceRequests(Scene& scene) {
                          ToPassInvalidationFlags(PassInvalidation::Framebuffer);
             }
 
-            bool has_depth_attachment = false;
-            if (m_desc.node.is_some() && (*m_desc.node)->Mesh() != nullptr) {
-                auto&             mesh          = *(*m_desc.node)->Mesh();
-                const std::size_t submesh_index = m_desc.submesh_index.to_primitive();
-                if (submesh_index < mesh.Submeshes().size()) {
-                    const auto& submesh = mesh.Submeshes()[submesh_index];
-                    const auto& slots   = mesh.MaterialSlots();
-                    if (submesh.material_slot < slots.size() && slots[submesh.material_slot]) {
-                        has_depth_attachment =
-                            rt.withDepth && UsesDepthAttachment(*slots[submesh.material_slot]);
-                    }
-                }
-            }
+            auto* material = ResolvePassMaterial(m_desc);
+            bool  has_depth_attachment =
+                rt.withDepth && material != nullptr && UsesDepthAttachment(*material);
             if (m_desc.has_depth_attachment != has_depth_attachment) {
                 m_desc.has_depth_attachment = has_depth_attachment;
                 flags |= PassInvalidationAll;

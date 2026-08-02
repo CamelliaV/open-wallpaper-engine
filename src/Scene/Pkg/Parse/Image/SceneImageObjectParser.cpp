@@ -378,11 +378,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
     auto finalMaterialState = material;
     if (color_blend_attachment_override.is_some())
         finalMaterialState.blenmode = *color_blend_attachment_override;
-    // disable img material blend, as it's the first effect node now
     SceneNodeLayer* image_effect_layer { nullptr };
-    if (hasEffect) {
-        material.blenmode = BlendMode::Normal;
-    }
     if (! material.textures.empty()) {
         auto control =
             context.scene->VideoControl(rstd::cppstd::as_str(material.textures.front()).unwrap());
@@ -636,6 +632,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
         image_effect_layer = imgEffectLayer.get();
         {
             imgEffectLayer->SetRequiresSourceDraw(parse_geometry.requires_source_draw);
+            imgEffectLayer->SetIntermediateSourceBlend(BlendMode::Normal);
             imgEffectLayer->SetFullscreen(wpimgobj.fullscreen);
             imgEffectLayer->SetFinalMaterialState(finalMaterialState);
             imgEffectLayer->SetSkipWhenNoRuntimeEffect(wpimgobj.fullscreen || isPassthrough);

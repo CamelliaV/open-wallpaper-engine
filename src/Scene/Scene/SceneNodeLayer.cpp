@@ -44,11 +44,31 @@ void ChangeMeshToUnitQuad(SceneMesh& target) {
 SceneNodeLayer::SceneNodeLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
                                std::string_view pingpong_b)
     : m_worldNode(node),
+      m_sourceNode(node),
       m_width(w),
       m_height(h),
       m_pingpong_a(pingpong_a),
       m_pingpong_b(pingpong_b),
+      m_source_camera(node != nullptr ? node->Camera() : std::string()),
       m_final_mesh(Box<SceneMesh>::make()) {};
+
+void SceneNodeLayer::SetSourceDraw(SceneNode& node) {
+    m_sourceNode    = &node;
+    m_source_camera = node.Camera();
+}
+
+void SceneNodeLayer::ConfigureSourceDraw(bool intermediate) {
+    if (m_sourceNode == nullptr) return;
+    if (intermediate) {
+        m_sourceNode->SetCamera(m_source_camera);
+        return;
+    }
+    if (! m_final_camera.empty()) {
+        m_sourceNode->SetCamera(m_final_camera);
+    } else {
+        m_sourceNode->SetCamera(m_sourceNode->Perspective() ? "global_perspective" : "");
+    }
+}
 
 void SceneNodeLayer::ResolveEffect(const SceneMesh& default_mesh, std::string_view effect_cam) {
     if (m_resolved) return;

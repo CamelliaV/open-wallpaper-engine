@@ -222,14 +222,15 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             break;
         }
     }
+    const bool linked_source        = context.IsLinkedSource(static_cast<std::int32_t>(obj.id));
     const auto text_render_mode     = ResolveTextRenderMode(TextSurfaceRequirements {
         .has_effect        = has_text_effect,
         .copy_background   = obj.copybackground,
         .opaque_background = obj.opaquebackground,
-        .linked_source     = context.IsLinkedSource(static_cast<std::int32_t>(obj.id)),
+        .linked_source     = linked_source,
     });
     const bool direct_text          = text_render_mode == TextRenderMode::Direct;
-    const bool copy_background_seed = has_text_effect || obj.copybackground;
+    const bool copy_background_seed = has_text_effect || obj.copybackground || linked_source;
 
     std::string s_text;
     if (obj.text.is_string()) {
@@ -520,6 +521,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
         .frame_height       = object_h,
         .dynamic            = wants_dynamic_text,
         .has_effect         = has_text_effect,
+        .frame_bound        = linked_source,
         .preserve_text_bbox = has_bg || obj.copybackground,
     };
     const auto initial_geometry = text::ResolveTextGeometry(geometry_policy, layouter->Metrics());
@@ -530,6 +532,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
         obj.id >= 0 ? Some(WallpaperLayerId { .value = i32(obj.id) }) : None<WallpaperLayerId>());
     scene.RegisterNode(*sp_node);
     std::shared_ptr<TextRuntimeTargets> runtime_targets;
+    std::string                         link_output;
     if (direct_text) {
         UniformNodeConfigDraft text_sv;
         text_sv.parallax_depth            = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
@@ -586,8 +589,16 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
 
         layer_node->CopyTrans(*sp_node.as_ptr());
         layer_node->SetSize({ initial_geometry.draw_width, initial_geometry.draw_height });
-        scene.RegisterLayerLinkSource(WallpaperLayerId { .value = static_cast<i32>(obj.id) },
-                                      *sp_node.as_ptr());
+        if (linked_source) {
+            const auto link_source = WallpaperLayerId { .value = static_cast<i32>(obj.id) };
+            const auto link_width =
+                rstd::cmp::max(i32(1), i32(static_cast<std::int32_t>(std::ceil(object_w))));
+            const auto link_height =
+                rstd::cmp::max(i32(1), i32(static_cast<std::int32_t>(std::ceil(object_h))));
+            scene.RegisterLayerLinkSource(
+                link_source, *sp_node.as_ptr(), { link_width, link_height });
+            link_output = scene.EnsureLinkRenderTarget(link_source, *sp_node.as_ptr());
+        }
 
         auto layer = std::make_shared<SceneNodeLayer>(has_text_effect ? layer_node.as_ptr()
                                                                       : sp_node.as_ptr(),
@@ -856,6 +867,31 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             layer->SetFinalResolveEffect(std::move(resolve_effect));
         }
 
+        if (linked_source) {
+            const std::string_view input =
+                has_text_effect ? std::string_view(effect_final) : std::string_view(ppong_a);
+            auto publish_node = Arc<SceneNode>::make();
+            auto published    = load_passthrough_material(input);
+            if (published.is_none()) return;
+            auto publish_mesh = std::make_shared<SceneMesh>();
+            publish_mesh->AddMaterial(std::move(published->material));
+            RegisterMaterialBindings(
+                scene, *publish_mesh->Material(), published->source, published->shader_info);
+            publish_node->AddMesh(std::move(publish_mesh));
+            scene.RegisterNode(*publish_node);
+            SetUniformConfig(context, publish_node, std::move(published->sv));
+            runtime_targets->effect_nodes.push_back(
+                TextRuntimeEffectNode { .node = publish_node.as_ptr() });
+
+            auto publish  = std::make_shared<SceneImageEffect>();
+            publish->name = "linked_text_publish";
+            publish->nodes.push_back(SceneImageEffectNode {
+                .output    = link_output,
+                .sceneNode = publish_node.clone(),
+            });
+            layer->SetPublishedEffect(std::move(publish));
+        }
+
         auto compose_mesh = std::make_shared<SceneMesh>(/*dynamic=*/wants_dynamic_text);
         GenCardMesh(*compose_mesh,
                     { static_cast<float>(runtime_targets->layer_w),
@@ -875,6 +911,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
         // mesh renders at the ortho origin.
         sp_node->CopyTrans(SceneNode());
         sp_node->SetCamera(addr);
+        layer->SetSourceDraw(*sp_node);
     }
 
     auto layer_hold        = SceneNodeArcHold(layer_node.clone());
