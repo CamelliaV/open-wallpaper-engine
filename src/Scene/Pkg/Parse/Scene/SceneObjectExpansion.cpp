@@ -37,52 +37,66 @@ ToSceneUserVisibilityBinding(const wpscene::VisibleUserBinding& binding) {
     };
 }
 
-void CollectLinkedSourceIdsFromValue(const Json& value, HashSet<std::int32_t>& out) {
+void CollectLinkedSourceId(ref<str> value, HashSet<std::int32_t>& out,
+                           Option<std::int32_t> effect_owner = None()) {
+    if (auto id = ParseImageLayerCompositeId(value);
+        id.is_some() &&
+        (effect_owner.is_none() || rstd::as_cast<std::int32_t>(*id) != *effect_owner))
+        out.insert(rstd::as_cast<std::int32_t>(*id));
+    if (IsSpecLinkTex(value)) out.insert(rstd::as_cast<std::int32_t>(ParseLinkTex(value)));
+}
+
+void CollectLinkedSourceIdsFromValue(const Json& value, HashSet<std::int32_t>& out,
+                                     Option<std::int32_t> effect_owner = None()) {
     if (value.is_string()) {
         auto text = *value.as_str();
-        if (auto id = ParseImageLayerCompositeId(text))
-            out.insert(rstd::as_cast<std::int32_t>(*id));
-        if (IsSpecLinkTex(text)) out.insert(rstd::as_cast<std::int32_t>(ParseLinkTex(text)));
+        CollectLinkedSourceId(text, out, effect_owner);
         return;
     }
     if (value.is_array()) {
         auto values = value.as_array();
-        for (const auto& element : **values) CollectLinkedSourceIdsFromValue(element, out);
+        for (const auto& element : **values)
+            CollectLinkedSourceIdsFromValue(element, out, effect_owner);
         return;
     }
     auto object = value.as_object();
     if (object.is_none()) return;
     (*object)->iter().for_each([&](auto entry) {
         auto [_, entry_value] = entry;
-        CollectLinkedSourceIdsFromValue(*entry_value, out);
+        CollectLinkedSourceIdsFromValue(*entry_value, out, effect_owner);
     });
 }
 
-void CollectLinkedSourceId(std::string_view value, HashSet<std::int32_t>& out) {
-    auto text = rstd::cppstd::as_str(value).unwrap();
-    if (auto id = ParseImageLayerCompositeId(text)) out.insert(rstd::as_cast<std::int32_t>(*id));
-    if (IsSpecLinkTex(text)) out.insert(rstd::as_cast<std::int32_t>(ParseLinkTex(text)));
+void CollectLinkedSourceId(std::string_view value, HashSet<std::int32_t>& out,
+                           Option<std::int32_t> effect_owner = None()) {
+    CollectLinkedSourceId(rstd::cppstd::as_str(value).unwrap(), out, effect_owner);
 }
 
-void CollectLinkedSourceIds(const wpscene::Material& material, HashSet<std::int32_t>& out) {
-    for (const auto& texture : material.textures) CollectLinkedSourceId(texture, out);
-    for (const auto& binding : material.usertextures) CollectLinkedSourceIdsFromValue(binding, out);
+void CollectLinkedSourceIds(const wpscene::Material& material, HashSet<std::int32_t>& out,
+                            Option<std::int32_t> effect_owner = None()) {
+    for (const auto& texture : material.textures) CollectLinkedSourceId(texture, out, effect_owner);
+    for (const auto& binding : material.usertextures)
+        CollectLinkedSourceIdsFromValue(binding, out, effect_owner);
 }
 
-void CollectLinkedSourceIds(const wpscene::MaterialPass& pass, HashSet<std::int32_t>& out) {
-    for (const auto& texture : pass.textures) CollectLinkedSourceId(texture, out);
-    for (const auto& binding : pass.usertextures) CollectLinkedSourceIdsFromValue(binding, out);
-    for (const auto& bind : pass.bind) CollectLinkedSourceId(bind.name, out);
+void CollectLinkedSourceIds(const wpscene::MaterialPass& pass, HashSet<std::int32_t>& out,
+                            Option<std::int32_t> effect_owner = None()) {
+    for (const auto& texture : pass.textures) CollectLinkedSourceId(texture, out, effect_owner);
+    for (const auto& binding : pass.usertextures)
+        CollectLinkedSourceIdsFromValue(binding, out, effect_owner);
+    for (const auto& bind : pass.bind) CollectLinkedSourceId(bind.name, out, effect_owner);
 }
 
-void CollectLinkedSourceIds(const wpscene::ImageEffect& effect, HashSet<std::int32_t>& out) {
-    for (const auto& material : effect.materials) CollectLinkedSourceIds(material, out);
-    for (const auto& pass : effect.passes) CollectLinkedSourceIds(pass, out);
+void CollectLinkedSourceIds(const wpscene::ImageEffect& effect, HashSet<std::int32_t>& out,
+                            Option<std::int32_t> effect_owner = None()) {
+    for (const auto& material : effect.materials)
+        CollectLinkedSourceIds(material, out, effect_owner);
+    for (const auto& pass : effect.passes) CollectLinkedSourceIds(pass, out, effect_owner);
     for (const auto& command : effect.commands) {
-        CollectLinkedSourceId(command.target, out);
-        CollectLinkedSourceId(command.source, out);
+        CollectLinkedSourceId(command.target, out, effect_owner);
+        CollectLinkedSourceId(command.source, out, effect_owner);
     }
-    for (const auto& fbo : effect.fbos) CollectLinkedSourceId(fbo.name, out);
+    for (const auto& fbo : effect.fbos) CollectLinkedSourceId(fbo.name, out, effect_owner);
 }
 
 void CollectLinkedSourceIds(const wpscene::Particle& particle, HashSet<std::int32_t>& out) {
@@ -107,7 +121,8 @@ HashSet<std::int32_t> CollectLinkedSourceIds(slice<SceneObjectVar> objects) {
             RSTD_CASE(Image, value) {
                 CollectDependencies(value.dependencies, out);
                 CollectLinkedSourceIds(value.material, out);
-                for (const auto& effect : value.effects) CollectLinkedSourceIds(effect, out);
+                for (const auto& effect : value.effects)
+                    CollectLinkedSourceIds(effect, out, Some(std::int32_t(value.id)));
                 for (const auto& texture : value.instance.textures)
                     CollectLinkedSourceId(texture, out);
                 for (const auto& binding : value.instance.usertextures)
@@ -115,7 +130,8 @@ HashSet<std::int32_t> CollectLinkedSourceIds(slice<SceneObjectVar> objects) {
             }
             RSTD_CASE(Shape, value) {
                 CollectDependencies(value.dependencies, out);
-                for (const auto& effect : value.effects) CollectLinkedSourceIds(effect, out);
+                for (const auto& effect : value.effects)
+                    CollectLinkedSourceIds(effect, out, Some(std::int32_t(value.id)));
             }
             RSTD_CASE(Particle, value) {
                 CollectDependencies(value.dependencies, out);
@@ -134,7 +150,8 @@ HashSet<std::int32_t> CollectLinkedSourceIds(slice<SceneObjectVar> objects) {
             RSTD_CASE(Text, value) {
                 CollectDependencies(value.dependencies, out);
                 CollectLinkedSourceIdsFromValue(value.instance, out);
-                for (const auto& effect : value.effects) CollectLinkedSourceIds(effect, out);
+                for (const auto& effect : value.effects)
+                    CollectLinkedSourceIds(effect, out, Some(std::int32_t(value.id)));
             }
             RSTD_CASE(Model, value) {
                 CollectDependencies(value.dependencies, out);
