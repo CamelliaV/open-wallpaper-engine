@@ -210,7 +210,7 @@ TEST(SceneIdentity, RegistersStableNodeAndEffectOwners) {
     EXPECT_TRUE(duplicate->WallpaperIdentity().is_none());
 
     auto layer =
-        std::make_shared<owe::SceneNodeLayer>(first.as_ptr(), 64.0f, 32.0f, "_rt_a", "_rt_b");
+        std::make_shared<owe::SceneNodeLayer>(first.as_ptr(), 64.0f, 32.0f, "_rt_composite");
     auto effect_a  = std::make_shared<owe::SceneImageEffect>();
     auto effect_b  = std::make_shared<owe::SceneImageEffect>();
     effect_a->name = effect_b->name = "duplicate";
@@ -290,7 +290,7 @@ TEST(SceneResourceIndex, IncludesAllNodeLayerEffectDrawItems) {
     auto       camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     auto layer = std::make_shared<owe::SceneNodeLayer>(
-        scene.RootMut().as_raw_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
+        scene.RootMut().as_raw_ptr(), 1920.0f, 1080.0f, "_rt_composite");
 
     auto prefill = rstd::sync::Arc<owe::SceneNode>::make();
     prefill->AddMesh(MakeSingleSubmesh("prefill"));
@@ -319,12 +319,30 @@ TEST(SceneResourceIndex, IncludesAllNodeLayerEffectDrawItems) {
     }
 }
 
+TEST(SceneResourceIndex, PreservesTypedLayerPreviousSourceAcrossResolution) {
+    owe::Scene         scene;
+    owe::SceneMaterial material;
+    material.textures.push_back("_rt_composite");
+    auto layer = owe::SceneNodeId { .index = rstd::u32(4), .generation = rstd::u32(2) };
+
+    ASSERT_TRUE(
+        scene.SetMaterialLayerPreviousSource(material, rstd::u32(), layer, "_rt_composite"_str));
+    scene.ResolveMaterialTextureSources(material);
+
+    ASSERT_EQ(material.texture_sources.len(), rstd::usize(1));
+    EXPECT_EQ(material.texture_sources[rstd::usize()].kind,
+              owe::SceneMaterialTextureSourceKind::LayerPrevious);
+    EXPECT_EQ(material.texture_sources[rstd::usize()].key, "_rt_composite"_str);
+    ASSERT_TRUE(material.texture_sources[rstd::usize()].layer.is_some());
+    EXPECT_EQ(*material.texture_sources[rstd::usize()].layer, layer);
+}
+
 TEST(SceneResourceIndex, RebuildPreservesNodeAndDrawIdsAfterLayerBindingChanges) {
     owe::Scene scene;
     auto       camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     auto layer = std::make_shared<owe::SceneNodeLayer>(
-        scene.RootMut().as_raw_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
+        scene.RootMut().as_raw_ptr(), 1920.0f, 1080.0f, "_rt_composite");
 
     auto effect_node = rstd::sync::Arc<owe::SceneNode>::make();
     effect_node->AddMesh(MakeSingleSubmesh("effect"));

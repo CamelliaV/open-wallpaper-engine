@@ -32,6 +32,9 @@ auto ToTextureDesc(const TexNode& node) -> TextureDesc {
         .kind = ToTextureKind(node.type),
         .request =
             node.request.is_some() ? Some(node.request->clone()) : None<resource::TextureRequest>(),
+        .allocation_family = node.allocation_family.is_some()
+                                 ? Some(node.allocation_family->clone())
+                                 : None<String>(),
     };
 }
 
@@ -97,7 +100,13 @@ auto RenderGraph::passState(NodeHandle handle) const -> rstd::Option<PassNodeSta
 }
 
 void RenderGraph::ToGraphviz(rstd::ref<rstd::str> path) const {
-    auto output = String::make("digraph framegraph {\nnode [shape=box]\n"_str);
+    auto output         = String::make("digraph framegraph {\nnode [shape=box]\n"_str);
+    using AllocationMap = rstd::collections::HashMap<NodeHandle, String>;
+    auto allocations    = AllocationMap::make();
+    for (const auto& entry : resourcePlan().textures) {
+        (void)allocations.insert(NodeHandle { .index = usize(entry.handle.index.to_primitive()) },
+                                 entry.allocation_key.clone());
+    }
 
     for (usize index {}; index < m_dg.NodeNum(); ++index) {
         NodeHandle handle { .index = index };
@@ -106,7 +115,11 @@ void RenderGraph::ToGraphviz(rstd::ref<rstd::str> path) const {
             output.push_str(declaration.as_str());
             output.push_ascii(u8('\n'));
         } else if (auto texture = getTexNode(handle); texture.is_some()) {
-            auto declaration = NodeGraphviz(*texture);
+            auto allocation = allocations.get(handle);
+            auto declaration =
+                allocation.is_some()
+                    ? texture->ToGraphvizWithAllocation(Some((**allocation).as_str()))
+                    : NodeGraphviz(*texture);
             output.push_str(declaration.as_str());
             output.push_ascii(u8('\n'));
         }
@@ -290,6 +303,10 @@ void RenderGraphBuilder::markVirtualWrite(TextureNodeRef ref) {
         });
 }
 
+void RenderGraphBuilder::reusePreviousAllocation(TextureNodeRef ref) {
+    m_rg.reusePreviousAllocation(ref);
+}
+
 auto RenderGraphBuilder::createTexture(const TextureDesc& desc, bool write) -> TextureNodeRef {
     return createTextureNode(desc, write);
 }
@@ -343,11 +360,14 @@ auto RenderGraph::createNewTextureNode(const TextureDesc& desc) -> TextureNodeRe
     if (request.is_some()) request->name = desc.key.clone();
 
     TexNode node {
-        .handle  = handle,
-        .type    = ToTexType(desc.kind),
-        .key     = desc.key.clone(),
-        .name    = desc.name.clone(),
-        .request = rstd::move(request),
+        .handle            = handle,
+        .type              = ToTexType(desc.kind),
+        .key               = desc.key.clone(),
+        .name              = desc.name.clone(),
+        .request           = rstd::move(request),
+        .allocation_family = desc.allocation_family.is_some()
+                                 ? Some(desc.allocation_family->clone())
+                                 : None<String>(),
     };
     if (current) {
         auto previous = getTexNode(**current);
@@ -364,12 +384,26 @@ auto RenderGraph::createNewTextureNode(const TextureDesc& desc) -> TextureNodeRe
     return TextureNodeRef { .handle = handle };
 }
 
+void RenderGraph::reusePreviousAllocation(TextureNodeRef ref) {
+    auto node = getTexNode(ref.handle);
+    rstd_assert(node.is_some());
+    if (node.is_none() || node->previous.is_none()) return;
+    node->allocation_parent = node->previous;
+}
+
 void RenderGraph::connectTextureRead(TextureNodeRef ref, NodeHandle pass_node) {
     auto texture = getTexNode(ref.handle);
     if (! texture || getPassNode(pass_node).is_none()) return;
     (void)m_dg.Connect(ref.handle, pass_node);
+    bool registered = false;
+    for (auto reader : texture->readers) {
+        if (reader != pass_node) continue;
+        registered = true;
+        break;
+    }
+    if (! registered) texture->readers.push(NodeHandle { .index = pass_node.index });
 
-    if (texture->next) {
+    if (texture->allocation_family.is_none() && texture->next) {
         auto next = getTexNode(*texture->next);
         if (next && next->writer) (void)m_dg.Connect(pass_node, *next->writer);
     }
@@ -384,7 +418,7 @@ void RenderGraph::connectTextureWrite(TextureNodeRef ref, NodeHandle pass_node) 
         auto readers  = m_dg.GetNodeOut(previous);
         for (usize index {}; index < readers.len(); ++index) {
             auto reader = readers[index];
-            if (isPassNode(reader)) (void)m_dg.Connect(reader, pass_node);
+            if (reader != pass_node && isPassNode(reader)) (void)m_dg.Connect(reader, pass_node);
         }
         if (readers.len() == usize()) (void)m_dg.Connect(previous, pass_node);
     }
@@ -459,6 +493,7 @@ auto RenderGraph::resourcePlan() const -> resource::ResourcePlan {
     }
 
     resource::ResourcePlan plan { .generation = u64(1) };
+    auto                   plan_nodes = Vec<NodeHandle>::make();
     for (usize index {}; index < m_dg.NodeNum(); ++index) {
         auto node = getTexNode(NodeHandle { .index = index });
         if (node.is_none() || node->request.is_none()) continue;
@@ -480,13 +515,142 @@ auto RenderGraph::resourcePlan() const -> resource::ResourcePlan {
             request.content |=
                 resource::TextureContentFlag(resource::TextureContent::PreserveAcrossFrames);
         }
+        auto allocation_key = request.name.clone();
         plan.textures.push(resource::TexturePlanEntry {
             .handle  = resource::TextureUseHandle { .index = rstd::as_cast<u64>(node->handle.index),
                                                     .generation = plan.generation },
             .request = rstd::move(request),
-            .access  = access,
-            .version = rstd::as_cast<u32>(node->version),
+            .allocation_key = rstd::move(allocation_key),
+            .access         = access,
+            .version        = rstd::as_cast<u32>(node->version),
         });
+        plan_nodes.push(NodeHandle { .index = node->handle.index });
+    }
+
+    auto ordered = topologicalOrder();
+    if (ordered.is_err()) return plan;
+
+    using PositionMap = rstd::collections::HashMap<NodeHandle, usize>;
+    auto positions    = PositionMap::make();
+    auto pass_order   = rstd::move(ordered).unwrap_unchecked();
+    for (usize index {}; index < pass_order.len(); ++index) {
+        (void)positions.insert(pass_order[index], index);
+    }
+
+    auto parents = Vec<usize>::with_capacity(m_dg.NodeNum());
+    for (usize index {}; index < m_dg.NodeNum(); ++index) {
+        parents.push(usize(index.to_primitive()));
+    }
+    auto root_of = [&](usize index) {
+        while (parents[index] != index) index = parents[index];
+        return index;
+    };
+    for (usize entry_index {}; entry_index < plan_nodes.len(); ++entry_index) {
+        auto node = getTexNode(plan_nodes[entry_index]);
+        if (node.is_none() || node->allocation_family.is_none() ||
+            node->allocation_parent.is_none() ||
+            plan.textures[entry_index].request.lifetime !=
+                resource::TextureLifetimeClass::FrameLocal) {
+            continue;
+        }
+        auto parent = getTexNode(*node->allocation_parent);
+        if (parent.is_none() || parent->allocation_family.is_none() ||
+            *parent->allocation_family != *node->allocation_family) {
+            continue;
+        }
+        auto child_root     = root_of(node->handle.index);
+        auto parent_root    = root_of(parent->handle.index);
+        parents[child_root] = parent_root;
+    }
+
+    struct AllocationGroup {
+        String     family;
+        usize      first { usize::MAX };
+        usize      last {};
+        Vec<usize> entries;
+    };
+    auto groups = Vec<Option<AllocationGroup>>::with_capacity(m_dg.NodeNum());
+    for (usize index {}; index < m_dg.NodeNum(); ++index) {
+        groups.push(None<AllocationGroup>());
+    }
+
+    for (usize entry_index {}; entry_index < plan_nodes.len(); ++entry_index) {
+        auto node = getTexNode(plan_nodes[entry_index]);
+        if (node.is_none() || node->allocation_family.is_none() ||
+            plan.textures[entry_index].request.lifetime !=
+                resource::TextureLifetimeClass::FrameLocal) {
+            continue;
+        }
+
+        usize first { usize::MAX };
+        usize last {};
+        if (node->writer.is_some()) {
+            auto position = positions.get(*node->writer);
+            if (position.is_some()) first = last = **position;
+        }
+        for (auto reader : node->readers) {
+            auto position = positions.get(reader);
+            if (position.is_none()) continue;
+            if (first == usize::MAX || **position < first) first = **position;
+            if (**position > last) last = **position;
+        }
+        if (first == usize::MAX) first = last = usize();
+
+        auto root = root_of(node->handle.index);
+        if (groups[root].is_none()) {
+            groups[root] = Some(AllocationGroup {
+                .family  = node->allocation_family->clone(),
+                .entries = Vec<usize>::make(),
+            });
+        }
+        auto& group = *groups[root];
+        if (first < group.first) group.first = first;
+        if (last > group.last) group.last = last;
+        group.entries.push(usize(entry_index.to_primitive()));
+    }
+
+    auto roots = Vec<usize>::make();
+    for (usize index {}; index < groups.len(); ++index) {
+        if (groups[index].is_some()) roots.push(usize(index.to_primitive()));
+    }
+    rstd::slice_::sort_unstable_by(roots.as_mut_slice().as_mut_ref(), [&](usize lhs, usize rhs) {
+        const auto& left  = *groups[lhs];
+        const auto& right = *groups[rhs];
+        if (left.family != right.family) return left.family < right.family.as_str();
+        if (left.first != right.first) return left.first < right.first;
+        return lhs < rhs;
+    });
+
+    using SlotMap = rstd::collections::HashMap<String, Vec<usize>>;
+    auto slots    = SlotMap::make();
+    for (auto root : roots) {
+        auto& group      = *groups[root];
+        auto  family_key = group.family.clone();
+        auto  family     = slots.get_mut(group.family.as_str());
+        if (family.is_none()) {
+            (void)slots.insert(rstd::move(family_key), Vec<usize>::make());
+            family = slots.get_mut(group.family.as_str());
+        }
+        rstd_assert(family.is_some());
+        if (family.is_none()) continue;
+
+        usize slot = (*family)->len();
+        for (usize index {}; index < (*family)->len(); ++index) {
+            if ((**family)[index] < group.first) {
+                slot = index;
+                break;
+            }
+        }
+        if (slot == (*family)->len()) {
+            (*family)->push(usize(group.last.to_primitive()));
+        } else {
+            (**family)[slot] = group.last;
+        }
+
+        auto allocation_key = rstd::format("{}::slot_{}", group.family.as_str(), slot);
+        for (auto entry_index : group.entries) {
+            plan.textures[entry_index].allocation_key = allocation_key.clone();
+        }
     }
     return plan;
 }

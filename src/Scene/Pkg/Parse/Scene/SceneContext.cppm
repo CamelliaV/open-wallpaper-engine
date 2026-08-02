@@ -64,6 +64,8 @@ void ParseSpecTexName(std::string&, const wpscene::Material&, const ShaderInfo&,
 auto IsLegacyAtmosphereShadowValue(const wpscene::Material&, std::string_view) -> bool;
 void RegisterMaterialBindings(Scene&, SceneMaterial&, const wpscene::Material&, const ShaderInfo&,
                               Option<ref<wpscene::Material>> user_texture_fallback = None());
+void RegisterLayerPreviousBindings(Scene&, SceneMaterial&, const wpscene::Material&, SceneNodeId,
+                                   ref<str> composite_target);
 void ApplyTextureBinds(wpscene::Material&, std::span<const wpscene::MaterialPassBindItem>,
                        const EffectRenderTargets&);
 void LoadConstvalue(SceneMaterial&, const wpscene::Material&, const ShaderInfo&,

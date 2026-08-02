@@ -743,6 +743,57 @@ TEST(ResourcePrepareService, InitializesRetainedHistoryTextureOnce) {
     EXPECT_EQ(image_backend.transparent_creates, rstd::usize(1));
 }
 
+TEST(ResourcePrepareService, MapsLogicalTextureUsesToPlannedPhysicalSlots) {
+    owe::resource::TextureRegistry         textures;
+    owe::resource_registry::BufferRegistry buffers;
+    owe::resource_registry::ShaderRegistry shaders;
+    BufferBackend                          buffer_backend;
+    ImageBackend                           image_backend;
+    auto buffer = rstd::dyn<owe::vulkan::BufferBackend>::from_ref(buffer_backend);
+    auto image  = rstd::dyn<owe::vulkan::ImagePrepareBackend>::from_ref(image_backend);
+
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(22) };
+    for (rstd::uint64_t index = 0; index < 3; ++index) {
+        plan.textures.push(owe::resource::TexturePlanEntry {
+            .handle =
+                owe::resource::TextureUseHandle {
+                    .index      = rstd::u64(index),
+                    .generation = rstd::u64(22),
+                },
+            .request =
+                owe::resource::TextureRequest {
+                    .kind       = owe::resource::TextureRequestKind::RenderTarget,
+                    .name       = rstd::format("composite-v{}", index),
+                    .definition = rstd::Some(owe::resource::TextureDefinition {
+                        .width  = rstd::i32(64),
+                        .height = rstd::i32(32),
+                    }),
+                    .lifetime   = owe::resource::TextureLifetimeClass::FrameLocal,
+                },
+            .allocation_key = index < 2 ? rstd::string::String::make("composite::slot_0"_str)
+                                        : rstd::string::String::make("composite::slot_1"_str),
+        });
+    }
+
+    owe::resource_registry::ResourcePrepareService service(
+        textures, rstd::Some(image.as_mut_ref()), buffers, buffer.as_mut_ref(), shaders);
+    auto prepared = service.Prepare(plan);
+    ASSERT_TRUE(prepared.is_ok());
+    ASSERT_EQ(prepared->TextureCount(), rstd::usize(3));
+    EXPECT_EQ(image_backend.creates, rstd::usize(2));
+
+    auto first  = prepared->Resolve(plan.textures[rstd::usize()].handle);
+    auto second = prepared->Resolve(plan.textures[rstd::usize(1)].handle);
+    auto third  = prepared->Resolve(plan.textures[rstd::usize(2)].handle);
+    ASSERT_TRUE(first.is_some());
+    ASSERT_TRUE(second.is_some());
+    ASSERT_TRUE(third.is_some());
+    EXPECT_EQ((**first).resource, (**second).resource);
+    EXPECT_NE((**first).resource, (**third).resource);
+    EXPECT_EQ((**first).request.name, "composite-v0"_str);
+    EXPECT_EQ((**second).request.name, "composite-v1"_str);
+}
+
 TEST(ResourcePrepareService, BatchesDeduplicatesAndCachesImportedTextures) {
     owe::resource::TextureRegistry         textures;
     owe::resource_registry::BufferRegistry buffers;

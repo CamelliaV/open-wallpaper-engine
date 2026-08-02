@@ -617,18 +617,14 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                                       String::make(rstd::cppstd::as_str(group_camera).unwrap()));
         }
         spImgNode->SetCamera(nodeAddr);
-        std::string effect_ppong_a, effect_ppong_b;
-        effect_ppong_a = rstd::cppstd::to_string(
-            scene.NodeResourceKey(image_node_id, "layer_pingpong_a"_str).as_str());
-        effect_ppong_b = rstd::cppstd::to_string(
-            scene.NodeResourceKey(image_node_id, "layer_pingpong_b"_str).as_str());
+        const std::string effect_composite = rstd::cppstd::to_string(
+            scene.NodeResourceKey(image_node_id, "layer_composite"_str).as_str());
         // set image effect
         auto imgEffectLayer =
             std::make_shared<SceneNodeLayer>(spImgNode.as_ptr(),
                                              static_cast<float>(effect_extent[usize()]),
                                              static_cast<float>(effect_extent[usize(1)]),
-                                             effect_ppong_a,
-                                             effect_ppong_b);
+                                             effect_composite);
         image_effect_layer = imgEffectLayer.get();
         {
             imgEffectLayer->SetRequiresSourceDraw(parse_geometry.requires_source_draw);
@@ -658,8 +654,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                 auto& s     = target.sample;
                 s.magFilter = s.minFilter = TextureFilter::NEAREST;
             }
-            scene.RegisterRenderTarget(String::make(as_str(effect_ppong_a).unwrap()), target);
-            scene.RegisterRenderTarget(String::make(as_str(effect_ppong_b).unwrap()),
+            scene.RegisterRenderTarget(String::make(as_str(effect_composite).unwrap()),
                                        rstd::move(target));
         }
 
@@ -680,8 +675,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                     ToSceneUserVisibilityBinding(wpeffobj.visible_user);
             }
 
-            // this will be replace when resolve, use here to get rt info
-            const std::string inRT { effect_ppong_a };
+            const std::string inRT { effect_composite };
 
             EffectRenderTargets render_targets;
             {
@@ -753,11 +747,18 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                             "Unknown effect command dst or src: {} {}", el.target, el.source);
                         continue;
                     }
-                    imgEffect->commands.push_back(
-                        { .cmd      = SceneImageEffect::CmdType::Copy,
-                          .dst      = rstd::cppstd::to_string((**target).as_str()),
-                          .src      = rstd::cppstd::to_string((**source).as_str()),
-                          .afterpos = el.afterpos });
+                    auto command_target = el.target == "previous"
+                                              ? SceneEffectTarget::LayerNext()
+                                              : SceneEffectTarget::Named(
+                                                    rstd::cppstd::to_string((**target).as_str()));
+                    auto command_source = el.source == "previous"
+                                              ? SceneEffectTarget::LayerPrevious()
+                                              : SceneEffectTarget::Named(
+                                                    rstd::cppstd::to_string((**source).as_str()));
+                    imgEffect->commands.push_back({ .cmd      = SceneImageEffect::CmdType::Copy,
+                                                    .dst      = std::move(command_target),
+                                                    .src      = std::move(command_source),
+                                                    .afterpos = el.afterpos });
                 }
             }
 
@@ -765,7 +766,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
 
             for (std::size_t i_mat = 0; i_mat < wpeffobj.materials.size(); i_mat++) {
                 wpscene::Material         wpmat = wpeffobj.materials.at(i_mat).clone();
-                std::string               matOutRT { effect_ppong_b };
+                SceneEffectTarget         matOutRT { SceneEffectTarget::LayerNext() };
                 Option<wpscene::Material> user_texture_fallback;
                 if (wpeffobj.passes.size() > i_mat) {
                     const auto& wppass = wpeffobj.passes.at(i_mat);
@@ -778,7 +779,8 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                         if (target.is_none()) {
                             rstd_error("fbo {} not found", wppass.target);
                         } else {
-                            matOutRT = rstd::cppstd::to_string((**target).as_str());
+                            matOutRT = SceneEffectTarget::Named(
+                                rstd::cppstd::to_string((**target).as_str()));
                         }
                     }
                 }
@@ -789,8 +791,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                     auto composite_id = ParseImageLayerCompositeId(as_str(t).unwrap());
                     if (composite_id.is_some() &&
                         *composite_id == rstd::as_cast<u32>(wpimgobj.id)) {
-                        t = as_str(t).unwrap().ends_with("_b"_str) ? effect_ppong_b
-                                                                   : effect_ppong_a;
+                        t = effect_composite;
                     }
                 }
                 if (wpmat.textures.size() == 0) wpmat.textures.resize(1);
@@ -850,6 +851,11 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                 }
                 RegisterMaterialBindings(
                     *context.scene, *spMesh->Material(), wpmat, wpEffShaderInfo, binding_fallback);
+                RegisterLayerPreviousBindings(*context.scene,
+                                              *spMesh->Material(),
+                                              wpmat,
+                                              image_node_id,
+                                              as_str(effect_composite).unwrap());
                 WireMaterialShaderValueScripts(
                     context, spImgNode, spMesh->MaterialSlots().front(), wpmat, wpEffShaderInfo);
                 auto add_puppet_mask_materials = [&]() -> bool {
@@ -886,6 +892,11 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                             mask_material   = rstd::move(mask_build.material);
                             mask_shaderInfo = rstd::move(mask_build.shader_info);
                             LoadConstvalue(mask_material, mask_wpmat, mask_shaderInfo);
+                            RegisterLayerPreviousBindings(*context.scene,
+                                                          mask_material,
+                                                          mask_wpmat,
+                                                          image_node_id,
+                                                          as_str(effect_composite).unwrap());
                             spMesh->AddMaterial(std::move(mask_material));
                             track_image_property_material(spMesh->MaterialSlots().back().get());
 
@@ -912,6 +923,11 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                             clip_material   = rstd::move(clip_build.material);
                             clip_shaderInfo = rstd::move(clip_build.shader_info);
                             LoadConstvalue(clip_material, clip_wpmat, clip_shaderInfo);
+                            RegisterLayerPreviousBindings(*context.scene,
+                                                          clip_material,
+                                                          clip_wpmat,
+                                                          image_node_id,
+                                                          as_str(effect_composite).unwrap());
                             spMesh->AddMaterial(std::move(clip_material));
                             track_image_property_material(spMesh->MaterialSlots().back().get());
                         }
@@ -930,7 +946,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
 
                 SetUniformConfig(context, spEffNode, rstd::move(svData));
                 imgEffect->nodes.push_back(SceneImageEffectNode {
-                    .output                   = matOutRT,
+                    .output                   = std::move(matOutRT),
                     .sceneNode                = spEffNode.clone(),
                     .uses_unit_final_quad     = UsesUnitFinalQuad(wpmat),
                     .final_quad_shader_values = std::move(final_quad_shader_values),
@@ -945,7 +961,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
         }
 
         auto make_internal_passthrough =
-            [&](std::string_view input, std::string_view output, ref<str> name) {
+            [&](std::string_view input, SceneEffectTarget output, ref<str> name) {
                 std::shared_ptr<SceneImageEffect> result;
                 wpscene::Material                 passthrough_mat;
                 auto json = LoadJsonFile(vfs, "/assets/materials/util/effectpassthrough.json");
@@ -986,6 +1002,11 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                 mesh->AddMaterial(std::move(material));
                 RegisterMaterialBindings(
                     *context.scene, *mesh->Material(), passthrough_mat, shader_info);
+                RegisterLayerPreviousBindings(*context.scene,
+                                              *mesh->Material(),
+                                              passthrough_mat,
+                                              image_node_id,
+                                              as_str(effect_composite).unwrap());
                 node->AddMesh(std::move(mesh));
                 scene.RegisterNode(*node);
                 SetUniformConfig(context, node, rstd::move(uniform_config));
@@ -993,7 +1014,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                 result       = std::make_shared<SceneImageEffect>();
                 result->name = rstd::cppstd::to_string(name);
                 result->nodes.push_back(SceneImageEffectNode {
-                    .output    = std::string(output),
+                    .output    = std::move(output),
                     .sceneNode = node.clone(),
                 });
                 return result;
@@ -1004,11 +1025,13 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                 WallpaperLayerId { .value = i32(wpimgobj.id) }, *spImgNode);
             scene.RegisterLayerLinkSource(WallpaperLayerId { .value = i32(wpimgobj.id) },
                                           *spImgNode);
-            auto publish =
-                make_internal_passthrough(effect_ppong_a, link_output, "linked_layer_publish"_str);
-            auto visible = make_internal_passthrough(link_output,
-                                                     rstd::cppstd::as_string_view(SpecTex_Default),
-                                                     "linked_layer_visible_resolve"_str);
+            auto publish = make_internal_passthrough(effect_composite,
+                                                     SceneEffectTarget::Named(link_output),
+                                                     "linked_layer_publish"_str);
+            auto visible = make_internal_passthrough(
+                link_output,
+                SceneEffectTarget::Named(rstd::cppstd::to_string(SpecTex_Default)),
+                "linked_layer_visible_resolve"_str);
             if (publish && visible) {
                 imgEffectLayer->SetPublishedEffect(rstd::move(publish));
                 imgEffectLayer->SetVisibleResolveEffect(rstd::move(visible));
@@ -1027,9 +1050,9 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                     rstd_error("parse effectpassthrough.json failed for '{}'", wpimgobj.name);
                 } else {
                     if (passthrough_mat.textures.empty())
-                        passthrough_mat.textures.push_back(effect_ppong_a);
+                        passthrough_mat.textures.push_back(effect_composite);
                     else
-                        passthrough_mat.textures[0] = effect_ppong_a;
+                        passthrough_mat.textures[0] = effect_composite;
 
                     auto finalEffect = std::make_shared<SceneImageEffect>();
                     auto spFinalNode = Arc<SceneNode>::make();
@@ -1060,10 +1083,17 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                                                  *spFinalMesh->Material(),
                                                  passthrough_mat,
                                                  wpFinalShaderInfo);
+                        RegisterLayerPreviousBindings(*context.scene,
+                                                      *spFinalMesh->Material(),
+                                                      passthrough_mat,
+                                                      image_node_id,
+                                                      as_str(effect_composite).unwrap());
                         spFinalNode->AddMesh(spFinalMesh);
                         SetUniformConfig(context, spFinalNode, rstd::move(finalSvData));
-                        finalEffect->nodes.push_back(
-                            SceneImageEffectNode { effect_ppong_b, spFinalNode.clone() });
+                        finalEffect->nodes.push_back(SceneImageEffectNode {
+                            .output    = SceneEffectTarget::LayerNext(),
+                            .sceneNode = spFinalNode.clone(),
+                        });
                         imgEffectLayer->AddEffect(finalEffect);
                     } else {
                         rstd_error("effect passthrough failed to load for '{}'", wpimgobj.name);

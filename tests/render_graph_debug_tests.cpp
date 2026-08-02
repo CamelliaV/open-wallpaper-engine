@@ -25,6 +25,24 @@ std::string ReadFile(const std::filesystem::path& path) {
     return { std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
 }
 
+auto CompositeDesc() -> owe::rg::TextureDesc {
+    return owe::rg::TextureDesc {
+        .name              = String::make("layer-composite"_str),
+        .key               = String::make("layer-composite"_str),
+        .kind              = owe::rg::TextureKind::Temp,
+        .request           = rstd::Some(owe::resource::TextureRequest {
+            .kind       = owe::resource::TextureRequestKind::RenderTarget,
+            .name       = String::make("layer-composite"_str),
+            .definition = rstd::Some(owe::resource::TextureDefinition {
+                .width  = rstd::i32(1920),
+                .height = rstd::i32(1080),
+            }),
+            .lifetime   = owe::resource::TextureLifetimeClass::FrameLocal,
+        }),
+        .allocation_family = rstd::Some(String::make("layer-composite"_str)),
+    };
+}
+
 } // namespace
 
 TEST(DependencyGraph, StoresHandlesAndDeduplicatesEdges) {
@@ -57,25 +75,32 @@ TEST(DependencyGraph, StoresHandlesAndDeduplicatesEdges) {
 TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
     owe::rg::RenderGraph graph;
 
-    graph.addPass<DebugPass>("draw/main"_str,
-                             owe::rg::PassNode::Type::CustomShader,
-                             [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
-                                 auto input = builder.createTexture(owe::rg::TextureDesc {
-                                     .name = String::make("albedo"_str),
-                                     .key  = String::make("tex/albedo"_str),
-                                     .kind = owe::rg::TextureKind::Imported,
-                                 });
-                                 builder.read(input);
+    graph.addPass<DebugPass>(
+        "draw/main"_str,
+        owe::rg::PassNode::Type::CustomShader,
+        [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+            auto input = builder.createTexture(owe::rg::TextureDesc {
+                .name = String::make("albedo"_str),
+                .key  = String::make("tex/albedo"_str),
+                .kind = owe::rg::TextureKind::Imported,
+            });
+            builder.read(input);
 
-                                 auto output = builder.createTexture(
-                                     owe::rg::TextureDesc {
-                                         .name = String::make("default"_str),
-                                         .key  = String::make("_rt_default"_str),
-                                         .kind = owe::rg::TextureKind::Temp,
-                                     },
-                                     true);
-                                 builder.write(output);
-                             });
+            auto output = builder.createTexture(
+                owe::rg::TextureDesc {
+                    .name              = String::make("default"_str),
+                    .key               = String::make("_rt_default"_str),
+                    .kind              = owe::rg::TextureKind::Temp,
+                    .request           = rstd::Some(owe::resource::TextureRequest {
+                        .kind     = owe::resource::TextureRequestKind::RenderTarget,
+                        .name     = String::make("_rt_default"_str),
+                        .lifetime = owe::resource::TextureLifetimeClass::FrameLocal,
+                    }),
+                    .allocation_family = rstd::Some(String::make("_rt_default"_str)),
+                },
+                true);
+            builder.write(output);
+        });
 
     graph.addPass<DebugPass>("draw/overlay"_str,
                              owe::rg::PassNode::Type::CustomShader,
@@ -104,6 +129,7 @@ TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
     EXPECT_NE(dot.find("resource: default"), std::string::npos);
     EXPECT_NE(dot.find("kind=Temp"), std::string::npos);
     EXPECT_NE(dot.find("version=1"), std::string::npos);
+    EXPECT_NE(dot.find("physical=_rt_default::slot_"), std::string::npos);
     EXPECT_NE(dot.find("access=read"), std::string::npos);
     EXPECT_NE(dot.find("access=read/version"), std::string::npos);
     EXPECT_NE(dot.find("access=write"), std::string::npos);
@@ -257,6 +283,114 @@ TEST(RenderGraphResources, UsesGraphKeyAsTextureRequestIdentity) {
     ASSERT_EQ(plan.textures.len(), rstd::usize(1));
     EXPECT_EQ(rstd::cppstd::as_string_view(plan.textures[rstd::usize()].request.name.as_str()),
               "_rt_default_1_copy");
+}
+
+TEST(RenderGraphResources, AlternatesPhysicalSlotsForLinearCompositeVersions) {
+    owe::rg::RenderGraph    graph;
+    owe::rg::TextureNodeRef current;
+
+    graph.addPass<DebugPass>("source"_str,
+                             owe::rg::PassNode::Type::CustomShader,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 current = builder.createTexture(CompositeDesc(), true);
+                                 builder.write(current);
+                             });
+    for (usize index {}; index < usize(2); ++index) {
+        graph.addPass<DebugPass>("effect"_str,
+                                 owe::rg::PassNode::Type::CustomShader,
+                                 [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                     builder.read(current);
+                                     current = builder.createTexture(CompositeDesc(), true);
+                                     builder.write(current);
+                                 });
+    }
+
+    auto plan = graph.resourcePlan();
+    ASSERT_EQ(plan.textures.len(), usize(3));
+    EXPECT_NE(plan.textures[usize()].allocation_key,
+              plan.textures[usize(1)].allocation_key.as_str());
+    EXPECT_EQ(plan.textures[usize()].allocation_key,
+              plan.textures[usize(2)].allocation_key.as_str());
+}
+
+TEST(RenderGraphResources, ReusesOnePhysicalSlotForOverwriteOnlyVersions) {
+    owe::rg::RenderGraph graph;
+    for (usize index {}; index < usize(3); ++index) {
+        graph.addPass<DebugPass>("overwrite"_str,
+                                 owe::rg::PassNode::Type::CustomShader,
+                                 [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                     auto output = builder.createTexture(CompositeDesc(), true);
+                                     builder.write(output);
+                                 });
+    }
+
+    auto plan = graph.resourcePlan();
+    ASSERT_EQ(plan.textures.len(), usize(3));
+    EXPECT_EQ(plan.textures[usize()].allocation_key,
+              plan.textures[usize(1)].allocation_key.as_str());
+    EXPECT_EQ(plan.textures[usize()].allocation_key,
+              plan.textures[usize(2)].allocation_key.as_str());
+}
+
+TEST(RenderGraphResources, ExpandsPhysicalSlotsForConcurrentVersions) {
+    owe::rg::RenderGraph    graph;
+    owe::rg::TextureNodeRef first;
+    owe::rg::TextureNodeRef second;
+
+    graph.addPass<DebugPass>("source"_str,
+                             owe::rg::PassNode::Type::CustomShader,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 first = builder.createTexture(CompositeDesc(), true);
+                                 builder.write(first);
+                             });
+    graph.addPass<DebugPass>("effect/first"_str,
+                             owe::rg::PassNode::Type::CustomShader,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 builder.read(first);
+                                 second = builder.createTexture(CompositeDesc(), true);
+                                 builder.write(second);
+                             });
+    graph.addPass<DebugPass>("effect/second"_str,
+                             owe::rg::PassNode::Type::CustomShader,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 builder.read(first);
+                                 builder.read(second);
+                                 auto output = builder.createTexture(CompositeDesc(), true);
+                                 builder.write(output);
+                             });
+
+    auto plan = graph.resourcePlan();
+    ASSERT_EQ(plan.textures.len(), usize(3));
+    EXPECT_NE(plan.textures[usize()].allocation_key,
+              plan.textures[usize(1)].allocation_key.as_str());
+    EXPECT_NE(plan.textures[usize()].allocation_key,
+              plan.textures[usize(2)].allocation_key.as_str());
+    EXPECT_NE(plan.textures[usize(1)].allocation_key,
+              plan.textures[usize(2)].allocation_key.as_str());
+}
+
+TEST(RenderGraphResources, CanAliasAnOutputWithItsPreviousVersion) {
+    owe::rg::RenderGraph    graph;
+    owe::rg::TextureNodeRef current;
+
+    graph.addPass<DebugPass>("source"_str,
+                             owe::rg::PassNode::Type::CustomShader,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 current = builder.createTexture(CompositeDesc(), true);
+                                 builder.write(current);
+                             });
+    graph.addPass<DebugPass>("blend"_str,
+                             owe::rg::PassNode::Type::CustomShader,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 current = builder.createTexture(CompositeDesc(), true);
+                                 builder.reusePreviousAllocation(current);
+                                 builder.write(current);
+                             });
+
+    auto plan = graph.resourcePlan();
+    ASSERT_EQ(plan.textures.len(), usize(2));
+    EXPECT_EQ(plan.textures[usize()].allocation_key,
+              plan.textures[usize(1)].allocation_key.as_str());
 }
 
 TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {

@@ -17,6 +17,8 @@ using namespace owe;
 using namespace rstd::literals;
 using namespace rstd::prelude;
 using rstd::collections::BTreeSet;
+using rstd::collections::HashMap;
+using rstd::collections::HashSet;
 using rstd::cppstd::as_str;
 using rstd::cppstd::as_string_view;
 
@@ -33,6 +35,9 @@ auto CloneTextureDesc(const rg::TextureDesc& desc) -> rg::TextureDesc {
         .kind = desc.kind,
         .request =
             desc.request.is_some() ? Some(desc.request->clone()) : None<resource::TextureRequest>(),
+        .allocation_family = desc.allocation_family.is_some()
+                                 ? Some(desc.allocation_family->clone())
+                                 : None<String>(),
     };
 }
 } // namespace
@@ -71,6 +76,7 @@ struct ExtraInfo {
     rg::RenderGraph*           rgraph { nullptr };
     Scene*                     scene { nullptr };
     Set<std::string>           depth_initialized_outputs {};
+    HashSet<String>            transient_texture_families;
     Option<rg::TextureNodeRef> mip_framebuffer_history;
     const RenderSceneSnapshot* render_scene { nullptr };
 };
@@ -106,7 +112,22 @@ static Option<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       
 static rg::TextureDesc MakeTextureDesc(ExtraInfo& extra, std::string_view key) {
     auto desc    = MakeTextureDescBase(key);
     desc.request = BuildGraphTextureRequest(extra, key);
+    auto name    = as_str(key).unwrap();
+    if (extra.transient_texture_families.contains(name)) {
+        desc.allocation_family = Some(String::make(name));
+    }
     return desc;
+}
+
+static std::string_view ResolveEffectTarget(const SceneNodeLayer&    layer,
+                                            const SceneEffectTarget& target) {
+    if (target.kind == SceneEffectTargetKind::Named && ! target.key.empty()) return target.key;
+    return layer.CompositeTarget();
+}
+
+static bool LoadsPreviousAttachment(BlendMode mode) {
+    return mode == BlendMode::Translucent || mode == BlendMode::Additive ||
+           mode == BlendMode::AlphaToCoverage;
 }
 
 static void FillCopyTextureRequests(ExtraInfo& extra, vulkan::CopyPass::Desc& desc) {
@@ -177,7 +198,9 @@ static void StoreMipFramebufferHistory(ExtraInfo& extra) {
 
 static void AddMaterialTextureReads(SceneMaterial& material, std::string_view pass_output,
                                     ExtraInfo& extra, rg::RenderGraphBuilder& builder,
-                                    vulkan::CustomShaderPass::Desc& pdesc) {
+                                    vulkan::CustomShaderPass::Desc& pdesc,
+                                    bool                            reuses_previous_output) {
+    auto snapshots = HashMap<String, rg::TextureNodeRef>::make();
     for (std::size_t index = 0; index < material.textures.size(); ++index) {
         rstd_assert(index < material.texture_sources.len().to_primitive());
         if (index >= material.texture_sources.len().to_primitive()) {
@@ -228,9 +251,18 @@ static void AddMaterialTextureReads(SceneMaterial& material, std::string_view pa
             }
         }
 
-        if (binding_key == pass_output) {
-            builder.markSelfWrite(*input);
-            input = Some(AddCopyPass(extra, *input));
+        if (binding_key == pass_output && reuses_previous_output) {
+            auto key      = as_str(binding_key).unwrap();
+            auto snapshot = snapshots.get(key);
+            if (snapshot.is_some()) {
+                input = Some<rg::TextureNodeRef>(rg::TextureNodeRef {
+                    .handle = (**snapshot).handle,
+                });
+            } else {
+                builder.markSelfWrite(*input);
+                input = Some(AddCopyPass(extra, *input));
+                (void)snapshots.insert(String::make(key), *input);
+            }
         }
         builder.read(*input);
         auto sampled_state = builder.textureState(*input);
@@ -253,10 +285,6 @@ static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, Ext
                                    SceneRenderViewKind render_view  = SceneRenderViewKind::Primary);
 
 static void LoadGraphEffects(SceneNodeLayer* effs, ExtraInfo& extra) {
-    auto& scene = *extra.scene;
-
-    effs->ResolveEffect(*scene.DefaultEffectMesh(), "effect");
-
     for (auto* eff : effs->ResolvedEffects()) {
         if (eff == nullptr) continue;
         auto cmdItor = eff->commands.begin();
@@ -264,13 +292,13 @@ static void LoadGraphEffects(SceneNodeLayer* effs, ExtraInfo& extra) {
         int  nodePos = 0;
         for (auto& n : eff->nodes) {
             if (cmdItor != cmdEnd && nodePos == cmdItor->afterpos.to_primitive()) {
-                AddCopyPass(extra,
-                            MakeTextureDesc(extra, cmdItor->src),
-                            MakeTextureDesc(extra, cmdItor->dst));
+                auto source = ResolveEffectTarget(*effs, cmdItor->src);
+                auto target = ResolveEffectTarget(*effs, cmdItor->dst);
+                AddCopyPass(extra, MakeTextureDesc(extra, source), MakeTextureDesc(extra, target));
                 cmdItor++;
             }
-            auto& name = n.output;
-            ToGraphPass(n.sceneNode.as_ptr(), name, extra);
+            auto target = effs->ResolvedTarget(n);
+            ToGraphPass(n.sceneNode.as_ptr(), ResolveEffectTarget(*effs, target), extra);
             nodePos++;
         }
     }
@@ -293,13 +321,14 @@ static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, Ext
         effect->ConfigureSourceDraw(intermediate);
         if (intermediate) {
             imgeff = effect;
-            output = imgeff->FirstTarget();
+            imgeff->ResolveEffect(*scene.DefaultEffectMesh(), "effect");
+            output = imgeff->CompositeTarget();
+            (void)extra.transient_texture_families.insert(String::make(as_str(output).unwrap()));
         }
     }
     if (imgeff != nullptr) {
         for (auto& prefill : imgeff->PrefillNodes()) {
-            std::string_view prefill_output =
-                prefill.output.empty() ? output : std::string_view(prefill.output);
+            auto prefill_output = ResolveEffectTarget(*imgeff, prefill.output);
             ToGraphPass(prefill.sceneNode.as_ptr(), prefill_output, extra);
         }
     }
@@ -354,23 +383,33 @@ static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, Ext
                         }
                     }
                 }
-                pdesc.output = std::string(pass_output);
-                AddMaterialTextureReads(*material, pass_output, extra, builder, pdesc);
-
                 std::string pass_output_s(pass_output);
-                auto        output_node =
+                auto        output_rt = scene.RenderTarget(as_str(pass_output_s).unwrap());
+                rstd_assert(output_rt.is_some());
+                if (output_rt.is_none()) return;
+                const auto& output_target = **output_rt;
+                const auto* pass_material = material_override ? material_override.get() : material;
+                const bool  reuses_previous_output =
+                    ! (output_target.force_clear && ! preserve_output) &&
+                    (output_target.preserve_on_write || preserve_output ||
+                     LoadsPreviousAttachment(pass_material->blenmode));
+
+                pdesc.output = pass_output_s;
+                AddMaterialTextureReads(
+                    *material, pass_output, extra, builder, pdesc, reuses_previous_output);
+
+                auto output_node =
                     builder.createTexture(MakeTextureDesc(extra, pass_output_s), true);
                 auto output_state = builder.textureState(output_node);
                 rstd_assert(output_state.is_some());
                 if (output_state.is_none()) return;
-                auto output_rt = scene.RenderTarget(as_str(pass_output_s).unwrap());
-                rstd_assert(output_rt.is_some());
-                if (output_rt.is_none()) return;
-                const auto& output_target      = **output_rt;
-                const bool  first_output_write = output_state->version == usize();
-                pdesc.output_use               = Some(output_state->use);
-                pdesc.output_request           = BuildGraphTextureRequest(extra, pass_output_s);
-                pdesc.samples = vulkan::TextureSampleCount(output_target.sample_count);
+                const bool first_output_write = output_state->version == usize();
+                if (! first_output_write && reuses_previous_output) {
+                    builder.reusePreviousAllocation(output_node);
+                }
+                pdesc.output_use     = Some(output_state->use);
+                pdesc.output_request = BuildGraphTextureRequest(extra, pass_output_s);
+                pdesc.samples        = vulkan::TextureSampleCount(output_target.sample_count);
                 if (pdesc.samples != VK_SAMPLE_COUNT_1_BIT) {
                     auto twin_name            = vulkan::MsaaTwinName(pass_output_s, pdesc.samples);
                     pdesc.output_msaa_request = Some(
@@ -390,10 +429,9 @@ static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, Ext
                 pdesc.clear_output =
                     ! preserve_output &&
                     ((first_output_write && output_target.bind.screen) || pdesc.transparent_clear);
-                pdesc.preserve_output     = output_state->version > usize() &&
-                                            (output_target.preserve_on_write || preserve_output);
-                const auto* pass_material = material_override ? material_override.get() : material;
-                const bool  uses_depth =
+                pdesc.preserve_output = output_state->version > usize() &&
+                                        (output_target.preserve_on_write || preserve_output);
+                const bool uses_depth =
                     output_target.withDepth && vulkan::UsesDepthAttachment(*pass_material);
                 pdesc.has_depth_attachment = uses_depth;
                 if (uses_depth) {
@@ -535,7 +573,8 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
             rstd_error("render group layer {} has no effect target", wallpaper->value);
         }
         const std::string_view child_output =
-            effect_layer == nullptr ? node_output : std::string_view(effect_layer->FirstTarget());
+            effect_layer == nullptr ? node_output
+                                    : std::string_view(effect_layer->CompositeTarget());
         for (auto& child : node->GetChildren()) {
             EmitSceneNode(child.as_ptr(),
                           child_output,
@@ -647,7 +686,7 @@ static void EmitShadowPasses(ExtraInfo& extra) {
                     });
                 }
 
-                AddMaterialTextureReads(*material, target, extra, builder, pdesc);
+                AddMaterialTextureReads(*material, target, extra, builder, pdesc, true);
                 auto atlas = builder.createTexture(MakeTextureDesc(extra, target), true);
                 auto state = builder.textureState(atlas);
                 if (state.is_none()) return;

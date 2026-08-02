@@ -1631,8 +1631,13 @@ void Scene::ResolveMaterialTextureSources(SceneMaterial& material) {
     for (std::size_t index = 0; index < material.textures.size(); ++index) {
         const auto& texture = material.textures[index];
         auto&       source  = material.texture_sources[usize(index)];
-        source              = {};
-        source.key          = String::make(rstd::cppstd::as_str(texture).unwrap());
+        if (source.kind == SceneMaterialTextureSourceKind::LayerPrevious &&
+            source.binding_key == rstd::cppstd::as_str(texture).unwrap()) {
+            continue;
+        }
+        source             = {};
+        source.key         = String::make(rstd::cppstd::as_str(texture).unwrap());
+        source.binding_key = source.key.clone();
         if (texture.empty()) continue;
 
         auto name = rstd::cppstd::as_str(texture).unwrap();
@@ -1705,6 +1710,20 @@ void Scene::ResolveMaterialTextureSources(SceneMaterial& material) {
             source.kind = SceneMaterialTextureSourceKind::UnsupportedSpecial;
         }
     }
+}
+
+bool Scene::SetMaterialLayerPreviousSource(SceneMaterial& material, u32 slot, SceneNodeId layer,
+                                           ref<str> composite_target) {
+    auto index = usize(slot.to_primitive());
+    if (index >= usize(material.textures.size())) return false;
+    material.texture_sources.resize(usize(material.textures.size()), SceneMaterialTextureSource {});
+    auto& source = material.texture_sources[index];
+    source.kind  = SceneMaterialTextureSourceKind::LayerPrevious;
+    source.key   = String::make(composite_target);
+    source.binding_key =
+        String::make(rstd::cppstd::as_str(material.textures[index.to_primitive()]).unwrap());
+    source.layer = Some(layer);
+    return true;
 }
 
 SceneMaterialTextureSlotMutation Scene::SetMaterialTextureSlot(SceneMaterial& material, u32 slot,

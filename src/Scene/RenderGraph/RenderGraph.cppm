@@ -32,6 +32,7 @@ struct TextureDesc {
     String                                 key;
     TextureKind                            kind { TextureKind::Imported };
     rstd::Option<resource::TextureRequest> request;
+    rstd::Option<String>                   allocation_family;
 };
 
 struct TextureNodeState {
@@ -61,6 +62,7 @@ struct RenderGraphBuilder {
     auto workPassNode() const -> const PassNode&;
     void markSelfWrite(TextureNodeRef);
     void markVirtualWrite(TextureNodeRef);
+    void reusePreviousAllocation(TextureNodeRef);
 
 private:
     friend class RenderGraph;
@@ -133,6 +135,7 @@ private:
     void connectTextureRead(TextureNodeRef, NodeHandle pass_node);
     void connectTextureWrite(TextureNodeRef, NodeHandle pass_node);
     auto textureHasWriter(TextureNodeRef) const -> bool;
+    void reusePreviousAllocation(TextureNodeRef);
     auto isPassNode(NodeHandle) const -> bool;
     auto isVirtualPassNode(NodeHandle) const -> bool;
     auto isRenderPassNode(NodeHandle) const -> bool;

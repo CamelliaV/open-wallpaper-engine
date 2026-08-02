@@ -1368,7 +1368,7 @@ TEST(ScriptLayerLookup, GetEffectVisibleWritesSceneDirty) {
     auto camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(256, 256, -1.0, 1.0));
     auto effect_layer = std::make_shared<owe::SceneNodeLayer>(
-        layer.as_ptr(), 256.0f, 256.0f, "_rt_effect_pingpong_a_test", "_rt_effect_pingpong_b_test");
+        layer.as_ptr(), 256.0f, 256.0f, "_rt_effect_composite_test");
     auto effect             = std::make_shared<owe::SceneImageEffect>();
     effect->name            = "audio-color";
     effect->runtime_visible = true;
@@ -1415,13 +1415,10 @@ TEST(ScriptLayerLookup, EffectIndexAndMaterialWritesUseSceneMaterialOwner) {
     layer->SetCamera("color-effect-camera");
     auto camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(256, 256, -1.0, 1.0));
-    auto effect_layer = std::make_shared<owe::SceneNodeLayer>(layer.as_ptr(),
-                                                              256.0f,
-                                                              256.0f,
-                                                              "_rt_effect_pingpong_a_color",
-                                                              "_rt_effect_pingpong_b_color");
-    auto effect       = std::make_shared<owe::SceneImageEffect>();
-    effect->name      = "color";
+    auto effect_layer = std::make_shared<owe::SceneNodeLayer>(
+        layer.as_ptr(), 256.0f, 256.0f, "_rt_effect_composite_color");
+    auto effect                             = std::make_shared<owe::SceneImageEffect>();
+    effect->name                            = "color";
     auto                        effect_node = Arc<owe::SceneNode>::make();
     auto                        mesh        = std::make_shared<owe::SceneMesh>();
     owe::SceneMaterial          material;
@@ -1437,7 +1434,7 @@ TEST(ScriptLayerLookup, EffectIndexAndMaterialWritesUseSceneMaterialOwner) {
     auto* effect_material = mesh->Material();
     effect_node->AddMesh(std::move(mesh));
     effect->nodes.push_back(owe::SceneImageEffectNode {
-        .output    = "_rt_effect_pingpong_b_color",
+        .output    = owe::SceneEffectTarget::LayerNext(),
         .sceneNode = effect_node.clone(),
     });
     effect_layer->AddEffect(effect);

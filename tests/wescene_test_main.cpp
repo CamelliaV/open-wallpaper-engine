@@ -1543,6 +1543,13 @@ void DumpShadowTopology(FILE* out, owe::Scene& scene) {
 
 void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
     std::fprintf(out, "\nScene-graph passes (TraverseNode pre-order):\n");
+    auto target_name = [](const owe::SceneNodeLayer&    layer,
+                          const owe::SceneEffectTarget& target) -> std::string {
+        if (target.kind == owe::SceneEffectTargetKind::Named && ! target.key.empty()) {
+            return target.key;
+        }
+        return layer.CompositeTarget();
+    };
     std::function<void(owe::SceneNode*, int)> walk = [&](owe::SceneNode* n, int depth) {
         if (n == nullptr) return;
         // Mirror SceneToRenderGraph::ToGraphPass: only nodes with mesh+material emit.
@@ -1555,20 +1562,23 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
             if (n->HasLayer()) {
                 eff_layer = n->Layer();
                 if (eff_layer->EffectCount() == usize() || eff_layer->HasRuntimeVisibleEffect()) {
-                    output = eff_layer->FirstTarget();
+                    output = eff_layer->CompositeTarget();
                 }
             }
             if (eff_layer) {
+                eff_layer->ResolveEffect(*scene.DefaultEffectMesh(), "effect");
                 std::size_t ni = 0;
                 for (auto& enode : eff_layer->PrefillNodes()) {
                     std::string tag2 = "[prefill node " + std::to_string(ni++) + "]";
-                    DumpPass(out, "    " + tag2, *enode.sceneNode.as_ptr(), enode.output);
+                    DumpPass(out,
+                             "    " + tag2,
+                             *enode.sceneNode.as_ptr(),
+                             target_name(*eff_layer, enode.output));
                 }
             }
             DumpPass(out, tag, *n, output);
 
             if (eff_layer && eff_layer->HasRenderEffects()) {
-                eff_layer->ResolveEffect(*scene.DefaultEffectMesh(), "effect");
                 const auto& resolved     = eff_layer->ResolvedEffects();
                 const auto  effect_count = usize(resolved.size());
                 std::fprintf(
@@ -1582,14 +1592,18 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
                         std::fprintf(out,
                                      "      [eff %zu cmd] copy %s -> %s (afterpos=%d)\n",
                                      ei.to_primitive(),
-                                     cmd_it->src.c_str(),
-                                     cmd_it->dst.c_str(),
+                                     target_name(*eff_layer, cmd_it->src).c_str(),
+                                     target_name(*eff_layer, cmd_it->dst).c_str(),
                                      cmd_it->afterpos.to_primitive());
                     }
                     for (auto& enode : eff->nodes) {
                         std::string tag2 = "[eff " + std::to_string(ei.to_primitive()) + " node " +
                                            std::to_string(ni++) + "]";
-                        DumpPass(out, "    " + tag2, *enode.sceneNode.as_ptr(), enode.output);
+                        auto        target = eff_layer->ResolvedTarget(enode);
+                        DumpPass(out,
+                                 "    " + tag2,
+                                 *enode.sceneNode.as_ptr(),
+                                 target_name(*eff_layer, target));
                     }
                 }
             }

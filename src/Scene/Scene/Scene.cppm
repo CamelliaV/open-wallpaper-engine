@@ -477,6 +477,7 @@ enum class SceneMaterialTextureSourceKind
     Empty,
     Imported,
     SceneSurface,
+    LayerPrevious,
     LayerStage,
     LayerOutput,
     EffectLocal,
@@ -489,6 +490,7 @@ struct SceneMaterialTextureSource {
     SceneMaterialTextureSource(const SceneMaterialTextureSource& other)
         : kind(other.kind),
           key(other.key.clone()),
+          binding_key(other.binding_key.clone()),
           layer(other.layer),
           effect(other.effect),
           wallpaper_layer(other.wallpaper_layer) {}
@@ -497,6 +499,7 @@ struct SceneMaterialTextureSource {
         if (this == &other) return *this;
         kind            = other.kind;
         key             = other.key.clone();
+        binding_key     = other.binding_key.clone();
         layer           = other.layer;
         effect          = other.effect;
         wallpaper_layer = other.wallpaper_layer;
@@ -506,6 +509,7 @@ struct SceneMaterialTextureSource {
 
     SceneMaterialTextureSourceKind kind { SceneMaterialTextureSourceKind::Empty };
     String                         key;
+    String                         binding_key;
     Option<SceneNodeId>            layer;
     Option<SceneEffectId>          effect;
     i32                            wallpaper_layer { -1 };
@@ -1748,8 +1752,39 @@ private:
 // SceneNodeLayer.h
 // ============================================================================
 
+enum class SceneEffectTargetKind
+{
+    Named,
+    LayerPrevious,
+    LayerNext,
+};
+
+struct SceneEffectTarget {
+    SceneEffectTarget() = default;
+    SceneEffectTarget(std::string value)
+        : kind(SceneEffectTargetKind::Named), key(std::move(value)) {}
+    SceneEffectTarget(std::string_view value): kind(SceneEffectTargetKind::Named), key(value) {}
+
+    static auto Named(std::string value) -> SceneEffectTarget {
+        return SceneEffectTarget(std::move(value));
+    }
+    static auto LayerPrevious() -> SceneEffectTarget {
+        SceneEffectTarget target;
+        target.kind = SceneEffectTargetKind::LayerPrevious;
+        return target;
+    }
+    static auto LayerNext() -> SceneEffectTarget {
+        SceneEffectTarget target;
+        target.kind = SceneEffectTargetKind::LayerNext;
+        return target;
+    }
+
+    SceneEffectTargetKind kind { SceneEffectTargetKind::Named };
+    std::string           key;
+};
+
 struct SceneImageEffectNode {
-    std::string                  output; // render target
+    SceneEffectTarget            output;
     Arc<SceneNode>               sceneNode;
     bool                         uses_unit_final_quad { false };
     SceneShaderValueAnimationMap final_quad_shader_values;
@@ -1761,10 +1796,10 @@ struct SceneImageEffect {
         Copy,
     };
     struct Command {
-        CmdType     cmd { CmdType::Copy };
-        std::string dst;
-        std::string src;
-        i32         afterpos { 0 };
+        CmdType           cmd { CmdType::Copy };
+        SceneEffectTarget dst;
+        SceneEffectTarget src;
+        i32               afterpos { 0 };
     };
     std::string                     name;
     SceneEffectId                   id;
@@ -1777,8 +1812,7 @@ struct SceneImageEffect {
 
 class SceneNodeLayer {
 public:
-    SceneNodeLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
-                   std::string_view pingpong_b);
+    SceneNodeLayer(SceneNode* node, float w, float h, std::string_view composite_target);
 
     void AddEffect(const std::shared_ptr<SceneImageEffect>& node) {
         m_effects.push_back(node);
@@ -1813,7 +1847,7 @@ public:
     }
     void             SetSourceDraw(SceneNode& node);
     void             ConfigureSourceDraw(bool intermediate);
-    const auto&      FirstTarget() const { return m_pingpong_a; }
+    const auto&      CompositeTarget() const { return m_composite_target; }
     SceneMesh&       FinalMesh() { return *m_final_mesh.get(); }
     const SceneMesh& FinalMesh() const { return *m_final_mesh.as_ptr(); }
     void             AddPrefillNode(SceneImageEffectNode node) {
@@ -1869,7 +1903,11 @@ public:
     }
     bool        VisibleOutputEnabled() const { return m_visible_output_enabled; }
     const auto& ResolvedEffects() const { return m_resolved_effects; }
-    void        SetFinalLocal(bool value) {
+    auto        ResolvedTarget(const SceneImageEffectNode& node) const -> SceneEffectTarget {
+        if (m_direct_final_output == &node) return SceneEffectTarget::Named(m_final_target);
+        return node.output;
+    }
+    void SetFinalLocal(bool value) {
         m_final_local = value;
         m_resolved    = false;
     }
@@ -1892,22 +1930,11 @@ public:
     void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
 
 private:
-    struct EffectNodeResolveState {
-        std::string              output;
-        std::vector<std::size_t> pingpong_input_slots;
-    };
-
-    struct EffectCommandResolveState {
-        std::string src;
-        std::string dst;
-    };
-
     SceneNode*  m_worldNode;
     SceneNode*  m_sourceNode;
     float       m_width { 1.0f };
     float       m_height { 1.0f };
-    std::string m_pingpong_a;
-    std::string m_pingpong_b;
+    std::string m_composite_target;
     std::string m_source_camera;
 
     bool              fullscreen { false };
@@ -1925,15 +1952,13 @@ private:
     bool              m_visible_output_enabled { true };
     bool              m_resolved { false };
 
-    std::vector<std::shared_ptr<SceneImageEffect>>                    m_effects;
-    std::shared_ptr<SceneImageEffect>                                 m_final_resolve_effect;
-    std::shared_ptr<SceneImageEffect>                                 m_published_effect;
-    std::shared_ptr<SceneImageEffect>                                 m_visible_resolve_effect;
-    std::vector<SceneImageEffect*>                                    m_resolved_effects;
-    std::vector<SceneImageEffectNode>                                 m_prefill_nodes;
-    std::unordered_map<SceneImageEffectNode*, EffectNodeResolveState> m_node_resolve_state;
-    std::unordered_map<SceneImageEffect::Command*, EffectCommandResolveState>
-        m_command_resolve_state;
+    std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
+    std::shared_ptr<SceneImageEffect>              m_final_resolve_effect;
+    std::shared_ptr<SceneImageEffect>              m_published_effect;
+    std::shared_ptr<SceneImageEffect>              m_visible_resolve_effect;
+    std::vector<SceneImageEffect*>                 m_resolved_effects;
+    std::vector<SceneImageEffectNode>              m_prefill_nodes;
+    SceneImageEffectNode*                          m_direct_final_output { nullptr };
 };
 
 struct SceneImageEffectRef {
@@ -2638,7 +2663,9 @@ public:
                                             const ShaderValue& value);
     SceneMaterialTextureSlotMutation SetMaterialTextureSlot(SceneMaterial& material, u32 slot,
                                                             std::string_view texture);
-    void                             ResolveMaterialTextureSources(SceneMaterial& material);
+    bool SetMaterialLayerPreviousSource(SceneMaterial& material, u32 slot, SceneNodeId layer,
+                                        ref<str> composite_target);
+    void ResolveMaterialTextureSources(SceneMaterial& material);
     SceneMaterialShaderVariantMutation
          SetMaterialShaderVariant(SceneMaterial& material, SceneShaderVariantMutation mutation);
     void MarkLayerStaticElidable(WallpaperLayerId id);

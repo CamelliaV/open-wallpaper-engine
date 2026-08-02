@@ -21,6 +21,7 @@ enum class ResourceAccess
 struct TexturePlanEntry {
     TextureUseHandle handle;
     TextureRequest   request;
+    String           allocation_key;
     ResourceAccess   access { ResourceAccess::Read };
     u32              version { 0 };
 };

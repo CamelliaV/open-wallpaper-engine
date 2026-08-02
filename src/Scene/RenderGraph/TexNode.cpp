@@ -30,7 +30,9 @@ auto TextureTypeName(TexNode::TexType type) -> rstd::ref<rstd::str> {
 }
 } // namespace
 
-auto TexNode::ToGraphviz() const -> String {
+auto TexNode::ToGraphviz() const -> String { return ToGraphvizWithAllocation(None<ref<str>>()); }
+
+auto TexNode::ToGraphvizWithAllocation(Option<ref<str>> allocation_key) const -> String {
     auto graph_id     = rstd::format("n{}", handle.index);
     auto escaped_key  = DotEscape(key.as_str());
     auto escaped_name = DotEscape(name.as_str());
@@ -51,6 +53,18 @@ auto TexNode::ToGraphviz() const -> String {
     }
     if (next) {
         auto field = rstd::format("\\nnext=n{}", next->index);
+        label.push_str(field.as_str());
+    }
+    if (allocation_family) {
+        auto field = rstd::format("\\nfamily={}", allocation_family->as_str());
+        label.push_str(field.as_str());
+    }
+    if (allocation_parent) {
+        auto field = rstd::format("\\nallocation_parent=n{}", allocation_parent->index);
+        label.push_str(field.as_str());
+    }
+    if (allocation_key) {
+        auto field = rstd::format("\\nphysical={}", *allocation_key);
         label.push_str(field.as_str());
     }
     label.push_str("\" shape=ellipse]"_str);

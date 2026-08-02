@@ -97,8 +97,7 @@ struct TextRuntimeTargets {
     Scene*                     scene;
     mut_ref<UniformSceneState> uniform_state;
     std::string                camera_key;
-    std::string                ppong_a;
-    std::string                ppong_b;
+    std::string                composite;
     std::string                effect_final;
     bool                       has_effect { false };
     std::int32_t               layer_w { 1 };
@@ -112,10 +111,8 @@ struct TextRuntimeTargets {
         bool changed          = false;
         auto [next_w, next_h] = TextLayerExtent(geometry);
         changed |= scene->ResizeRenderTarget(
-            rstd::cppstd::as_str(ppong_a).unwrap(), i32(next_w), i32(next_h));
+            rstd::cppstd::as_str(composite).unwrap(), i32(next_w), i32(next_h));
         if (has_effect) {
-            changed |= scene->ResizeRenderTarget(
-                rstd::cppstd::as_str(ppong_b).unwrap(), i32(next_w), i32(next_h));
             changed |= scene->ResizeRenderTarget(
                 rstd::cppstd::as_str(effect_final).unwrap(), i32(next_w), i32(next_h));
         }
@@ -546,15 +543,12 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             scene, mut_ref<UniformSceneState>::from_raw_parts(context.uniform_state.as_ptr()));
         const std::string addr = rstd::cppstd::to_string(
             scene.NodeResourceKey(text_node_id, "text_camera"_str).as_str());
-        const std::string ppong_a = rstd::cppstd::to_string(
-            scene.NodeResourceKey(text_node_id, "text_pingpong_a"_str).as_str());
-        const std::string ppong_b = rstd::cppstd::to_string(
-            scene.NodeResourceKey(text_node_id, "text_pingpong_b"_str).as_str());
+        const std::string composite = rstd::cppstd::to_string(
+            scene.NodeResourceKey(text_node_id, "text_composite"_str).as_str());
         const std::string effect_final = rstd::cppstd::to_string(
             scene.NodeResourceKey(text_node_id, "text_effect_final"_str).as_str());
         runtime_targets->camera_key   = addr;
-        runtime_targets->ppong_a      = ppong_a;
-        runtime_targets->ppong_b      = ppong_b;
+        runtime_targets->composite    = composite;
         runtime_targets->effect_final = effect_final;
         runtime_targets->has_effect   = has_text_effect;
         runtime_targets->layer_w      = initial_layer_w;
@@ -578,12 +572,11 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             .preserve_on_write    = copy_background_seed,
         };
         if (has_text_effect) {
-            scene.RegisterRenderTarget(String::make(as_str(ppong_a).unwrap()), text_target);
-            scene.RegisterRenderTarget(String::make(as_str(ppong_b).unwrap()), text_target);
+            scene.RegisterRenderTarget(String::make(as_str(composite).unwrap()), text_target);
             scene.RegisterRenderTarget(String::make(as_str(effect_final).unwrap()),
                                        rstd::move(text_target));
         } else {
-            scene.RegisterRenderTarget(String::make(as_str(ppong_a).unwrap()),
+            scene.RegisterRenderTarget(String::make(as_str(composite).unwrap()),
                                        rstd::move(text_target));
         }
 
@@ -604,8 +597,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
                                                                       : sp_node.as_ptr(),
                                                       static_cast<float>(initial_layer_w),
                                                       static_cast<float>(initial_layer_h),
-                                                      ppong_a,
-                                                      has_text_effect ? ppong_b : ppong_a);
+                                                      composite);
         sp_node->AttachLayer(layer);
 
         if (copy_background_seed) {
@@ -635,7 +627,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             runtime_targets->effect_nodes.push_back(TextRuntimeEffectNode {
                 .node = bg_node.as_ptr(), .text_projection = rstd::move(text_projection) });
             layer->AddPrefillNode(SceneImageEffectNode {
-                .output    = ppong_a,
+                .output    = SceneEffectTarget::LayerNext(),
                 .sceneNode = bg_node.clone(),
             });
         }
@@ -717,7 +709,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
                         ToSceneUserVisibilityBinding(wpeffobj.visible_user);
                 }
 
-                const std::string   inRT { ppong_a };
+                const std::string   inRT { composite };
                 EffectRenderTargets render_targets;
                 (void)render_targets.insert(String::make("previous"_str),
                                             String::make(as_str(inRT).unwrap()));
@@ -752,17 +744,24 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
                             "Unknown effect command dst or src: {} {}", cmd.target, cmd.source);
                         continue;
                     }
-                    effect->commands.push_back(
-                        { .cmd      = SceneImageEffect::CmdType::Copy,
-                          .dst      = rstd::cppstd::to_string((**target).as_str()),
-                          .src      = rstd::cppstd::to_string((**source).as_str()),
-                          .afterpos = cmd.afterpos });
+                    auto command_target = cmd.target == "previous"
+                                              ? SceneEffectTarget::LayerNext()
+                                              : SceneEffectTarget::Named(
+                                                    rstd::cppstd::to_string((**target).as_str()));
+                    auto command_source = cmd.source == "previous"
+                                              ? SceneEffectTarget::LayerPrevious()
+                                              : SceneEffectTarget::Named(
+                                                    rstd::cppstd::to_string((**source).as_str()));
+                    effect->commands.push_back({ .cmd      = SceneImageEffect::CmdType::Copy,
+                                                 .dst      = std::move(command_target),
+                                                 .src      = std::move(command_source),
+                                                 .afterpos = cmd.afterpos });
                 }
 
                 bool effect_ok = true;
                 for (std::size_t i_mat = 0; i_mat < wpeffobj.materials.size(); ++i_mat) {
                     wpscene::Material         wpmat = wpeffobj.materials.at(i_mat).clone();
-                    std::string               matOutRT { ppong_b };
+                    SceneEffectTarget         matOutRT { SceneEffectTarget::LayerNext() };
                     Option<wpscene::Material> user_texture_fallback;
                     if (wpeffobj.passes.size() > i_mat) {
                         const auto& pass = wpeffobj.passes.at(i_mat);
@@ -775,13 +774,14 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
                             if (target.is_none())
                                 rstd_error("fbo {} not found", pass.target);
                             else
-                                matOutRT = rstd::cppstd::to_string((**target).as_str());
+                                matOutRT = SceneEffectTarget::Named(
+                                    rstd::cppstd::to_string((**target).as_str()));
                         }
                     }
                     for (auto& tex : wpmat.textures) {
                         auto composite_id = ParseImageLayerCompositeId(as_str(tex).unwrap());
                         if (composite_id.is_some() && *composite_id == rstd::as_cast<u32>(obj.id)) {
-                            tex = as_str(tex).unwrap().ends_with("_b"_str) ? ppong_b : ppong_a;
+                            tex = composite;
                         }
                     }
                     if (wpmat.textures.empty()) wpmat.textures.resize(1);
@@ -829,6 +829,8 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
                     }
                     RegisterMaterialBindings(
                         scene, *mesh->Material(), wpmat, shader_info, binding_fallback);
+                    RegisterLayerPreviousBindings(
+                        scene, *mesh->Material(), wpmat, text_node_id, as_str(composite).unwrap());
                     WireMaterialShaderValueScripts(
                         context, layer_node, mesh->MaterialSlots().front(), wpmat, shader_info);
                     effect_node->AddMesh(mesh);
@@ -836,7 +838,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
                     runtime_targets->effect_nodes.push_back(
                         TextRuntimeEffectNode { .node = effect_node.as_ptr() });
                     effect->nodes.push_back(SceneImageEffectNode {
-                        .output                   = matOutRT,
+                        .output                   = std::move(matOutRT),
                         .sceneNode                = effect_node.clone(),
                         .uses_unit_final_quad     = UsesUnitFinalQuad(wpmat),
                         .final_quad_shader_values = std::move(final_quad_shader_values),
@@ -850,10 +852,15 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             }
 
             auto resolve_node = Arc<SceneNode>::make();
-            auto resolved     = load_passthrough_material(ppong_a);
+            auto resolved     = load_passthrough_material(composite);
             if (resolved.is_none()) return;
             auto resolve_mesh = std::make_shared<SceneMesh>();
             resolve_mesh->AddMaterial(std::move(resolved->material));
+            RegisterLayerPreviousBindings(scene,
+                                          *resolve_mesh->Material(),
+                                          resolved->source,
+                                          text_node_id,
+                                          as_str(composite).unwrap());
             resolve_node->AddMesh(std::move(resolve_mesh));
             SetUniformConfig(context, resolve_node, rstd::move(resolved->sv));
             runtime_targets->effect_nodes.push_back(
@@ -861,7 +868,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             auto resolve_effect  = std::make_shared<SceneImageEffect>();
             resolve_effect->name = "text_resolve";
             resolve_effect->nodes.push_back(SceneImageEffectNode {
-                .output    = ppong_b,
+                .output    = SceneEffectTarget::LayerNext(),
                 .sceneNode = resolve_node.clone(),
             });
             layer->SetFinalResolveEffect(std::move(resolve_effect));
@@ -869,7 +876,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
 
         if (linked_source) {
             const std::string_view input =
-                has_text_effect ? std::string_view(effect_final) : std::string_view(ppong_a);
+                has_text_effect ? std::string_view(effect_final) : std::string_view(composite);
             auto publish_node = Arc<SceneNode>::make();
             auto published    = load_passthrough_material(input);
             if (published.is_none()) return;
@@ -877,6 +884,11 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             publish_mesh->AddMaterial(std::move(published->material));
             RegisterMaterialBindings(
                 scene, *publish_mesh->Material(), published->source, published->shader_info);
+            RegisterLayerPreviousBindings(scene,
+                                          *publish_mesh->Material(),
+                                          published->source,
+                                          text_node_id,
+                                          as_str(composite).unwrap());
             publish_node->AddMesh(std::move(publish_mesh));
             scene.RegisterNode(*publish_node);
             SetUniformConfig(context, publish_node, std::move(published->sv));
@@ -896,7 +908,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
         GenCardMesh(*compose_mesh,
                     { static_cast<float>(runtime_targets->layer_w),
                       static_cast<float>(runtime_targets->layer_h) });
-        auto loaded = load_passthrough_material(has_text_effect ? effect_final : ppong_a);
+        auto loaded = load_passthrough_material(has_text_effect ? effect_final : composite);
         if (loaded.is_none()) return;
         compose_sv                           = std::move(loaded->sv);
         compose_sv.parallax_depth            = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
@@ -904,6 +916,11 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
         compose_mesh->AddMaterial(std::move(loaded->material));
         RegisterMaterialBindings(
             scene, *compose_mesh->Material(), loaded->source, loaded->shader_info);
+        RegisterLayerPreviousBindings(scene,
+                                      *compose_mesh->Material(),
+                                      loaded->source,
+                                      text_node_id,
+                                      as_str(composite).unwrap());
         layer_node->AddMesh(compose_mesh);
         SetUniformConfig(context, layer_node, rstd::move(compose_sv));
 

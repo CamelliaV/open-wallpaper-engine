@@ -675,8 +675,12 @@ public:
         TexturePrepareTrace plan_trace(observer, TexturePrepareTrace::Kind::Plan);
 
         for (usize entry_index {}; entry_index < entries.len(); ++entry_index) {
-            const auto& entry            = entries[entry_index];
-            auto        imported_content = None<resource::ImportedTextureContentIdentity>();
+            const auto& entry              = entries[entry_index];
+            auto        imported_content   = None<resource::ImportedTextureContentIdentity>();
+            auto        allocation_request = entry.request.clone();
+            if (! entry.allocation_key.is_empty()) {
+                allocation_request.name = entry.allocation_key.clone();
+            }
             resource::TextureHandle handle;
             if (entry.request.kind == resource::TextureRequestKind::Imported) {
                 if (content.is_none()) {
@@ -689,10 +693,10 @@ public:
                 auto resolved = (*content)->ResolveTextureContent(entry.request);
                 if (resolved.is_err()) return Err(rstd::move(resolved).unwrap_err_unchecked());
                 imported_content = Some(rstd::move(resolved).unwrap_unchecked());
-                handle =
-                    m_textures.RegisterImported(entry.request.clone(), imported_content->clone());
+                handle           = m_textures.RegisterImported(rstd::move(allocation_request),
+                                                               imported_content->clone());
             } else {
-                handle = m_textures.Register(entry.request.clone());
+                handle = m_textures.Register(allocation_request.clone());
             }
             if (! handle.Valid()) {
                 return Err(resource::ResourceError {
@@ -717,7 +721,7 @@ public:
                      resource::TextureContentFlag(
                          resource::TextureContent::InitializeTransparent)) != u32();
                 if (initialize_transparent) {
-                    auto prepared = AllocateTransparentTexture(entry.request);
+                    auto prepared = AllocateTransparentTexture(allocation_request);
                     if (prepared.is_err()) {
                         return Err(rstd::move(prepared).unwrap_err_unchecked());
                     }
@@ -733,7 +737,7 @@ public:
                     }
                     continue;
                 }
-                auto allocated = AllocateTexture(entry.request);
+                auto allocated = AllocateTexture(allocation_request);
                 if (allocated.is_err()) return Err(rstd::move(allocated).unwrap_err_unchecked());
                 auto published = PublishPrepared(entry.handle,
                                                  handle,

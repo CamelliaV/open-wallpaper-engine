@@ -1011,6 +1011,19 @@ void RegisterMaterialBindings(Scene& scene, SceneMaterial& material,
     }
 }
 
+void RegisterLayerPreviousBindings(Scene& scene, SceneMaterial& material,
+                                   const wpscene::Material& authored, SceneNodeId layer,
+                                   ref<str> composite_target) {
+    for (usize index {}; index < usize(authored.textures.size()); ++index) {
+        if (authored.textures[index.to_primitive()] !=
+            rstd::cppstd::as_string_view(composite_target)) {
+            continue;
+        }
+        (void)scene.SetMaterialLayerPreviousSource(
+            material, u32(rstd::as_cast<rstd::uint32_t>(index)), layer, composite_target);
+    }
+}
+
 void ApplyTextureBinds(wpscene::Material&                             material,
                        std::span<const wpscene::MaterialPassBindItem> bindings,
                        const EffectRenderTargets&                     render_targets) {

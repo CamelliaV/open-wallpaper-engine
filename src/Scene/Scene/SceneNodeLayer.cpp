@@ -41,14 +41,12 @@ void ChangeMeshToUnitQuad(SceneMesh& target) {
 
 } // namespace
 
-SceneNodeLayer::SceneNodeLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
-                               std::string_view pingpong_b)
+SceneNodeLayer::SceneNodeLayer(SceneNode* node, float w, float h, std::string_view composite_target)
     : m_worldNode(node),
       m_sourceNode(node),
       m_width(w),
       m_height(h),
-      m_pingpong_a(pingpong_a),
-      m_pingpong_b(pingpong_b),
+      m_composite_target(composite_target),
       m_source_camera(node != nullptr ? node->Camera() : std::string()),
       m_final_mesh(Box<SceneMesh>::make()) {};
 
@@ -73,50 +71,16 @@ void SceneNodeLayer::ConfigureSourceDraw(bool intermediate) {
 void SceneNodeLayer::ResolveEffect(const SceneMesh& default_mesh, std::string_view effect_cam) {
     if (m_resolved) return;
     m_resolved_effects.clear();
-    std::string_view ppong_a = m_pingpong_a, ppong_b = m_pingpong_b;
-    auto             swap_pp = [&ppong_a, &ppong_b]() {
-        std::swap(ppong_a, ppong_b);
-    };
-    auto default_node = SceneNode();
+    m_direct_final_output = nullptr;
+    auto default_node     = SceneNode();
 
     SceneImageEffectNode* last_output { nullptr };
     auto                  resolve_effect = [&](SceneImageEffect& eff) {
         SceneImageEffectNode* effect_output { nullptr };
-        for (auto& cmd : eff.commands) {
-            auto state_it = m_command_resolve_state
-                                .try_emplace(&cmd,
-                                             EffectCommandResolveState {
-                                                 .src = cmd.src,
-                                                 .dst = cmd.dst,
-                                             })
-                                .first;
-            cmd.src       = state_it->second.src;
-            cmd.dst       = state_it->second.dst;
-            if (cmd.src == m_pingpong_a) cmd.src = ppong_a;
-            if (cmd.dst == m_pingpong_a) cmd.dst = ppong_a;
-        }
         for (auto it = eff.nodes.begin(); it != eff.nodes.end(); it++) {
             rstd_assert(it->sceneNode->HasMaterial());
-            auto& material            = *(it->sceneNode->Mesh()->Material());
-            auto [state_it, inserted] = m_node_resolve_state.try_emplace(
-                &(*it), EffectNodeResolveState { .output = it->output });
-            auto& state = state_it->second;
-            if (inserted) {
-                for (std::size_t i = 0; i < material.textures.size(); ++i) {
-                    if (material.textures[i] == m_pingpong_a)
-                        state.pingpong_input_slots.push_back(i);
-                }
-            }
-            it->output = state.output;
-            for (std::size_t slot : state.pingpong_input_slots) {
-                if (slot < material.textures.size()) material.textures[slot] = ppong_a;
-            }
-
-            auto output = rstd::cppstd::as_str(it->output).unwrap();
-            if (it->output == m_pingpong_b || output == SpecTex_Default) {
-                it->output  = ppong_b;
-                last_output = &(*it);
-            }
+            auto& material = *(it->sceneNode->Mesh()->Material());
+            if (it->output.kind == SceneEffectTargetKind::LayerNext) last_output = &(*it);
             effect_output = &(*it);
 
             {
@@ -127,7 +91,6 @@ void SceneNodeLayer::ResolveEffect(const SceneMesh& default_mesh, std::string_vi
             }
         }
         m_resolved_effects.push_back(&eff);
-        swap_pp();
         return effect_output;
     };
     for (auto& eff : m_effects) {
@@ -144,13 +107,13 @@ void SceneNodeLayer::ResolveEffect(const SceneMesh& default_mesh, std::string_vi
                              ? visible_output
                              : (published_output == nullptr ? last_output : nullptr);
     if (final_output != nullptr) {
-        final_output->output = m_final_target;
-        auto& mesh           = *(final_output->sceneNode->Mesh());
-        auto& material       = *mesh.Material();
-        material.blenmode    = m_final_blend;
-        material.depth_test  = m_final_depth_test;
-        material.depth_write = m_final_depth_write;
-        material.cull_mode   = m_final_cull_mode;
+        m_direct_final_output = final_output;
+        auto& mesh            = *(final_output->sceneNode->Mesh());
+        auto& material        = *mesh.Material();
+        material.blenmode     = m_final_blend;
+        material.depth_test   = m_final_depth_test;
+        material.depth_write  = m_final_depth_write;
+        material.cull_mode    = m_final_cull_mode;
         if (m_final_local) {
             final_output->sceneNode->SetCamera(std::string(effect_cam));
             final_output->sceneNode->SetParentAnchor(nullptr);
