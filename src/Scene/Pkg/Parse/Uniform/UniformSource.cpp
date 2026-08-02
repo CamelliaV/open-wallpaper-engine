@@ -2,6 +2,7 @@ module;
 
 module wescene.pkg.parse;
 import eigen;
+import owe.scene_audio_response;
 import rstd;
 import rstd.cppstd;
 import wescene.scene;
@@ -30,19 +31,6 @@ template<typename T>
 auto MakeArcUniformBindingLease(const Arc<T>& state) -> Option<Box<dyn<UniformBindingLease>>> {
     return Some(
         Box<dyn<UniformBindingLease>>::make(ArcUniformBindingLease<T> { .state = state.clone() }));
-}
-
-template<std::size_t N>
-void AverageResample64(slice<float> bins, rstd::array<float, N>& out) {
-    static_assert(64 % N == 0);
-    constexpr std::size_t ratio = 64 / N;
-    for (std::size_t index = 0; index < N; ++index) {
-        float sum = 0.0f;
-        for (std::size_t offset = 0; offset < ratio; ++offset) {
-            sum += std::max(0.0f, bins[usize(index * ratio + offset)]);
-        }
-        out[usize(index)] = sum / static_cast<float>(ratio);
-    }
 }
 
 float Smooth(float value) { return value * value * (3.0f - 2.0f * value); }
@@ -268,14 +256,8 @@ void UniformSceneState::SetPointerInput(double x, double y) {
 
 void UniformSceneState::SetPointerDelay(float delay) { m_pointer_delay = std::max(0.0f, delay); }
 
-void UniformSceneState::SetAudioSpectrum(slice<float> left, slice<float> right) {
-    if (left.len() != m_inputs.audio_left.len() || right.len() != m_inputs.audio_right.len()) {
-        return;
-    }
-    for (usize index {}; index < m_inputs.audio_left.len(); ++index) {
-        m_inputs.audio_left[index]  = left[index];
-        m_inputs.audio_right[index] = right[index];
-    }
+void UniformSceneState::SetAudioSpectrum(const scene_audio::Buffers& buffers) {
+    m_inputs.audio = buffers;
 }
 
 void UniformSceneState::Advance(const SceneFrame& frame) {
@@ -576,26 +558,18 @@ auto AudioUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
                                   mut_ref<dyn<UniformValueSink>> sink) const
     -> Result<empty, UniformError> {
     using Output = AudioUniformOutput;
-    UniformWriter          writer(sink);
-    const auto&            inputs = m_state->Inputs();
-    rstd::array<float, 16> audio_16_left {};
-    rstd::array<float, 16> audio_16_right {};
-    rstd::array<float, 32> audio_32_left {};
-    rstd::array<float, 32> audio_32_right {};
-    AverageResample64(inputs.audio_left.as_slice(), audio_16_left);
-    AverageResample64(inputs.audio_right.as_slice(), audio_16_right);
-    AverageResample64(inputs.audio_left.as_slice(), audio_32_left);
-    AverageResample64(inputs.audio_right.as_slice(), audio_32_right);
-    auto write_audio = [&](Output output, slice<float> values) {
+    UniformWriter writer(sink);
+    const auto&   inputs      = m_state->Inputs();
+    auto          write_audio = [&](Output output, slice<float> values) {
         if (writer.Wants(output))
             writer.Write(output, UniformValue(values.as_raw_ptr(), values.len()));
     };
-    write_audio(Output::Spectrum16Left, audio_16_left.as_slice());
-    write_audio(Output::Spectrum16Right, audio_16_right.as_slice());
-    write_audio(Output::Spectrum32Left, audio_32_left.as_slice());
-    write_audio(Output::Spectrum32Right, audio_32_right.as_slice());
-    write_audio(Output::Spectrum64Left, inputs.audio_left.as_slice());
-    write_audio(Output::Spectrum64Right, inputs.audio_right.as_slice());
+    write_audio(Output::Spectrum16Left, inputs.audio.bands16.left.as_slice());
+    write_audio(Output::Spectrum16Right, inputs.audio.bands16.right.as_slice());
+    write_audio(Output::Spectrum32Left, inputs.audio.bands32.left.as_slice());
+    write_audio(Output::Spectrum32Right, inputs.audio.bands32.right.as_slice());
+    write_audio(Output::Spectrum64Left, inputs.audio.bands64.left.as_slice());
+    write_audio(Output::Spectrum64Right, inputs.audio.bands64.right.as_slice());
     return writer.Finish();
 }
 

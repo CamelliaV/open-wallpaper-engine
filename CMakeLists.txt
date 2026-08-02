@@ -57,6 +57,10 @@ add_subdirectory(third_party)
 
 option(BUILD_WESCENE "Build the wescene (Wallpaper Engine *scene*) renderer" ON)
 option(BUILD_WEWEB   "Build the weweb (Wallpaper Engine *web*) renderer"     ON)
+option(BUILD_TESTS "Build the wescene-renderer test suite" OFF)
+if(BUILD_TESTS)
+    enable_testing()
+endif()
 option(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT
     "Install waywallen plugin files as a plugin-root bundle for CPack"
     OFF)
@@ -64,9 +68,7 @@ option(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT
 add_subdirectory(src)
 
 
-option(BUILD_TESTS "Build the wescene-renderer test suite" OFF)
 if(BUILD_WESCENE AND BUILD_TESTS)
-    enable_testing()
     add_subdirectory(tests)
 endif()
 

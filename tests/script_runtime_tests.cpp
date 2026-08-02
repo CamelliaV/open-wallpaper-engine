@@ -251,13 +251,13 @@ TEST(ScriptCompat, RegExpLegacyCapturesSurviveTimerCallbacks) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 2.0);
 }
 
-TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
+TEST(ScriptAudio, RegisterAudioBuffersUsesRequestedResolution) {
     JsRuntime   rt;
     FrameInputs fi {};
-    for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
-        fi.audio_left[i]    = static_cast<float>(i);
-        fi.audio_right[i]   = static_cast<float>(200 + i);
-        fi.audio_average[i] = static_cast<float>(100 + i);
+    for (std::size_t i = 0; i < 16; ++i) {
+        fi.audio.bands16.left.data()[i]    = static_cast<float>(i);
+        fi.audio.bands16.right.data()[i]   = static_cast<float>(200 + i);
+        fi.audio.bands16.average.data()[i] = static_cast<float>(100 + i);
     }
     rt.SetFrameInputs(fi);
 
@@ -277,19 +277,19 @@ TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
 
     rt.TickAll();
     EXPECT_DOUBLE_EQ(LastScalar(fs),
-                     16.0 * 100000000.0 + 16.0 * 1000000.0 + 161.5 * 10000.0 + 61.5 * 100.0 +
-                         261.5);
+                     16.0 * 100000000.0 + 16.0 * 1000000.0 + 115.0 * 10000.0 + 15.0 * 100.0 +
+                         215.0);
 
-    for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
-        fi.audio_left[i]    = static_cast<float>(100 + i);
-        fi.audio_right[i]   = static_cast<float>(300 + i);
-        fi.audio_average[i] = static_cast<float>(200 + i);
+    for (std::size_t i = 0; i < 16; ++i) {
+        fi.audio.bands16.left.data()[i]    = static_cast<float>(100 + i);
+        fi.audio.bands16.right.data()[i]   = static_cast<float>(300 + i);
+        fi.audio.bands16.average.data()[i] = static_cast<float>(200 + i);
     }
     rt.SetFrameInputs(fi);
     rt.TickAll();
     EXPECT_DOUBLE_EQ(LastScalar(fs),
-                     16.0 * 100000000.0 + 16.0 * 1000000.0 + 261.5 * 10000.0 + 161.5 * 100.0 +
-                         361.5);
+                     16.0 * 100000000.0 + 16.0 * 1000000.0 + 215.0 * 10000.0 + 115.0 * 100.0 +
+                         315.0);
 }
 
 TEST(ScriptAudio, RegisterAudioBuffersAcceptsResolution64Constant) {
@@ -311,8 +311,11 @@ TEST(ScriptAudio, RegisterAudioBuffersAcceptsResolution64Constant) {
 
 TEST(ScriptAudio, RegisterAudioBuffersKeepsMixedResolutionsIndependent) {
     FrameInputs fi {};
-    for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
-        fi.audio_average[i] = static_cast<float>(100 + i);
+    for (std::size_t i = 0; i < 64; ++i) {
+        fi.audio.bands64.average.data()[i] = static_cast<float>(100 + i);
+    }
+    for (std::size_t i = 0; i < 16; ++i) {
+        fi.audio.bands16.average.data()[i] = static_cast<float>(100 + i * 4 + 3);
     }
 
     {
@@ -334,15 +337,18 @@ TEST(ScriptAudio, RegisterAudioBuffersKeepsMixedResolutionsIndependent) {
         ASSERT_NE(full, nullptr);
 
         rt.TickAll();
-        EXPECT_DOUBLE_EQ(LastScalar(low), 16161.5);
+        EXPECT_DOUBLE_EQ(LastScalar(low), 16163.0);
         EXPECT_DOUBLE_EQ(LastScalar(full), 64163.0);
 
-        for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
-            fi.audio_average[i] = static_cast<float>(200 + i);
+        for (std::size_t i = 0; i < 64; ++i) {
+            fi.audio.bands64.average.data()[i] = static_cast<float>(200 + i);
+        }
+        for (std::size_t i = 0; i < 16; ++i) {
+            fi.audio.bands16.average.data()[i] = static_cast<float>(200 + i * 4 + 3);
         }
         rt.SetFrameInputs(fi);
         rt.TickAll();
-        EXPECT_DOUBLE_EQ(LastScalar(low), 16261.5);
+        EXPECT_DOUBLE_EQ(LastScalar(low), 16263.0);
         EXPECT_DOUBLE_EQ(LastScalar(full), 64263.0);
     }
 

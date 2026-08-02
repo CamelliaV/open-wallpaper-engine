@@ -1,5 +1,7 @@
 include_directories(.)
 
+add_subdirectory(Audio)
+
 if(BUILD_WESCENE)
 
 find_package(OpenGL REQUIRED)

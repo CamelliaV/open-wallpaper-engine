@@ -24,6 +24,7 @@ import wescene.rgraph;
 import wescene.scene_wallpaper;
 import wescene.pkg.parse;
 import waywallen.bridge;
+import waywallen.bridge_audio;
 import waywallen.bridge_ex_swapchain;
 import waywallen.bridge_session;
 
@@ -460,8 +461,7 @@ void signal_shutdown(HostState& s) {
 void set_audio_response_demand(HostState& s, bool active) {
     s.audio_response_demand.store(active, rstd::sync::atomic::Ordering::Release);
     if (! active && s.wp) {
-        const std::array<float, 64> silence {};
-        s.wp->setAudioSpectrum(silence, silence);
+        s.wp->endAudioResponse();
     }
     auto subscriptions = *s.subscriptions.lock().unwrap();
     if (subscriptions && ! subscriptions->set("audio", active)) {
@@ -662,23 +662,24 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         ww_bridge_event_subscriptions_applied_free(&applied);
         break;
     }
-    case WW_EVT_IN_AUDIO_SPECTRUM: {
-        ww_bridge_audio_spectrum_t audio {};
-        if (ww_bridge_audio_spectrum_from_control(&msg, &audio) != 0) break;
+    case WW_EVT_IN_AUDIO_WINDOW: {
+        owe::audio::PcmWindow audio {};
+        bool                  ended = false;
+        if (! ww_wescene::DecodeAudioWindow(msg, audio, ended)) break;
         if (! s.audio_response_demand.load(rstd::sync::atomic::Ordering::Acquire)) break;
-        auto       subscriptions = *s.subscriptions.lock().unwrap();
-        const bool fresh         = u64(audio.generation) > s.last_audio_generation ||
-                                   (u64(audio.generation) == s.last_audio_generation &&
-                                    u64(audio.sequence) > s.last_audio_sequence);
-        if (fresh && subscriptions && subscriptions->acceptsAudio(audio.subscription_revision) &&
+        auto        subscriptions = *s.subscriptions.lock().unwrap();
+        const auto& wire          = msg.u.audio_window;
+        const bool  fresh         = u64(wire.generation) > s.last_audio_generation ||
+                                    (u64(wire.generation) == s.last_audio_generation &&
+                                     u64(wire.sequence) > s.last_audio_sequence);
+        if (fresh && subscriptions && subscriptions->acceptsAudio(wire.subscription_revision) &&
             s.wp) {
-            std::array<float, 64> left {};
-            std::array<float, 64> right {};
-            std::copy_n(audio.left, left.size(), left.begin());
-            std::copy_n(audio.right, right.size(), right.begin());
-            s.wp->setAudioSpectrum(left, right);
-            s.last_audio_generation = u64(audio.generation);
-            s.last_audio_sequence   = u64(audio.sequence);
+            if (ended)
+                s.wp->endAudioResponse();
+            else
+                s.wp->setAudioPcmWindow(rstd::move(audio));
+            s.last_audio_generation = u64(wire.generation);
+            s.last_audio_sequence   = u64(wire.sequence);
         }
         break;
     }

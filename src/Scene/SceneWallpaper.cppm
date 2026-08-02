@@ -13,6 +13,7 @@ export import wescene.vulkan_render;
 export import wescene.vulkan;
 export import wescene.types;
 export import wescene.pkg.parse;
+export import owe.audio_response;
 
 using namespace rstd::prelude;
 using rstd::sync::Arc;
@@ -107,7 +108,8 @@ public:
         setAudioResponseDemandCallback(AudioResponseDemandCallback::make(rstd::move(callback)));
     }
     void setAudioResponseEnabled(bool);
-    void setAudioSpectrum(const std::array<float, 64>& left, const std::array<float, 64>& right);
+    void setAudioPcmWindow(audio::PcmWindow window);
+    void endAudioResponse();
     void setUserPropertyRaw(std::string_view, std::string);
     void setUserPropertyJson(std::string_view, Json);
     void setOnFirstFrame(FirstFrameCallback);

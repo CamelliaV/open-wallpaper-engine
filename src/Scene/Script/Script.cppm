@@ -1,6 +1,7 @@
 module;
 
 export module wescene.script;
+export import owe.scene_audio_response;
 import wescene.core;
 import wescene.json;
 import rstd;
@@ -68,18 +69,14 @@ enum class FieldKind
 // `JsRuntime::TickFieldScripts` once per frame. Mirrors the engine.* fields
 // the audio-response cluster (and the parallax cluster) actually read.
 struct FrameInputs {
-    float frametime { 0.0f };   // seconds since last frame
-    float runtime { 0.0f };     // seconds since wallpaper start
-    float time_of_day { 0.0f }; // 0..1, 0=midnight, 0.5=noon
-    float canvas_w { 1920.0f };
-    float canvas_h { 1080.0f };
-    float screen_w { 1920.0f };
-    float screen_h { 1080.0f };
-    // 64-bin audio buffers populated by the audio chain. The script bridge
-    // resamples these to the requested registerAudioBuffers() resolution.
-    std::array<float, 64> audio_left {};
-    std::array<float, 64> audio_right {};
-    std::array<float, 64> audio_average {};
+    float                frametime { 0.0f };   // seconds since last frame
+    float                runtime { 0.0f };     // seconds since wallpaper start
+    float                time_of_day { 0.0f }; // 0..1, 0=midnight, 0.5=noon
+    float                canvas_w { 1920.0f };
+    float                canvas_h { 1080.0f };
+    float                screen_w { 1920.0f };
+    float                screen_h { 1080.0f };
+    scene_audio::Buffers audio;
     // Cursor state. (cursor_x, cursor_y) is normalised canvas coords:
     // x ∈ [0,1] left-to-right, y ∈ [0,1] top-to-bottom. button bits use
     // GLFW numbering (left=0, right=1, middle=2). down is held-state,

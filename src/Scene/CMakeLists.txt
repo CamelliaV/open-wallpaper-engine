@@ -1,4 +1,15 @@
 # ---------------------------------------------------------------------------
+# owe-scene-audio-response
+# ---------------------------------------------------------------------------
+add_library(owe-scene-audio-response STATIC Audio/SceneAudioResponse.cpp)
+target_sources(owe-scene-audio-response
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Audio/SceneAudioResponse.cppm)
+target_link_libraries(owe-scene-audio-response PUBLIC owe-audio-response rstd::rstd)
+target_compile_features(owe-scene-audio-response PUBLIC cxx_std_20)
+set_property(TARGET owe-scene-audio-response PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET owe-scene-audio-response PROPERTY CXX_SCAN_FOR_MODULES ON)
+
+# ---------------------------------------------------------------------------
 # owe-load-bench
 # ---------------------------------------------------------------------------
 add_library(owe-load-bench STATIC)
@@ -79,7 +90,7 @@ add_library(owe-script STATIC Script/Script.cpp)
 target_sources(owe-script
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Script/Script.cppm)
 target_link_libraries(owe-script
-  PUBLIC  owe-base
+  PUBLIC  owe-base owe-scene-audio-response
   PRIVATE qjs)
 target_include_directories(owe-script
   PUBLIC  .. . Utils/include
@@ -161,7 +172,7 @@ target_sources(owe-parse
   PRIVATE FILE_SET internal_cxx_modules TYPE CXX_MODULES FILES
           Pkg/Parse/Scene/SceneContext.cppm)
 target_link_libraries(owe-parse
-  PUBLIC owe-base owe-load-bench owe-shader-compile owe-script
+  PUBLIC owe-base owe-load-bench owe-shader-compile owe-script owe-scene-audio-response
   PRIVATE ${LZ4_LIBRARIES} Freetype::Freetype PkgConfig::FONTCONFIG)
 target_include_directories(owe-parse
   PUBLIC  .. . Utils/include
@@ -243,6 +254,21 @@ add_library(owe-render INTERFACE)
 target_link_libraries(owe-render INTERFACE owe-rdg owe-vulkan-renderer)
 
 
+if(BUILD_TESTS)
+  add_executable(owe-scene-audio-response-tests ../../tests/SceneAudioResponseTests.cpp)
+  target_link_libraries(owe-scene-audio-response-tests PRIVATE owe-scene-audio-response)
+  target_compile_features(owe-scene-audio-response-tests PRIVATE cxx_std_20)
+  set_property(TARGET owe-scene-audio-response-tests PROPERTY CXX_SCAN_FOR_MODULES ON)
+  add_test(NAME owe-scene-audio-response-tests COMMAND owe-scene-audio-response-tests)
+
+  add_executable(owe-scene-audio-response-dump ../../tests/SceneAudioResponseDump.cpp)
+  target_link_libraries(owe-scene-audio-response-dump
+    PRIVATE owe-scene-audio-response owe-cli rstd::json wavsen::audio)
+  target_compile_features(owe-scene-audio-response-dump PRIVATE cxx_std_20)
+  set_property(TARGET owe-scene-audio-response-dump PROPERTY CXX_SCAN_FOR_MODULES ON)
+endif()
+
+
 # ---------------------------------------------------------------------------
 # owe-scene-wallpaper
 # ---------------------------------------------------------------------------
@@ -252,7 +278,8 @@ target_sources(owe-scene-wallpaper
          SceneWallpaper.cppm
          SceneUserProperty.cppm)
 target_link_libraries(owe-scene-wallpaper
-  PUBLIC owe-render owe-resource-registry owe-parse owe-script owe-load-bench wavsen::audio)
+  PUBLIC owe-render owe-resource-registry owe-parse owe-script owe-load-bench
+         owe-audio-response owe-scene-audio-response wavsen::audio)
 target_include_directories(owe-scene-wallpaper
   PUBLIC  .. . Swapchain Utils/include ../Vulkan/include
   PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)

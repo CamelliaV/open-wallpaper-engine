@@ -199,8 +199,9 @@ void AppHandler::OnContextCreated(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<C
 
     // WE web audio-response API. The page calls wallpaperRegisterAudioListener
     // to subscribe; the browser process feeds samples each tick by invoking
-    // __weweb_pushAudio with a 128-float array (64 left + 64 right, 0..1).
-    // Installed here so it exists before the page's own scripts run.
+    // __weweb_pushAudio with a 128-float array (64 left + 64 right). Values
+    // remain linear and may exceed 1 Installed here so it exists before the
+    // page's own scripts run.
     static const char kAudioApi[] =
         "(function(){"
         "  if (window.__weweb_audio_installed) return;"

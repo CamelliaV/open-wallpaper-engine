@@ -289,7 +289,7 @@ void BrowserHost::PushAudioData(const float* data, std::size_t count) {
     char buf[32];
     for (std::size_t i = 0; i < count; ++i) {
         if (i) snippet += ',';
-        std::snprintf(buf, sizeof(buf), "%.4f", static_cast<double>(data[i]));
+        std::snprintf(buf, sizeof(buf), "%.9g", static_cast<double>(data[i]));
         snippet += buf;
     }
     snippet += "]);})();";

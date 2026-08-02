@@ -6,6 +6,7 @@ module;
 
 module wescene.script;
 import eigen;
+import owe.scene_audio_response;
 import rstd;
 import rstd.log;
 import rstd.cppstd;
@@ -512,18 +513,6 @@ uint32_t NormalizeAudioResolution(int32_t requested) {
     return 64;
 }
 
-float AudioBufferValue(std::span<const float, 64> bins, uint32_t resolution, uint32_t index) {
-    if (resolution == 64) return bins[index];
-
-    const uint32_t ratio = 64 / resolution;
-    const uint32_t begin = index * ratio;
-    float          sum   = 0.0f;
-    for (uint32_t k = 0; k < ratio; ++k) {
-        sum += std::max(0.0f, bins[begin + k]);
-    }
-    return sum / static_cast<float>(ratio);
-}
-
 AudioBufferSlot& AudioBufferForResolution(EngineHostState& host, uint32_t resolution) {
     for (auto& slot : host.audio_buffers) {
         if (slot.resolution == resolution) return slot;
@@ -695,9 +684,9 @@ JSValue MakeAudioBuffer(JSContext* ctx, const FrameInputs& inputs, uint32_t reso
     JSValue average = JS_NewArray(ctx);
     JSValue buffer  = JS_NewArray(ctx);
     for (uint32_t index = 0; index < resolution; ++index) {
-        const float l = AudioBufferValue(inputs.audio_left, resolution, index);
-        const float r = AudioBufferValue(inputs.audio_right, resolution, index);
-        const float a = AudioBufferValue(inputs.audio_average, resolution, index);
+        const float l = inputs.audio.value(scene_audio::Channel::Left, resolution, index);
+        const float r = inputs.audio.value(scene_audio::Channel::Right, resolution, index);
+        const float a = inputs.audio.value(scene_audio::Channel::Average, resolution, index);
         SetAudioArrayValue(ctx, left, index, l);
         SetAudioArrayValue(ctx, right, index, r);
         SetAudioArrayValue(ctx, average, index, a);
@@ -716,9 +705,9 @@ void RefreshAudioBuffer(JSContext* ctx, const FrameInputs& inputs, const AudioBu
     JSValue average = JS_GetPropertyStr(ctx, slot.object, "average");
     JSValue buffer  = JS_GetPropertyStr(ctx, slot.object, "buffer");
     for (uint32_t index = 0; index < slot.resolution; ++index) {
-        const float l = AudioBufferValue(inputs.audio_left, slot.resolution, index);
-        const float r = AudioBufferValue(inputs.audio_right, slot.resolution, index);
-        const float a = AudioBufferValue(inputs.audio_average, slot.resolution, index);
+        const float l = inputs.audio.value(scene_audio::Channel::Left, slot.resolution, index);
+        const float r = inputs.audio.value(scene_audio::Channel::Right, slot.resolution, index);
+        const float a = inputs.audio.value(scene_audio::Channel::Average, slot.resolution, index);
         SetAudioArrayValue(ctx, left, index, l);
         SetAudioArrayValue(ctx, right, index, r);
         SetAudioArrayValue(ctx, average, index, a);

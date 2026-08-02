@@ -13,6 +13,7 @@ import wescene.json;
 import wescene.scene_wallpaper;
 import wescene.utils;
 import viewer.common;
+import viewer.audio;
 
 using namespace std;
 using namespace rstd::prelude;
@@ -345,24 +346,24 @@ int main(int argc, char** argv) {
     StdinJsonControl            stdin_control(args.stdin_json);
     wavsen::audio::AudioCapture audio_capture;
     auto                        next_audio_update = std::chrono::steady_clock::now();
+    bool                        audio_ended       = true;
     auto                        update_audio      = [&] {
         if (! audio_response_demand.load(std::memory_order_acquire)) {
             if (audio_capture.is_inited()) audio_capture.uninit();
+            if (! audio_ended) {
+                psw->endAudioResponse();
+                audio_ended = true;
+            }
             return;
         }
         if (! audio_capture.is_inited() && ! audio_capture.init()) return;
+        audio_ended    = false;
         const auto now = std::chrono::steady_clock::now();
         if (now < next_audio_update) return;
         next_audio_update = now + std::chrono::milliseconds(33);
-        wavsen::audio::AudioSpectrum spectrum;
-        if (audio_capture.snapshot(spectrum)) {
-            std::array<float, 64> left;
-            std::array<float, 64> right;
-            for (rstd::usize i {}; i < rstd::usize(64); ++i) {
-                left[i.to_primitive()]  = spectrum.left[i].to_primitive();
-                right[i.to_primitive()] = spectrum.right[i].to_primitive();
-            }
-            psw->setAudioSpectrum(left, right);
+        wavsen::audio::AudioPcmWindow window {};
+        if (audio_capture.snapshot(window)) {
+            psw->setAudioPcmWindow(viewer::ConvertAudioWindow(window));
         }
     };
 

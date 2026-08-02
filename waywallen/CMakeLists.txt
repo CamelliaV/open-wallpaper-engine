@@ -25,6 +25,7 @@ target_sources(waywallen-bridge-producer
         Bridge.cppm
         BridgeSession.cppm
         BridgeProducerCore.cppm
+        BridgeAudio.cppm
 )
 target_sources(waywallen-bridge-producer PRIVATE
     BridgeSession.cpp
@@ -34,6 +35,7 @@ target_include_directories(waywallen-bridge-producer PUBLIC .)
 target_link_libraries(waywallen-bridge-producer
     PUBLIC
         waywallen::bridge
+        owe-audio-response
         vvk::ffi::vulkan
         rstd.cppstd
 )

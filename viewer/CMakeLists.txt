@@ -10,10 +10,12 @@ add_library(viewer-common STATIC)
 target_sources(viewer-common
     PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
         Common.cppm
+        Audio.cppm
         Arg.cppm)
 target_sources(viewer-common PRIVATE Common.cpp)
 target_include_directories(viewer-common PUBLIC .)
-target_link_libraries(viewer-common PUBLIC PkgConfig::GLFW owe-cli rstd.cppstd)
+target_link_libraries(viewer-common
+    PUBLIC PkgConfig::GLFW owe-cli owe-audio-response wavsen::audio rstd.cppstd)
 target_compile_features(viewer-common PUBLIC cxx_std_20)
 set_target_properties(viewer-common PROPERTIES
     POSITION_INDEPENDENT_CODE ON

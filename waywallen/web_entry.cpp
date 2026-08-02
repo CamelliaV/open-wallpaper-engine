@@ -17,11 +17,13 @@ import rstd.argparse;
 import rstd.cppstd;
 import rstd.log;
 import owe.user_property;
+import owe.audio_response;
 import wescene.cli;
 import wescene.json;
 import vulkan;
 import weweb;
 import waywallen.bridge;
+import waywallen.bridge_audio;
 import waywallen.bridge_producer_core;
 import waywallen.web_producer_device;
 
@@ -187,10 +189,10 @@ constexpr std::string_view kRuntimeMuteKey = "__waywallen_runtime_mute";
 using BridgeSubscriptions = std::shared_ptr<ww_wescene::BridgeSubscriptionController>;
 
 struct AudioState {
-    std::array<float, 64> left {};
-    std::array<float, 64> right {};
-    rstd::time::Instant   received {};
-    bool                  primed { false };
+    owe::audio::ResponseEngine engine;
+    owe::audio::ResponseFrame  response {};
+    rstd::time::Instant        received {};
+    bool                       primed { false };
 };
 
 struct ReaderState {
@@ -229,9 +231,8 @@ void set_audio_response_demand(HostState& s, bool active) {
     {
         auto audio = s.audio.lock().unwrap();
         if (! active) {
+            audio->engine.end();
             audio->primed = false;
-            audio->left.fill(0.0f);
-            audio->right.fill(0.0f);
         }
     }
     auto subscriptions = *s.subscriptions.lock().unwrap();
@@ -456,22 +457,27 @@ void apply_control(HostState& s, ReaderState& reader, ww_bridge_control_t& msg) 
         ww_bridge_event_subscriptions_applied_free(&applied);
         break;
     }
-    case WW_EVT_IN_AUDIO_SPECTRUM: {
-        ww_bridge_audio_spectrum_t audio {};
-        if (ww_bridge_audio_spectrum_from_control(&msg, &audio) != 0) break;
+    case WW_EVT_IN_AUDIO_WINDOW: {
+        owe::audio::PcmWindow audio {};
+        bool                  ended = false;
+        if (! ww_wescene::DecodeAudioWindow(msg, audio, ended)) break;
         if (! s.audio_response_demand.load(rstd::sync::atomic::Ordering::Acquire)) break;
-        auto subscriptions = *s.subscriptions.lock().unwrap();
-        if (! subscriptions || ! subscriptions->acceptsAudio(audio.subscription_revision)) break;
-        auto generation = u64(audio.generation);
-        auto sequence   = u64(audio.sequence);
+        auto        subscriptions = *s.subscriptions.lock().unwrap();
+        const auto& wire          = msg.u.audio_window;
+        if (! subscriptions || ! subscriptions->acceptsAudio(wire.subscription_revision)) break;
+        auto generation = u64(wire.generation);
+        auto sequence   = u64(wire.sequence);
         if (generation < reader.last_audio_generation ||
             (generation == reader.last_audio_generation && sequence <= reader.last_audio_sequence))
             break;
         auto state = s.audio.lock().unwrap();
-        std::copy_n(audio.left, state->left.size(), state->left.begin());
-        std::copy_n(audio.right, state->right.size(), state->right.begin());
-        state->received              = rstd::time::Instant::now();
-        state->primed                = true;
+        if (ended) {
+            state->engine.end();
+            state->primed = false;
+        } else if (state->engine.analyze(audio, state->response)) {
+            state->received = rstd::time::Instant::now();
+            state->primed   = true;
+        }
         reader.last_audio_generation = generation;
         reader.last_audio_sequence   = sequence;
         break;
@@ -817,8 +823,10 @@ int run(int argc, char** argv) {
                 auto audio = state.audio.lock().unwrap();
                 if (audio->primed &&
                     now - audio->received <= rstd::time::Duration::from_millis(u64(250))) {
-                    std::copy(audio->left.begin(), audio->left.end(), response.begin());
-                    std::copy(audio->right.begin(), audio->right.end(), response.begin() + 64);
+                    for (std::size_t index = 0; index < 64; ++index) {
+                        response[index]      = audio->response.left[usize(index)];
+                        response[index + 64] = audio->response.right[usize(index)];
+                    }
                 }
             }
             host.PushAudioData(response.data(), response.size());

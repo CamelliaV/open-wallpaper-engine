@@ -9,6 +9,8 @@ import wescene.scene;
 import wescene.spec_names;
 
 import eigen;
+import owe.audio_response;
+import owe.scene_audio_response;
 import owe.user_property;
 import rstd;
 import rstd.bench;
@@ -45,8 +47,7 @@ class RenderMsg final {
               (SetMediaStatus, (MediaStatus status;)),
               (SetAudioResponseDemandCallback, (AudioResponseDemandCallback callback;)),
               (SetAudioResponseEnabled, (bool enabled;)),
-              (SetAudioSpectrum, (std::array<float, 64> left; std::array<float, 64> right;
-                                  rstd::time::Instant                               received;)),
+              (SetAudioPcmWindow, (audio::PcmWindow window;)), (EndAudioResponse),
               (Stop, (bool stop;)), (Draw), (SwapchainReady, (bool ready; u32 width; u32 height;)),
               (RequestPreparedPassDiagnostics, (RenderPassDiagnosticCallback cb;)), (Shutdown))
 };
@@ -327,7 +328,7 @@ public:
     void on(RenderMsg::SetMediaStatus_payload&&);
     void on(RenderMsg::SetAudioResponseDemandCallback_payload&&);
     void on(RenderMsg::SetAudioResponseEnabled_payload&&);
-    void on(RenderMsg::SetAudioSpectrum_payload&&);
+    void on(RenderMsg::SetAudioPcmWindow_payload&&);
     void on(RenderMsg::Stop_payload&&);
     void onDraw();
     void on(RenderMsg::SwapchainReady_payload&&);
@@ -397,10 +398,8 @@ private:
     bool                                m_stopped { false };
     Option<AudioResponseDemandCallback> m_audio_response_demand_callback;
     bool                                m_audio_response_enabled { true };
-    std::array<float, 64>               m_audio_left {};
-    std::array<float, 64>               m_audio_right {};
-    rstd::time::Instant                 m_audio_received {};
-    bool                                m_audio_primed { false };
+    audio::ResponseEngine               m_audio_response_engine;
+    scene_audio::ResponseProcessor      m_scene_audio_response;
     bool                                m_first_frame_ok { false };
 
     Atomic<array<float, 2>> m_mouse_pos { array<float, 2> { 0.5f, 0.5f } };
@@ -459,7 +458,11 @@ void SceneRenderController::start() {
                 RSTD_CASE_PAYLOAD(SetMediaStatus, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(SetAudioResponseDemandCallback, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(SetAudioResponseEnabled, value) { on(rstd::move(value)); }
-                RSTD_CASE_PAYLOAD(SetAudioSpectrum, value) { on(rstd::move(value)); }
+                RSTD_CASE_PAYLOAD(SetAudioPcmWindow, value) { on(rstd::move(value)); }
+                RSTD_CASE(EndAudioResponse) {
+                    m_audio_response_engine.end();
+                    m_scene_audio_response.end();
+                }
                 RSTD_CASE_PAYLOAD(Stop, value) { on(rstd::move(value)); }
                 RSTD_CASE(Draw) { onDraw(); }
                 RSTD_CASE_PAYLOAD(SwapchainReady, value) { on(rstd::move(value)); }
@@ -548,26 +551,12 @@ void SceneRenderController::onDraw() {
                 fi.cursor_x = pos[usize()];
                 fi.cursor_y = pos[usize(1)];
             }
-            fi.cursor_in_window             = cursorInWindow();
-            fi.mouse_buttons_down           = buttonsDown().to_primitive();
-            fi.mouse_buttons_pressed        = consumePressed().to_primitive();
-            fi.mouse_buttons_released       = consumeReleased().to_primitive();
-            constexpr auto kAudioStaleAfter = rstd::time::Duration::from_millis(u64(250));
-            const bool     stale = ! m_audio_primed ||
-                                   rstd::time::Instant::now() - m_audio_received > kAudioStaleAfter;
-            if (! stale) {
-                fi.audio_left  = m_audio_left;
-                fi.audio_right = m_audio_right;
-                for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
-                    fi.audio_average[i] = (fi.audio_left[i] + fi.audio_right[i]) * 0.5f;
-                }
-            }
-            if (m_uniform_input) {
-                m_uniform_input->SetAudioSpectrum(
-                    slice<float>::from_raw_parts(fi.audio_left.data(), usize(fi.audio_left.size())),
-                    slice<float>::from_raw_parts(fi.audio_right.data(),
-                                                 usize(fi.audio_right.size())));
-            }
+            fi.cursor_in_window       = cursorInWindow();
+            fi.mouse_buttons_down     = buttonsDown().to_primitive();
+            fi.mouse_buttons_pressed  = consumePressed().to_primitive();
+            fi.mouse_buttons_released = consumeReleased().to_primitive();
+            (void)m_scene_audio_response.advance(fi.frametime, fi.audio);
+            if (m_uniform_input) m_uniform_input->SetAudioSpectrum(fi.audio);
             m_scene->TickNodeFieldAnimations();
             owe::script::TickSceneScripts(*m_scene, fi);
             m_scene->TickCameraPaths();
@@ -746,10 +735,8 @@ void SceneRenderController::on(RenderMsg::SetScene_payload&& m) {
     m_uniform_input_owner = Some(rstd::move(m.uniform_input));
     m_scene               = m_scene_owner->get();
     m_uniform_input       = m_uniform_input_owner->as_ptr().as_raw_ptr();
-    m_audio_primed        = false;
-    m_first_frame_ok      = false;
-    m_audio_left.fill(0.0f);
-    m_audio_right.fill(0.0f);
+    m_scene_audio_response.end();
+    m_first_frame_ok = false;
     if (m_scene) {
         m_scene->AudioDemandMut()->SetEnabled(m_audio_response_enabled);
         m_scene->AudioDemandMut()->SetCallback(
@@ -813,19 +800,16 @@ void SceneRenderController::on(RenderMsg::SetAudioResponseDemandCallback_payload
 void SceneRenderController::on(RenderMsg::SetAudioResponseEnabled_payload&& m) {
     m_audio_response_enabled = m.enabled;
     if (m_scene) m_scene->AudioDemandMut()->SetEnabled(m.enabled);
+    if (! m.enabled) {
+        m_audio_response_engine.end();
+        m_scene_audio_response.end();
+    }
 }
 
-void SceneRenderController::on(RenderMsg::SetAudioSpectrum_payload&& m) {
-    auto sanitize = [](float value) {
-        if (! std::isfinite(value)) return 0.0f;
-        return std::clamp(value, 0.0f, 1.0f);
-    };
-    for (std::size_t i = 0; i < m_audio_left.size(); ++i) {
-        m_audio_left[i]  = sanitize(m.left[i]);
-        m_audio_right[i] = sanitize(m.right[i]);
-    }
-    m_audio_received = m.received;
-    m_audio_primed   = true;
+void SceneRenderController::on(RenderMsg::SetAudioPcmWindow_payload&& m) {
+    audio::ResponseFrame response {};
+    if (! m_audio_response_engine.analyze(m.window, response)) return;
+    m_scene_audio_response.submit(rstd::move(response));
 }
 
 void SceneRenderController::on(RenderMsg::Init_payload&& m) {
@@ -1502,10 +1486,11 @@ void SceneWallpaper::setAudioResponseEnabled(bool enabled) {
     m_runtime->post(RenderMsg::SetAudioResponseEnabled(enabled));
 }
 
-void SceneWallpaper::setAudioSpectrum(const std::array<float, 64>& left,
-                                      const std::array<float, 64>& right) {
-    m_runtime->post(RenderMsg::SetAudioSpectrum(left, right, rstd::time::Instant::now()));
+void SceneWallpaper::setAudioPcmWindow(audio::PcmWindow window) {
+    m_runtime->post(RenderMsg::SetAudioPcmWindow(rstd::move(window)));
 }
+
+void SceneWallpaper::endAudioResponse() { m_runtime->post(RenderMsg::EndAudioResponse()); }
 
 void SceneWallpaper::setUserPropertyRaw(std::string_view name, std::string value) {
     m_runtime->post(MainMsg::SetUserProperty(std::string(name), RawUserProperty(value)));

@@ -4,10 +4,12 @@
 
 import rstd.argparse;
 import rstd.cppstd;
+import owe.audio_response;
 import wescene.cli;
 import weweb;
 import wavsen.audio;
 import viewer.common;
+import viewer.audio;
 import viewer.web;
 
 namespace
@@ -247,14 +249,14 @@ int main(int argc, char** argv) {
     glfwSetScrollCallback(window, OnScroll);
     glfwSetWindowFocusCallback(window, OnFocus);
 
-    // Audio-response capture (system default-sink monitor → page listeners).
+    rstd::sync::atomic::Atomic<bool> audio_response_demand { false };
+    host.SetAudioResponseDemandCallback([&audio_response_demand](bool active) {
+        audio_response_demand.store(active, rstd::sync::atomic::Ordering::Release);
+    });
+
     wavsen::audio::AudioCapture audio_capture;
-    if (! audio_capture.init()) {
-        std::cerr << "webviewer: audio capture init failed; "
-                     "audio response disabled\n";
-    }
-    wavsen::audio::AudioSpectrum audio_spec;
-    unsigned                     audio_tick = 0;
+    owe::audio::ResponseEngine  audio_response;
+    unsigned                    audio_tick = 0;
 
     // Main loop. ~60Hz nominal. CefDoMessageLoopWork is cheap; the
     // Vulkan FIFO present pacing also throttles us.
@@ -262,14 +264,24 @@ int main(int argc, char** argv) {
         glfwPollEvents();
         host.Pump();
 
-        // ~30 Hz audio push; wavsen is mono 64-bin, WE web wants 128 (L+R).
+        if (! audio_response_demand.load(rstd::sync::atomic::Ordering::Acquire)) {
+            if (audio_capture.is_inited()) audio_capture.uninit();
+            audio_response.end();
+        } else {
+            if (! audio_capture.is_inited() && ! audio_capture.init()) {
+                std::cerr << "webviewer: audio capture init failed\n";
+            }
+        }
         if (audio_capture.is_inited() && (audio_tick++ & 1u) == 0) {
-            if (audio_capture.snapshot(audio_spec)) {
+            wavsen::audio::AudioPcmWindow captured {};
+            owe::audio::ResponseFrame     response {};
+            auto                          window = owe::audio::PcmWindow {};
+            if (audio_capture.snapshot(captured)) window = viewer::ConvertAudioWindow(captured);
+            if (window.frames != 0 && audio_response.analyze(window, response)) {
                 std::array<float, 128> arr {};
                 for (std::size_t i = 0; i < 64; ++i) {
-                    const auto value = audio_spec.bins[rstd::usize(i)].to_primitive();
-                    arr[i]           = value;
-                    arr[64 + i]      = value;
+                    arr[i]      = response.left[rstd::usize(i)];
+                    arr[64 + i] = response.right[rstd::usize(i)];
                 }
                 host.PushAudioData(arr.data(), arr.size());
             }

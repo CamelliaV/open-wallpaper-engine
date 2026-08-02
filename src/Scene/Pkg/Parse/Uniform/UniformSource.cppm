@@ -1,4 +1,5 @@
 export module wescene.pkg.parse:uniform_source;
+export import owe.scene_audio_response;
 import rstd;
 import rstd.cppstd;
 import wescene.json;
@@ -189,10 +190,9 @@ struct UniformNodeState {
 };
 
 struct UniformFrameInputs {
-    array<float, 2>  pointer { 0.5f, 0.5f };
-    array<float, 2>  pointer_last { 0.5f, 0.5f };
-    array<float, 64> audio_left {};
-    array<float, 64> audio_right {};
+    array<float, 2>      pointer { 0.5f, 0.5f };
+    array<float, 2>      pointer_last { 0.5f, 0.5f };
+    scene_audio::Buffers audio;
 };
 
 class UniformSceneState {
@@ -214,7 +214,7 @@ public:
     void SetOrtho(float width, float height) { m_ortho = { width, height }; }
     void SetPointerInput(double, double);
     void SetPointerDelay(float);
-    void SetAudioSpectrum(slice<float>, slice<float>);
+    void SetAudioSpectrum(const scene_audio::Buffers&);
     void Advance(const SceneFrame&);
     void ApplyUserProperty(std::string_view, const Json&);
     auto AcquireAudioResponse() const -> Box<dyn<UniformBindingLease>> {
@@ -246,8 +246,8 @@ public:
     explicit UniformRuntimeInput(Arc<UniformSceneState> state): m_state(rstd::move(state)) {}
 
     void SetPointerInput(double x, double y) { m_state->SetPointerInput(x, y); }
-    void SetAudioSpectrum(slice<float> left, slice<float> right) {
-        m_state->SetAudioSpectrum(left, right);
+    void SetAudioSpectrum(const scene_audio::Buffers& buffers) {
+        m_state->SetAudioSpectrum(buffers);
     }
 
 private:

@@ -235,14 +235,11 @@ TEST(TransformUniformSource, UsesConfiguredEyePositionBeforePerspectiveCamera) {
 
 TEST(AudioUniformSource, ExposesLogicalSpectrumValues) {
     auto state = Arc<owe::UniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
-    rstd::array<float, 64> left {};
-    rstd::array<float, 64> right {};
+    owe::scene_audio::Buffers buffers {};
     for (usize band {}; band < usize(16); ++band) {
-        for (usize offset {}; offset < usize(4); ++offset) {
-            left[band * usize(4) + offset] = static_cast<float>(band.to_primitive() + 1);
-        }
+        buffers.bands16.left[band] = static_cast<float>(band.to_primitive() + 1);
     }
-    state->SetAudioSpectrum(left.as_slice(), right.as_slice());
+    state->SetAudioSpectrum(buffers);
     owe::AudioUniformSource source(state.clone());
 
     scene_test::ShapeSink shape_sink_impl;
