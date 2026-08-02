@@ -5,6 +5,7 @@ module;
 export module wescene.resource_registry:resource_key;
 import rstd;
 import rstd.cppstd;
+import wescene.resource;
 import wescene.types;
 import wescene.vulkan;
 
@@ -14,7 +15,7 @@ export namespace owe::vulkan
 {
 
 struct PipelineResourceRequest {
-    std::vector<DescriptorSetInfo>                 descriptor_sets;
+    resource::PipelineLayoutHandle                 pipeline_layout;
     std::vector<VkVertexInputBindingDescription>   vertex_bindings;
     std::vector<VkVertexInputAttributeDescription> vertex_attrs;
     std::vector<Uni_ShaderSpv>                     shader_stages;
@@ -104,7 +105,7 @@ struct RenderPassResourceDesc {
 };
 
 struct PipelineResourceDesc {
-    std::vector<DescriptorSetInfo>                 descriptor_sets;
+    resource::PipelineLayoutHandle                 pipeline_layout;
     std::vector<VkVertexInputBindingDescription>   vertex_bindings;
     std::vector<VkVertexInputAttributeDescription> vertex_attrs;
     std::vector<ShaderSpv>                         shader_stages;
@@ -315,34 +316,6 @@ inline void WritePipelineShaderStages(PipelineKeyWriter&         writer,
     }
 }
 
-inline void WritePipelineDescriptorSets(PipelineKeyWriter&                 writer,
-                                        std::span<const DescriptorSetInfo> sets) {
-    writer.writeArraySize(sets.size());
-    for (const auto& set : sets) {
-        writer.writeBool(set.push_descriptor);
-        auto bindings = set.bindings;
-        std::sort(bindings.begin(), bindings.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.binding < rhs.binding;
-        });
-        writer.writeArraySize(bindings.size());
-        for (const auto& binding : bindings) {
-            writer.writeU32(binding.binding);
-            WritePipelineScalar(writer, binding.descriptorType);
-            writer.writeU32(binding.descriptorCount);
-            writer.writeU32(binding.stageFlags);
-            writer.writeArraySize(binding.pImmutableSamplers != nullptr
-                                      ? static_cast<std::size_t>(binding.descriptorCount)
-                                      : std::size_t { 0 });
-            if (binding.pImmutableSamplers != nullptr) {
-                for (uint32_t i = 0; i < binding.descriptorCount; ++i) {
-                    writer.writeU64(static_cast<std::uint64_t>(
-                        reinterpret_cast<std::uintptr_t>(binding.pImmutableSamplers[i])));
-                }
-            }
-        }
-    }
-}
-
 inline void WritePipelineVertexInput(PipelineKeyWriter&                                 writer,
                                      std::span<const VkVertexInputBindingDescription>   bindings,
                                      std::span<const VkVertexInputAttributeDescription> attrs) {
@@ -510,7 +483,7 @@ inline PipelineResourceDesc MakePipelineResourceDesc(const PipelineResourceReque
     }
 
     return PipelineResourceDesc {
-        .descriptor_sets          = request.descriptor_sets,
+        .pipeline_layout          = request.pipeline_layout,
         .vertex_bindings          = request.vertex_bindings,
         .vertex_attrs             = request.vertex_attrs,
         .shader_stages            = std::move(shader_stages),
@@ -596,12 +569,13 @@ inline RenderPassCacheKey MakeRenderPassCacheKey(const RenderPassResourceDesc& d
 
 inline PipelineCacheKey MakePipelineCacheKey(const PipelineResourceDesc& desc) {
     PipelineKeyWriter writer;
-    writer.writeString("pipeline-v1");
+    writer.writeString("pipeline-v2");
     writer.writeU32(desc.create_flags);
     writer.writeU32(desc.subpass);
     WriteCacheKey(writer, MakeRenderPassCacheKey(desc.render_pass));
     WritePipelineShaderStages(writer, desc.shader_stages);
-    WritePipelineDescriptorSets(writer, desc.descriptor_sets);
+    writer.writeU64(desc.pipeline_layout.index.to_primitive());
+    writer.writeU64(desc.pipeline_layout.generation.to_primitive());
     WritePipelineVertexInput(writer, desc.vertex_bindings, desc.vertex_attrs);
     WritePipelineInputAssembly(writer, desc);
     WritePipelineViewportState(writer, desc);

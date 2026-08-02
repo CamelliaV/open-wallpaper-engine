@@ -169,8 +169,7 @@ public:
 
     static auto CanonicalSchema(const vulkan::DescriptorSetInfo& info)
         -> Result<DescriptorSetSchema, resource::ResourceError> {
-        auto bindings =
-            rstd::vec::Vec<DescriptorBindingSchema>::with_capacity(usize(info.bindings.size()));
+        auto bindings = rstd::vec::Vec<DescriptorBindingSchema>::with_capacity(info.bindings.len());
         for (const auto& binding : info.bindings) {
             if (binding.pImmutableSamplers != nullptr) {
                 return Err(resource::ResourceError {
@@ -230,14 +229,153 @@ struct DescriptorBufferBinding {
     VkDeviceSize   size { 0 };
 };
 
+struct DescriptorSetPacketKey {
+    resource::DescriptorLayoutHandle layout;
+    Option<DescriptorBufferBinding>  buffer;
+
+    friend bool operator==(const DescriptorSetPacketKey& lhs, const DescriptorSetPacketKey& rhs) {
+        if (lhs.layout != rhs.layout || lhs.buffer.is_some() != rhs.buffer.is_some()) return false;
+        if (lhs.buffer.is_none()) return true;
+        return lhs.buffer->binding == rhs.buffer->binding &&
+               lhs.buffer->buffer == rhs.buffer->buffer &&
+               lhs.buffer->offset == rhs.buffer->offset && lhs.buffer->size == rhs.buffer->size;
+    }
+};
+
+} // namespace owe::resource_registry
+
+export namespace rstd
+{
+
+template<>
+struct Impl<hash::Hash, owe::resource_registry::DescriptorSetPacketKey>
+    : ImplBase<owe::resource_registry::DescriptorSetPacketKey> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        const auto& key = this->self();
+        hash::hash_into(key.layout, state);
+        hash::hash_into(key.buffer.is_some(), state);
+        if (key.buffer.is_none()) return;
+        hash::hash_into(key.buffer->binding, state);
+        hash::hash_into(reinterpret_cast<rstd::uintptr_t>(key.buffer->buffer), state);
+        hash::hash_into(key.buffer->offset, state);
+        hash::hash_into(key.buffer->size, state);
+    }
+};
+
+} // namespace rstd
+
+export namespace owe::resource_registry
+{
+
+struct DescriptorBindingRecordState {
+    struct BoundSet {
+        rstd::uint32_t                   set_index { 0 };
+        resource::DescriptorLayoutHandle layout;
+        VkDescriptorSet                  set { VK_NULL_HANDLE };
+    };
+
+    bool BindRequired(rstd::uint32_t set_index, resource::DescriptorLayoutHandle layout,
+                      VkDescriptorSet set) {
+        for (const auto& bound : m_bound) {
+            if (bound.set_index != set_index) continue;
+            if (bound.layout == layout && bound.set == set) return false;
+            break;
+        }
+        InvalidateFrom(set_index);
+        m_bound.push(BoundSet {
+            .set_index = set_index,
+            .layout    = layout,
+            .set       = set,
+        });
+        return true;
+    }
+
+    void UsePipeline(resource::PipelineLayoutHandle          pipeline,
+                     slice<resource::DescriptorLayoutHandle> descriptor_layouts,
+                     rstd::uint64_t                          push_constant_identity) {
+        if (m_pipeline.is_some() && *m_pipeline == pipeline) return;
+
+        rstd::uint32_t incompatible_from {};
+        if (m_pipeline.is_some() && m_push_constant_identity == push_constant_identity) {
+            auto common = rstd::cmp::min(m_descriptor_layouts.len(), descriptor_layouts.len());
+            incompatible_from = static_cast<rstd::uint32_t>(common.to_primitive());
+            bool compatible   = true;
+            for (usize index {}; index < common; ++index) {
+                if (m_descriptor_layouts[index] == descriptor_layouts[index]) continue;
+                incompatible_from = static_cast<rstd::uint32_t>(index.to_primitive());
+                compatible        = false;
+                break;
+            }
+            if (compatible && common == m_descriptor_layouts.len() &&
+                common == descriptor_layouts.len()) {
+                incompatible_from = rstd::uint32_t(-1);
+            }
+        }
+        if (incompatible_from != rstd::uint32_t(-1)) InvalidateFrom(incompatible_from);
+
+        m_pipeline = Some(resource::PipelineLayoutHandle {
+            .index      = pipeline.index,
+            .generation = pipeline.generation,
+        });
+        m_descriptor_layouts.clear();
+        m_descriptor_layouts.reserve(descriptor_layouts.len());
+        for (const auto& layout : descriptor_layouts) {
+            m_descriptor_layouts.push(resource::DescriptorLayoutHandle {
+                .index      = layout.index,
+                .generation = layout.generation,
+            });
+        }
+        m_push_constant_identity = push_constant_identity;
+    }
+
+    void Push(rstd::uint32_t set_index) { InvalidateFrom(set_index); }
+
+    void Reset() {
+        m_bound.clear();
+        m_pipeline = None();
+        m_descriptor_layouts.clear();
+        m_push_constant_identity = 0;
+    }
+
+private:
+    void InvalidateFrom(rstd::uint32_t set_index) {
+        auto retained = rstd::vec::Vec<BoundSet>::with_capacity(m_bound.len());
+        for (const auto& bound : m_bound) {
+            if (bound.set_index < set_index) {
+                retained.push(BoundSet {
+                    .set_index = bound.set_index,
+                    .layout    = bound.layout,
+                    .set       = bound.set,
+                });
+            }
+        }
+        m_bound = rstd::move(retained);
+    }
+
+    rstd::vec::Vec<BoundSet>                         m_bound;
+    Option<resource::PipelineLayoutHandle>           m_pipeline;
+    rstd::vec::Vec<resource::DescriptorLayoutHandle> m_descriptor_layouts;
+    rstd::uint64_t                                   m_push_constant_identity {};
+};
+
 enum class DescriptorBindingBackend
 {
     Push,
     Set,
 };
 
+enum class DescriptorBindingReuse
+{
+    Exclusive,
+    Shared,
+};
+
 struct PreparedDescriptorBinding {
     resource::DescriptorBindingHandle      handle;
+    resource::DescriptorLayoutHandle       layout;
+    rstd::uint32_t                         set_index { 0 };
     DescriptorBindingBackend               backend { DescriptorBindingBackend::Push };
     rstd::vec::Vec<DescriptorImageBinding> images;
     Option<DescriptorBufferBinding>        buffer;
@@ -252,11 +390,13 @@ struct PreparedDescriptorBinding {
             });
         }
         return PreparedDescriptorBinding {
-            .handle  = handle,
-            .backend = backend,
-            .images  = rstd::move(cloned_images),
-            .buffer  = buffer,
-            .set     = set.is_some() ? Some(set->clone()) : None(),
+            .handle    = handle,
+            .layout    = layout,
+            .set_index = set_index,
+            .backend   = backend,
+            .images    = rstd::move(cloned_images),
+            .buffer    = buffer,
+            .set       = set.is_some() ? Some(set->clone()) : None(),
         };
     }
 
@@ -323,18 +463,21 @@ struct PreparedDescriptorBinding {
         return Ok(empty {});
     }
 
-    void Record(vvk::CommandBuffer& command, VkPipelineLayout layout) const {
+    void Record(vvk::CommandBuffer& command, VkPipelineLayout pipeline_layout,
+                DescriptorBindingRecordState& state) const {
         if (backend == DescriptorBindingBackend::Set) {
             if (set.is_none() || ! set->valid()) return;
             auto descriptor_set = set->handle;
+            if (! state.BindRequired(set_index, layout, descriptor_set)) return;
             command.BindDescriptorSets(
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
-                layout,
-                0,
+                pipeline_layout,
+                set_index,
                 slice<VkDescriptorSet>::from_raw_parts(&descriptor_set, usize(1)),
                 {});
             return;
         }
+        state.Push(set_index);
         for (const auto& binding : images) {
             VkDescriptorImageInfo image {
                 .sampler     = binding.image.sampler,
@@ -350,7 +493,8 @@ struct PreparedDescriptorBinding {
                 .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .pImageInfo      = &image,
             };
-            command.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, write);
+            command.PushDescriptorSetKHR(
+                VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, set_index, write);
         }
         if (buffer.is_none()) return;
 
@@ -368,14 +512,15 @@ struct PreparedDescriptorBinding {
             .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .pBufferInfo     = &info,
         };
-        command.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, write);
+        command.PushDescriptorSetKHR(
+            VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, set_index, write);
     }
 };
 
 class DescriptorSystem {
 public:
-    auto PreparePush(rstd::slice<DescriptorImageBinding> images,
-                     Option<DescriptorBufferBinding>     buffer) -> PreparedDescriptorBinding {
+    auto PreparePush(rstd::uint32_t set_index, rstd::slice<DescriptorImageBinding> images,
+                     Option<DescriptorBufferBinding> buffer) -> PreparedDescriptorBinding {
         auto prepared_images = rstd::vec::Vec<DescriptorImageBinding>::with_capacity(images.len());
         for (usize index = usize(); index < images.len(); ++index) {
             prepared_images.push(DescriptorImageBinding {
@@ -389,18 +534,52 @@ public:
                     .index      = m_next_index++,
                     .generation = m_generation,
                 },
-            .backend = DescriptorBindingBackend::Push,
-            .images  = rstd::move(prepared_images),
-            .buffer  = buffer,
+            .set_index = set_index,
+            .backend   = DescriptorBindingBackend::Push,
+            .images    = rstd::move(prepared_images),
+            .buffer    = buffer,
         };
     }
 
-    auto Prepare(const vulkan::Device& device, const DescriptorLayoutEntry& layout,
-                 rstd::slice<DescriptorImageBinding> images, Option<DescriptorBufferBinding> buffer)
+    auto Prepare(const vulkan::Device& device, rstd::uint32_t set_index,
+                 const DescriptorLayoutEntry& layout, rstd::slice<DescriptorImageBinding> images,
+                 Option<DescriptorBufferBinding> buffer, DescriptorBindingReuse reuse)
         -> Result<PreparedDescriptorBinding, resource::ResourceError> {
-        auto prepared = PreparePush(images, buffer);
+        for (const auto& image : images) {
+            if (! HasBinding(
+                    layout.schema, image.binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::MissingDefinition,
+                    .message = rstd::format("descriptor image binding {} is outside the layout",
+                                            image.binding),
+                });
+            }
+        }
+        if (buffer.is_some() &&
+            ! HasBinding(layout.schema, buffer->binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::MissingDefinition,
+                .message = rstd::format("descriptor buffer binding {} is outside the layout",
+                                        buffer->binding),
+            });
+        }
+        auto prepared   = PreparePush(set_index, images, buffer);
+        prepared.layout = layout.handle;
         if (layout.schema.push_descriptor) return Ok(rstd::move(prepared));
         prepared.backend = DescriptorBindingBackend::Set;
+        prepared.layout  = layout.handle;
+
+        Option<DescriptorSetPacketKey> cache_key = None();
+        if (reuse == DescriptorBindingReuse::Shared && images.is_empty()) {
+            cache_key = Some(DescriptorSetPacketKey {
+                .layout = layout.handle,
+                .buffer = buffer,
+            });
+            if (auto cached = m_packets.get(*cache_key); cached.is_some()) {
+                prepared.set = Some((**cached).clone());
+                return Ok(rstd::move(prepared));
+            }
+        }
 
         auto allocated = AllocateSet(device, *layout.layout);
         if (allocated.is_err()) return Err(rstd::move(allocated).unwrap_err_unchecked());
@@ -447,10 +626,14 @@ public:
                 .message = rstd::format("update descriptor set failed"),
             });
         }
+        if (cache_key.is_some()) {
+            (void)m_packets.insert(rstd::move(*cache_key), prepared.set->clone());
+        }
         return Ok(rstd::move(prepared));
     }
 
     void Reset() {
+        m_packets.clear();
         m_pool       = None();
         m_next_index = u64();
         ++m_generation;
@@ -458,6 +641,16 @@ public:
     }
 
 private:
+    static bool HasBinding(const DescriptorSetSchema& schema, rstd::uint32_t binding,
+                           VkDescriptorType type) {
+        for (const auto& candidate : schema.bindings) {
+            if (candidate.binding != binding) continue;
+            return candidate.descriptor_type == static_cast<rstd::uint32_t>(type) &&
+                   candidate.descriptor_count > 0;
+        }
+        return false;
+    }
+
     auto AllocateSet(const vulkan::Device& device, VkDescriptorSetLayout layout)
         -> Result<vvk::DescriptorSetLease, resource::ResourceError> {
         if (m_pool.is_none()) {
@@ -506,9 +699,10 @@ private:
         return Ok(rstd::move(*created.arena));
     }
 
-    Option<rstd::sync::Arc<vvk::DescriptorArenaGeneration>> m_pool;
-    u64                                                     m_generation { 1 };
-    u64                                                     m_next_index { 0 };
+    Option<rstd::sync::Arc<vvk::DescriptorArenaGeneration>>                     m_pool;
+    rstd::collections::HashMap<DescriptorSetPacketKey, vvk::DescriptorSetLease> m_packets;
+    u64                                                                         m_generation { 1 };
+    u64                                                                         m_next_index { 0 };
 };
 
 } // namespace owe::resource_registry

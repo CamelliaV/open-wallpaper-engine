@@ -197,12 +197,25 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
 
     device.m_graphics_queue.handle = device.m_device.GetQueue(device.m_graphics_queue.family_index);
     device.m_present_queue.handle  = device.m_device.GetQueue(device.m_present_queue.family_index);
-    device.m_capabilities          = DeviceCapabilities {
-        .timeline_semaphore = true,
-        .synchronization2   = enable_sync2,
-        .push_descriptor    = exists(tested_exts, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
-        .memory_budget      = exists(tested_exts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME),
-        .external_memory_fd = exists(tested_exts, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
+    rstd::uint32_t max_push_descriptors {};
+    if (exists(tested_exts, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
+        VkPhysicalDevicePushDescriptorPropertiesKHR push_properties {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES_KHR,
+        };
+        VkPhysicalDeviceProperties2 properties {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            .pNext = &push_properties,
+        };
+        device.m_gpu.GetProperties2KHR(properties);
+        max_push_descriptors = push_properties.maxPushDescriptors;
+    }
+    device.m_capabilities = DeviceCapabilities {
+        .timeline_semaphore   = true,
+        .synchronization2     = enable_sync2,
+        .push_descriptor      = exists(tested_exts, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
+        .max_push_descriptors = max_push_descriptors,
+        .memory_budget        = exists(tested_exts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME),
+        .external_memory_fd   = exists(tested_exts, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
         .external_memory_dma_buf =
             exists(tested_exts, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME),
         .drm_format_modifier = exists(tested_exts, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME),

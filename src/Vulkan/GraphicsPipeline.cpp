@@ -148,12 +148,6 @@ GraphicsPipeline& GraphicsPipeline::addStage(Uni_ShaderSpv&& spv) {
     return *this;
 }
 
-GraphicsPipeline&
-GraphicsPipeline::setDescriptorSetLayouts(std::span<const VkDescriptorSetLayout> layouts) {
-    m_descriptor_set_layouts.assign(layouts.begin(), layouts.end());
-    return *this;
-}
-
 GraphicsPipeline& GraphicsPipeline::addInputAttributeDescription(
     std::span<const VkVertexInputAttributeDescription> attrs) {
     for (auto& a : attrs) m_input_attr_descriptions.push_back(a);
@@ -191,7 +185,7 @@ GraphicsPipeline& GraphicsPipeline::setSampleCount(VkSampleCountFlagBits s) {
     return *this;
 }
 
-bool GraphicsPipeline::create(const Device& device, VkRenderPass pass,
+bool GraphicsPipeline::create(const Device& device, VkRenderPass pass, VkPipelineLayout layout,
                               PipelineParameters& pipeline) {
     VkPipelineDynamicStateCreateInfo dynamic_info {
         .sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -199,15 +193,7 @@ bool GraphicsPipeline::create(const Device& device, VkRenderPass pass,
         .dynamicStateCount = static_cast<rstd::uint32_t>(m_dynamic_states.size()),
         .pDynamicStates    = m_dynamic_states.data()
     };
-    {
-        VkPipelineLayoutCreateInfo ci {
-            .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-            .pNext          = nullptr,
-            .setLayoutCount = static_cast<rstd::uint32_t>(m_descriptor_set_layouts.size()),
-            .pSetLayouts    = m_descriptor_set_layouts.data(),
-        };
-        VVK_CHECK(device.handle().CreatePipelineLayout(ci, pipeline.layout));
-    }
+    pipeline.layout = layout;
 
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
     std::vector<vvk::ShaderModule>               shader_modules;
@@ -252,7 +238,7 @@ bool GraphicsPipeline::create(const Device& device, VkRenderPass pass,
         .pDepthStencilState  = &depth,
         .pColorBlendState    = &m_color,
         .pDynamicState       = &dynamic_info,
-        .layout              = *pipeline.layout,
+        .layout              = pipeline.layout,
         .renderPass          = pass,
         .subpass             = m_subpass,
     };

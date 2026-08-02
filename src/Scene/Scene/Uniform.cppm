@@ -185,6 +185,19 @@ struct UniformSourceAttachment {
     rstd::int32_t   priority { 0 };
 };
 
+enum class UniformBlockScope : rstd::uint8_t
+{
+    Shared,
+    Local,
+};
+
+struct UniformBlockDefinition {
+    u64                          identity {};
+    String                       name;
+    UniformBlockScope            scope { UniformBlockScope::Local };
+    Vec<UniformSourceAttachment> sources;
+};
+
 struct UniformValueShape {
     UniformScalarType scalar { UniformScalarType::Float32 };
     UniformValueKind  kind { UniformValueKind::Linear };
@@ -481,10 +494,37 @@ public:
         return found.is_some() ? (**found).as_slice() : slice<UniformSourceAttachment> {};
     }
 
+    bool RegisterBlock(UniformBlockDefinition definition) {
+        if (definition.identity == u64() || definition.name.is_empty()) return false;
+        for (const auto& attachment : definition.sources) {
+            if (Resolve(attachment.source).is_none()) return false;
+        }
+        auto existing = m_blocks.get(definition.identity);
+        if (existing.is_some()) {
+            if ((**existing).name != definition.name || (**existing).scope != definition.scope ||
+                (**existing).sources.len() != definition.sources.len()) {
+                return false;
+            }
+            for (usize index {}; index < definition.sources.len(); ++index) {
+                const auto& lhs = (**existing).sources[index];
+                const auto& rhs = definition.sources[index];
+                if (lhs.source != rhs.source || lhs.priority != rhs.priority) return false;
+            }
+            return true;
+        }
+        (void)m_blocks.insert(definition.identity, rstd::move(definition));
+        return true;
+    }
+
+    auto ResolveBlock(u64 identity) const -> Option<ref<UniformBlockDefinition>> {
+        return m_blocks.get(identity);
+    }
+
     void Reset() {
         m_sources.clear();
         m_global_sources.clear();
         m_node_sources.clear();
+        m_blocks.clear();
         ++m_generation;
         if (m_generation == u32()) ++m_generation;
     }
@@ -510,6 +550,7 @@ private:
     Vec<Box<dyn<UniformSource>>>               m_sources;
     Vec<UniformSourceAttachment>               m_global_sources;
     HashMap<u64, Vec<UniformSourceAttachment>> m_node_sources;
+    HashMap<u64, UniformBlockDefinition>       m_blocks;
     u32                                        m_generation { 1 };
 };
 

@@ -55,6 +55,11 @@ auto SceneUniformBindingPrepareContext::ResolveSource(UniformSourceId source) co
     return m_scene->Resolve(source);
 }
 
+auto SceneUniformBindingPrepareContext::ResolveBlock(u64 identity) const
+    -> Option<ref<UniformBlockDefinition>> {
+    return m_scene->ResolveUniformBlock(identity);
+}
+
 namespace
 {
 
@@ -161,9 +166,10 @@ private:
     ShaderMatrixAbi            m_matrix_abi;
 };
 
+template<typename Binding>
 class SourceValueWriter {
 public:
-    SourceValueWriter(const UniformBufferBinding& binding, const BoundUniformSource& source)
+    SourceValueWriter(const Binding& binding, const BoundUniformSource& source)
         : m_binding(binding), m_source(source) {}
 
     bool Wants(UniformOutputId output) const {
@@ -194,8 +200,8 @@ public:
     }
 
 private:
-    const UniformBufferBinding& m_binding;
-    const BoundUniformSource&   m_source;
+    const Binding&            m_binding;
+    const BoundUniformSource& m_source;
 };
 
 class ResourceSnapshot {
@@ -251,6 +257,9 @@ public:
         : m_frame(frame),
           m_resources(dyn<UniformResourceView>::from_ref(resources)),
           m_render_view(render_view) {}
+    UpdateContext(ref<SceneFrame> frame, ref<dyn<UniformResourceView>> resources,
+                  SceneRenderViewKind render_view)
+        : m_frame(frame), m_resources(resources), m_render_view(render_view) {}
 
     auto Frame() const -> ref<SceneFrame> { return m_frame; }
     auto Resources() const -> ref<dyn<UniformResourceView>> { return m_resources; }
@@ -260,6 +269,13 @@ private:
     ref<SceneFrame>               m_frame;
     ref<dyn<UniformResourceView>> m_resources;
     SceneRenderViewKind           m_render_view;
+};
+
+class EmptyResourceView {
+public:
+    auto Texture(usize) const -> Option<UniformTextureView> { return None(); }
+    auto Viewport() const -> rstd::array<float, 2> { return { 0.0f, 0.0f }; }
+    auto TexelSize() const -> rstd::array<float, 2> { return { 0.0f, 0.0f }; }
 };
 
 } // namespace detail
@@ -617,6 +633,118 @@ auto UniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         fr
     m_material_version = material.customShader.value_version;
     m_uploaded         = true;
     return Ok(empty {});
+}
+
+SharedUniformBufferBinding::SharedUniformBufferBinding(resource::BufferUseHandle buffer,
+                                                       UniformBufferLayout       layout,
+                                                       Vec<BoundUniformSource>   sources,
+                                                       ShaderMatrixConvention    matrix_convention,
+                                                       ShaderMatrixAbi           matrix_abi)
+    : m_buffer(buffer),
+      m_layout(rstd::move(layout)),
+      m_sources(rstd::move(sources)),
+      m_data(rstd::vec::Vec<u8>::with_capacity(m_layout.size)),
+      m_matrix_convention(matrix_convention),
+      m_matrix_abi(matrix_abi) {
+    m_data.resize(m_layout.size, u8());
+}
+
+auto SharedUniformBufferBinding::WriteSlot(usize slot_index, UniformValueView value) const
+    -> Result<bool, UniformBufferUpdateError> {
+    if (slot_index >= m_layout.slots.len()) return Ok(false);
+    auto serialized = SerializeUniformValue(m_data.as_mut_slice().as_mut_ref(),
+                                            m_layout.slots[slot_index],
+                                            value,
+                                            m_matrix_convention,
+                                            m_matrix_abi);
+    if (serialized.is_err()) return Err(rstd::move(serialized).unwrap_err_unchecked());
+    return Ok(true);
+}
+
+auto SharedUniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         frame_context,
+                                        mut_ref<dyn<resource::BufferContentWriter>> buffers) const
+    -> Result<empty, UniformBufferUpdateError> {
+    detail::EmptyResourceView resources_impl;
+    auto                      resources = dyn<UniformResourceView>::from_ref(resources_impl);
+    detail::UpdateContext     context_impl(
+        frame_context->Frame(), resources.as_ref(), SceneRenderViewKind::Primary);
+    auto context = dyn<UniformUpdateContext>::from_ref(context_impl);
+
+    auto versions = Vec<u64>::with_capacity(m_sources.len());
+    bool changed  = ! m_uploaded;
+    for (auto& bound : m_sources) {
+        auto version = bound.source->Version(context.as_ref());
+        versions.push(rstd::move(version));
+        changed = changed || ! bound.evaluated || bound.version != version;
+    }
+    if (! changed) return Ok(empty {});
+
+    for (usize index {}; index < m_data.len(); ++index) m_data[index] = u8();
+    usize source_index {};
+    for (auto& bound : m_sources) {
+        detail::SourceValueWriter writer_impl(*this, bound);
+        auto                      writer = dyn<UniformValueSink>::from_ref(writer_impl);
+        auto evaluated = bound.source->Evaluate(context.as_ref(), writer.as_mut_ref());
+        if (evaluated.is_err()) {
+            return Err(UniformBufferUpdateError {
+                .message = rstd::move(evaluated).unwrap_err_unchecked().message,
+            });
+        }
+        bound.version   = versions[source_index++];
+        bound.evaluated = true;
+    }
+    auto updated = buffers->UpdateBuffer(m_buffer, m_data.as_slice());
+    if (updated.is_err()) {
+        return Err(UniformBufferUpdateError {
+            .message = rstd::move(updated).unwrap_err_unchecked().message,
+        });
+    }
+    m_uploaded = true;
+    return Ok(empty {});
+}
+
+auto MakeSharedUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>>      prepare,
+                                    resource::BufferUseHandle                   buffer,
+                                    const resource::ShaderArtifactUniformBlock& block,
+                                    ShaderMatrixConvention                      matrix_convention,
+                                    ShaderMatrixAbi                             matrix_abi)
+    -> Result<Box<dyn<UniformBufferUpdate>>, UniformBufferUpdateError> {
+    auto definition = prepare->ResolveBlock(block.identity);
+    if (definition.is_none() || (**definition).scope != UniformBlockScope::Shared) {
+        return Err(UniformBufferUpdateError {
+            .message = String::make("shared uniform block definition is unavailable"_str),
+        });
+    }
+    auto layout_result = CompileUniformBufferLayout(block);
+    if (layout_result.is_err()) return Err(rstd::move(layout_result).unwrap_err_unchecked());
+    auto layout  = rstd::move(layout_result).unwrap_unchecked();
+    auto sources = Vec<BoundUniformSource>::make();
+    for (const auto& attachment : (**definition).sources) {
+        auto source = prepare->ResolveSource(attachment.source);
+        if (source.is_none()) {
+            return Err(UniformBufferUpdateError {
+                .message = String::make("shared uniform source is unavailable"_str),
+            });
+        }
+        BoundUniformSource bound {
+            .source   = *source,
+            .priority = attachment.priority,
+        };
+        detail::SourceBindingCompiler compiler_impl(layout, bound, matrix_convention, matrix_abi);
+        auto                          compiler  = dyn<UniformBindingSink>::from_ref(compiler_impl);
+        auto                          described = bound.source->Describe(compiler.as_mut_ref());
+        if (described.is_err()) {
+            return Err(UniformBufferUpdateError {
+                .message = rstd::move(described).unwrap_err_unchecked().message,
+            });
+        }
+        if (bound.outputs.is_empty()) continue;
+        bound.lease = bound.source->AcquireBindingLease();
+        sources.push(rstd::move(bound));
+    }
+    SharedUniformBufferBinding binding(
+        buffer, rstd::move(layout), rstd::move(sources), matrix_convention, matrix_abi);
+    return Ok(Box<dyn<UniformBufferUpdate>>::make(rstd::move(binding)));
 }
 
 auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,

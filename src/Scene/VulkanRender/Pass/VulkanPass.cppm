@@ -6,6 +6,7 @@ import wescene.vulkan;
 import wescene.scene;
 
 import :resource;
+import :pipeline_layout;
 import :shader_reflection_cache;
 import :uniform_buffer;
 
@@ -124,8 +125,9 @@ private:
 };
 
 struct PassRecordContext {
-    rstd::mut_ref<vvk::CommandBuffer> command;
-    rstd::ref<PreparedPassResources>  resources;
+    rstd::mut_ref<vvk::CommandBuffer>                              command;
+    rstd::ref<PreparedPassResources>                               resources;
+    rstd::mut_ref<resource_registry::DescriptorBindingRecordState> descriptor_state;
 };
 
 struct PassUpdateContext {
@@ -138,6 +140,7 @@ struct PassUpdateContext {
 struct PassPrepareContext {
     rstd::ref<resource_registry::PreparedResourceTable>                   resources;
     rstd::mut_ref<rstd::dyn<resource_registry::GraphicsResourcePreparer>> graphics;
+    rstd::ref<PipelineLayoutAssignments>                                  pipeline_layouts;
 };
 
 class ResourceDeclarationContext {
@@ -159,6 +162,15 @@ public:
         auto bytes = rstd::vec::Vec<rstd::u8>::with_capacity(request.definition.size);
         bytes.resize(request.definition.size, rstd::u8(0));
         return AddBuffer(rstd::move(request), rstd::move(bytes));
+    }
+
+    auto AddSharedBuffer(resource::BufferRequest request) -> resource::BufferUseHandle {
+        auto existing = m_shared_buffers.get(request.name);
+        if (existing.is_some()) return **existing;
+        auto name   = request.name.clone();
+        auto handle = AddBuffer(rstd::move(request));
+        if (handle.Valid()) (void)m_shared_buffers.insert(rstd::move(name), handle);
+        return handle;
     }
 
     auto AddTexture(resource::TextureRequest request, resource::ResourceAccess access)
@@ -244,15 +256,16 @@ private:
         });
         return handle;
     }
-    resource::ResourcePlan&                                      m_plan;
-    rstd::mut_ref<ShaderReflectionCache>                         m_shader_cache;
-    rstd::u64                                                    m_next_buffer { 0 };
-    rstd::u64                                                    m_next_shader { 0 };
-    rstd::u64                                                    m_next_pipeline { 0 };
-    rstd::u64                                                    m_next_render_pass { 0 };
-    rstd::u64                                                    m_next_framebuffer { 0 };
-    rstd::u64                                                    m_next_external { 0 };
-    rstd::collections::HashMap<String, rstd::vec::Vec<rstd::u8>> m_buffers;
+    resource::ResourcePlan&                                       m_plan;
+    rstd::mut_ref<ShaderReflectionCache>                          m_shader_cache;
+    rstd::u64                                                     m_next_buffer { 0 };
+    rstd::u64                                                     m_next_shader { 0 };
+    rstd::u64                                                     m_next_pipeline { 0 };
+    rstd::u64                                                     m_next_render_pass { 0 };
+    rstd::u64                                                     m_next_framebuffer { 0 };
+    rstd::u64                                                     m_next_external { 0 };
+    rstd::collections::HashMap<String, rstd::vec::Vec<rstd::u8>>  m_buffers;
+    rstd::collections::HashMap<String, resource::BufferUseHandle> m_shared_buffers;
     rstd::collections::HashMap<resource::ShaderRequest, resource::ShaderArtifact> m_shaders;
 };
 
@@ -268,10 +281,14 @@ public:
     virtual PassInvalidationFlags finalizeResourceRequests(Scene&) { return PassInvalidationNone; }
     virtual void                  declareResources(ResourceDeclarationContext&) {}
     virtual PassResourceUses      resourceUses() const { return {}; }
-    virtual auto                  createUniformBufferUpdate(ref<dyn<UniformBindingPrepareContext>>,
-                                                            const PreparedPassResources&)
-        -> Result<Option<Box<dyn<UniformBufferUpdate>>>, UniformBufferUpdateError> {
-        return Ok(Option<Box<dyn<UniformBufferUpdate>>>());
+    virtual auto                  pipelineLayoutRequirement(const PreparedPassResources&) const
+        -> Result<Option<PipelineLayoutRequirement>, resource::ResourceError> {
+        return Ok(None());
+    }
+    virtual auto createUniformBufferUpdates(ref<dyn<UniformBindingPrepareContext>>,
+                                            const PreparedPassResources&)
+        -> Result<Vec<Box<dyn<UniformBufferUpdate>>>, UniformBufferUpdateError> {
+        return Ok(Vec<Box<dyn<UniformBufferUpdate>>>::make());
     }
     virtual bool
     prepareResourceStates(rstd::mut_ref<rstd::dyn<resource_registry::TextureStatePreparer>>) {

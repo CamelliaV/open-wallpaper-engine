@@ -144,6 +144,7 @@ target_sources(owe-parse
          Pkg/SceneObj/ParticleObject.cppm
          Pkg/Parse/Particle/ParticleParser.cppm
          Pkg/Parse/Puppet/Puppet.cppm
+         Pkg/Parse/Uniform/GlobalUniform.cppm
          Pkg/Parse/Uniform/UniformSource.cppm
          Pkg/SceneObj/SceneDocument.cppm
          Pkg/Parse/Scene/SceneStages.cppm
@@ -215,6 +216,7 @@ target_sources(owe-vulkan-renderer
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          VulkanRender/VulkanRender.cppm
          VulkanRender/Program.cppm
+         VulkanRender/PipelineLayout.cppm
          VulkanRender/Pass/VulkanPass.cppm
          VulkanRender/ShaderReflectionCache.cppm
          VulkanRender/UniformBuffer.cppm

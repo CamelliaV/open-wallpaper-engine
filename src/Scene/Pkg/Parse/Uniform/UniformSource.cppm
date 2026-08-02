@@ -4,6 +4,7 @@ import rstd.cppstd;
 import wescene.json;
 import wescene.pkg.puppet;
 import wescene.scene;
+import :global_uniform;
 import :particle_runtime;
 
 using namespace rstd::prelude;

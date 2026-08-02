@@ -50,6 +50,41 @@ struct SceneSamplerBinding {
     bool operator==(const SceneSamplerBinding&) const = default;
 };
 
+enum class SceneShaderUniformBlockScope : rstd::uint8_t
+{
+    Shared,
+    Local,
+};
+
+struct SceneShaderUniformBlockInterface {
+    std::string                  name;
+    u32                          set {};
+    u32                          binding {};
+    SceneShaderUniformBlockScope scope { SceneShaderUniformBlockScope::Local };
+    u64                          identity {};
+
+    bool operator==(const SceneShaderUniformBlockInterface&) const = default;
+};
+
+struct SceneShaderDescriptorBindingInterface {
+    std::string name;
+    u32         binding {};
+    u32         descriptor_type {};
+    u32         descriptor_count { u32(1) };
+    u32         stage_flags {};
+
+    bool operator==(const SceneShaderDescriptorBindingInterface&) const = default;
+};
+
+struct SceneShaderDescriptorSetInterface {
+    u32                                                set {};
+    bool                                               push_descriptor { false };
+    u64                                                identity {};
+    std::vector<SceneShaderDescriptorBindingInterface> bindings;
+
+    bool operator==(const SceneShaderDescriptorSetInterface&) const = default;
+};
+
 struct SceneShader {
 public:
     u32                    id { 0 };
@@ -59,9 +94,11 @@ public:
 
     std::vector<ShaderCode> codes;
 
-    std::vector<ShaderAttribute>     attrs;
-    std::vector<SceneSamplerBinding> sampler_bindings;
-    ShaderValues                     default_uniforms;
+    std::vector<ShaderAttribute>                   attrs;
+    std::vector<SceneSamplerBinding>               sampler_bindings;
+    std::vector<SceneShaderUniformBlockInterface>  uniform_blocks;
+    std::vector<SceneShaderDescriptorSetInterface> descriptor_sets;
+    ShaderValues                                   default_uniforms;
 
     std::string_view SamplerMember(std::size_t texture_slot) const {
         for (const auto& binding : sampler_bindings) {
@@ -91,6 +128,17 @@ inline usize SceneShaderCodeHash(const SceneShader& shader) {
     std::size_t seed = SceneShaderCodeHash(shader.codes).to_primitive();
     utils::hash_combine(seed, static_cast<unsigned>(shader.matrix_convention));
     utils::hash_combine(seed, static_cast<unsigned>(shader.matrix_abi));
+    for (const auto& set : shader.descriptor_sets) {
+        utils::hash_combine(seed, set.set.to_primitive());
+        utils::hash_combine(seed, set.identity.to_primitive());
+        utils::hash_combine(seed, set.push_descriptor);
+    }
+    for (const auto& block : shader.uniform_blocks) {
+        utils::hash_combine(seed, block.set.to_primitive());
+        utils::hash_combine(seed, block.binding.to_primitive());
+        utils::hash_combine(seed, block.identity.to_primitive());
+        utils::hash_combine(seed, static_cast<unsigned>(block.scope));
+    }
     return usize(seed);
 }
 
@@ -117,13 +165,15 @@ struct SceneShaderVariantDesc {
     std::string scene_id;
     std::string shader_name;
 
-    Map<std::string, std::string>          input_combos;
-    Map<std::string, std::string>          resolved_combos;
-    Map<std::string, std::string>          uniform_aliases;
-    ShaderValues                           default_uniforms;
-    std::vector<SceneShaderDefaultTexture> default_textures;
-    std::vector<std::string>               texture_slots;
-    std::vector<SceneSamplerBinding>       sampler_bindings;
+    Map<std::string, std::string>                  input_combos;
+    Map<std::string, std::string>                  resolved_combos;
+    Map<std::string, std::string>                  uniform_aliases;
+    ShaderValues                                   default_uniforms;
+    std::vector<SceneShaderDefaultTexture>         default_textures;
+    std::vector<std::string>                       texture_slots;
+    std::vector<SceneSamplerBinding>               sampler_bindings;
+    std::vector<SceneShaderUniformBlockInterface>  uniform_blocks;
+    std::vector<SceneShaderDescriptorSetInterface> descriptor_sets;
 
     std::vector<SceneShaderTextureCompileInfo> texture_infos;
     std::vector<SceneShaderVariantStage>       stages;
@@ -2436,6 +2486,12 @@ public:
     }
     auto NodeSources(SceneNodeId node) const -> slice<UniformSourceAttachment> {
         return m_uniforms.NodeSources(node);
+    }
+    bool RegisterUniformBlock(UniformBlockDefinition definition) {
+        return m_uniforms.RegisterBlock(rstd::move(definition));
+    }
+    auto ResolveUniformBlock(u64 identity) const -> Option<ref<UniformBlockDefinition>> {
+        return m_uniforms.ResolveBlock(identity);
     }
     SceneRuntime&       Runtime() noexcept { return m_runtime; }
     const SceneRuntime& Runtime() const noexcept { return m_runtime; }

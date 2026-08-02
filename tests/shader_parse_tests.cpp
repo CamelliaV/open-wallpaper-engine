@@ -709,8 +709,13 @@ void main() {
     std::vector<owe::vulkan::Uni_ShaderSpv> spvs;
     owe::vulkan::ShaderReflected            reflected;
     ASSERT_TRUE(owe::vulkan::GenReflect(result.shader->codes, spvs, reflected));
-    ASSERT_EQ(reflected.blocks.size(), 1u);
-    const auto& members = reflected.blocks.front().member_map;
+    ASSERT_EQ(reflected.blocks.size(), 2u);
+    const auto local =
+        std::find_if(reflected.blocks.begin(), reflected.blocks.end(), [](const auto& block) {
+            return block.name == "ww_DrawUniforms";
+        });
+    ASSERT_NE(local, reflected.blocks.end());
+    const auto& members = local->member_map;
     ASSERT_TRUE(members.contains("g_Mat2"));
     ASSERT_TRUE(members.contains("g_Mat3"));
     ASSERT_TRUE(members.contains("g_Mat4"));
@@ -733,6 +738,140 @@ void main() {
     EXPECT_EQ(bones.num, rstd::usize(2));
     ASSERT_EQ(bones.array_dimensions.size(), 1u);
     EXPECT_EQ(bones.array_dimensions.front(), 2u);
+}
+
+TEST(ShaderParser, UsesOneCanonicalGlobalAbiForLegacyDaytimeAlias) {
+    auto compile = [](std::string_view declaration, std::string_view expression) {
+        owe::SceneShaderVariantDesc desc;
+        desc.scene_id    = "global-uniform-abi-test";
+        desc.shader_name = "global-uniform-abi-test";
+        desc.stages.push_back(owe::SceneShaderVariantStage {
+            .stage      = owe::ShaderType::VERTEX,
+            .source_key = "/assets/shaders/global-uniform-abi-test.vert",
+            .source     = std::string("attribute vec3 a_Position;\nuniform float ") +
+                          std::string(declaration) +
+                          ";\nvoid main() { gl_Position = vec4(a_Position.x + " +
+                          std::string(expression) + " * 0.0, a_Position.yz, 1.0); }\n",
+        });
+        desc.stages.push_back(owe::SceneShaderVariantStage {
+            .stage      = owe::ShaderType::FRAGMENT,
+            .source_key = "/assets/shaders/global-uniform-abi-test.frag",
+            .source     = "void main() { gl_FragColor = vec4(1.0); }",
+        });
+        owe::fs::VFS vfs;
+        return owe::ShaderParser::CompileSceneShaderVariant(desc, vfs);
+    };
+
+    const auto canonical = compile("g_Daytime", "g_Daytime");
+    const auto legacy    = compile("g_DayTime", "g_DayTime");
+    ASSERT_TRUE(canonical.ok) << canonical.error;
+    ASSERT_TRUE(legacy.ok) << legacy.error;
+    ASSERT_EQ(canonical.shader->descriptor_sets.size(), 2u);
+    ASSERT_EQ(legacy.shader->descriptor_sets.size(), 2u);
+    EXPECT_EQ(canonical.shader->descriptor_sets[0].identity,
+              legacy.shader->descriptor_sets[0].identity);
+
+    std::vector<owe::vulkan::Uni_ShaderSpv> canonical_spvs;
+    std::vector<owe::vulkan::Uni_ShaderSpv> legacy_spvs;
+    owe::vulkan::ShaderReflected            canonical_reflection;
+    owe::vulkan::ShaderReflected            legacy_reflection;
+    ASSERT_TRUE(
+        owe::vulkan::GenReflect(canonical.shader->codes, canonical_spvs, canonical_reflection));
+    ASSERT_TRUE(owe::vulkan::GenReflect(legacy.shader->codes, legacy_spvs, legacy_reflection));
+    const auto& canonical_members = canonical_reflection.blocks.front().member_map;
+    const auto& legacy_members    = legacy_reflection.blocks.front().member_map;
+    EXPECT_EQ(canonical_members.size(), legacy_members.size());
+    EXPECT_TRUE(legacy_members.contains("g_Daytime"));
+    EXPECT_FALSE(legacy_members.contains("g_DayTime"));
+    const auto global = std::find_if(canonical_reflection.blocks.begin(),
+                                     canonical_reflection.blocks.end(),
+                                     [](const auto& block) {
+                                         return block.name == "ww_GlobalUniforms";
+                                     });
+    ASSERT_NE(global, canonical_reflection.blocks.end());
+    EXPECT_EQ(global->size, owe::kGlobalUniformBlockSize.to_primitive());
+    for (const auto& field : owe::GlobalUniformFields()) {
+        auto member = global->member_map.find(rstd::cppstd::to_string(field.name));
+        ASSERT_NE(member, global->member_map.end());
+        EXPECT_EQ(member->second.offset, field.offset.to_primitive());
+    }
+}
+
+TEST(ShaderParser, FallsBackAsOneLegacyInterfaceOnGlobalTypeConflict) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "global-uniform-conflict-test";
+    desc.shader_name = "global-uniform-conflict-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/global-uniform-conflict-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+uniform vec2 g_Time;
+void main() { gl_Position = vec4(a_Position.xy + g_Time * 0.0, a_Position.z, 1.0); }
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/global-uniform-conflict-test.frag",
+        .source     = R"(
+uniform sampler2D g_Texture0;
+void main() { gl_FragColor = texSample2D(g_Texture0, vec2(0.5)); }
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::ShaderParser::CompileSceneShaderVariant(desc, vfs);
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_EQ(result.shader->descriptor_sets.size(), 1u);
+    EXPECT_EQ(result.shader->descriptor_sets.front().set, rstd::u32(1));
+    EXPECT_TRUE(result.shader->descriptor_sets.front().push_descriptor);
+    ASSERT_EQ(result.shader->uniform_blocks.size(), 1u);
+    EXPECT_EQ(result.shader->uniform_blocks.front().name, "ww_Uniforms");
+    EXPECT_EQ(result.shader->uniform_blocks.front().set, rstd::u32(1));
+    EXPECT_EQ(result.shader->uniform_blocks.front().scope,
+              owe::SceneShaderUniformBlockScope::Local);
+}
+
+TEST(ShaderParser, PrunesUnusedDrawUniformsWithoutPruningGlobalSchema) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "draw-uniform-prune-test";
+    desc.shader_name = "draw-uniform-prune-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/draw-uniform-prune-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+uniform float g_Used;
+uniform float g_Unused;
+void main() { gl_Position = vec4(a_Position.x + g_Used, a_Position.yz, 1.0); }
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/draw-uniform-prune-test.frag",
+        .source     = "void main() { gl_FragColor = vec4(1.0); }",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::ShaderParser::CompileSceneShaderVariant(desc, vfs);
+    ASSERT_TRUE(result.ok) << result.error;
+    std::vector<owe::vulkan::Uni_ShaderSpv> spvs;
+    owe::vulkan::ShaderReflected            reflected;
+    ASSERT_TRUE(owe::vulkan::GenReflect(result.shader->codes, spvs, reflected));
+    const auto local =
+        std::find_if(reflected.blocks.begin(), reflected.blocks.end(), [](const auto& block) {
+            return block.name == "ww_DrawUniforms";
+        });
+    ASSERT_NE(local, reflected.blocks.end());
+    EXPECT_TRUE(local->member_map.contains("g_Used"));
+    EXPECT_FALSE(local->member_map.contains("g_Unused"));
+    const auto global =
+        std::find_if(reflected.blocks.begin(), reflected.blocks.end(), [](const auto& block) {
+            return block.name == "ww_GlobalUniforms";
+        });
+    ASSERT_NE(global, reflected.blocks.end());
+    EXPECT_TRUE(global->member_map.contains("g_Time"));
+    EXPECT_TRUE(global->member_map.contains("g_Daytime"));
 }
 
 TEST(ShaderParser, CompileSceneShaderVariantUsesPhysicalFileCache) {
@@ -805,7 +944,7 @@ void main() {
                (static_cast<std::uint32_t>(header[offset + 3]) << 24);
     };
     EXPECT_EQ(read_u32(8), 3u);
-    EXPECT_EQ(read_u32(12), 9u);
+    EXPECT_EQ(read_u32(12), 11u);
     EXPECT_EQ(read_u32(16), 112u);
     EXPECT_EQ(read_u32(24), 2u);
     const auto initial_write_time = std::filesystem::last_write_time(artifact_path);

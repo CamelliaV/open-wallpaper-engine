@@ -51,12 +51,18 @@ struct ShaderReflected {
         int         index;
         unsigned    size;
         std::string name;
+        unsigned    set { 0 };
+        unsigned    binding { 0 };
 
         Map<std::string, BlockedUniform> member_map;
     };
     std::vector<Block> blocks;
 
-    Map<std::string, VkDescriptorSetLayoutBinding> binding_map;
+    struct Binding {
+        unsigned                     set { 0 };
+        VkDescriptorSetLayoutBinding layout;
+    };
+    Map<std::string, Binding> binding_map;
 
     struct Input {
         unsigned location;

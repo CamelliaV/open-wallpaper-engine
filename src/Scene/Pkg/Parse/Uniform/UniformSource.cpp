@@ -168,6 +168,20 @@ auto Bind(mut_ref<dyn<UniformBindingSink>> sink, UniformOutputId output, ref<str
     return Ok(empty {});
 }
 
+auto BindGlobalProducer(mut_ref<dyn<UniformBindingSink>> sink, GlobalUniformProducer producer)
+    -> Result<empty, UniformError> {
+    for (const auto& field : GlobalUniformFields()) {
+        if (field.producer != producer) continue;
+        auto result = Bind(sink, field.output, field.name, field.shape);
+        if (result.is_err()) return result;
+        if (! field.alias.is_empty()) {
+            result = Bind(sink, field.output, field.alias, field.shape);
+            if (result.is_err()) return result;
+        }
+    }
+    return Ok(empty {});
+}
+
 template<typename Output>
 struct BindingEntry {
     Output            output;
@@ -481,18 +495,9 @@ auto TransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
 auto FrameUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     using Output = FrameUniformOutput;
-    const rstd::array<BindingEntry<Output>, 10> entries {
-        BindingEntry<Output> { Output::Time, G_TIME, UniformValueShape::Float(u32(1)) },
-        BindingEntry<Output> { Output::FrameTime, G_FRAMETIME, UniformValueShape::Float(u32(1)) },
-        BindingEntry<Output> { Output::DayTime, G_DAYTIME, UniformValueShape::Float(u32(1)) },
-        BindingEntry<Output> {
-            Output::DayTime, G_DAYTIME_LEGACY, UniformValueShape::Float(u32(1)) },
-        BindingEntry<Output> {
-            Output::PointerPosition, G_POINTERPOSITION, UniformValueShape::Float(u32(2)) },
-        BindingEntry<Output> {
-            Output::PointerPositionLast, G_POINTERPOSITIONLAST, UniformValueShape::Float(u32(2)) },
-        BindingEntry<Output> {
-            Output::ParallaxPosition, G_PARALLAXPOSITION, UniformValueShape::Float(u32(2)) },
+    auto global  = BindGlobalProducer(sink, GlobalUniformProducer::Frame);
+    if (global.is_err()) return global;
+    const rstd::array<BindingEntry<Output>, 3> entries {
         BindingEntry<Output> { Output::TexelSize, G_TEXELSIZE, UniformValueShape::Float(u32(2)) },
         BindingEntry<Output> {
             Output::TexelSizeHalf, G_TEXELSIZEHALF, UniformValueShape::Float(u32(2)) },
@@ -510,23 +515,27 @@ auto FrameUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
     -> Result<empty, UniformError> {
     using Output = FrameUniformOutput;
     UniformWriter writer(sink);
-    const auto    frame     = context->Frame();
-    const auto&   inputs    = m_state->Inputs();
-    auto          resources = context->Resources();
-    const auto    texel     = resources->TexelSize();
-    const auto    viewport  = resources->Viewport();
+    const auto    frame  = context->Frame();
+    const auto&   inputs = m_state->Inputs();
 
     writer.Write(Output::Time, static_cast<float>(frame->elapsed.to_primitive()));
     writer.Write(Output::FrameTime, static_cast<float>(frame->delta.to_primitive()));
     writer.Write(Output::DayTime, 0.0f);
     writer.Write(Output::PointerPosition, inputs.pointer);
     writer.Write(Output::PointerPositionLast, inputs.pointer_last);
-    writer.Write(Output::TexelSize, texel);
-    writer.Write(Output::TexelSizeHalf,
-                 rstd::array<float, 2> { texel[usize(0)] * 0.5f, texel[usize(1)] * 0.5f });
-    const float aspect = viewport[usize(1)] > 0.0f ? viewport[usize(0)] / viewport[usize(1)] : 1.0f;
-    writer.Write(Output::Screen,
-                 rstd::array<float, 3> { viewport[usize(0)], viewport[usize(1)], aspect });
+    if (writer.Wants(Output::TexelSize) || writer.Wants(Output::TexelSizeHalf) ||
+        writer.Wants(Output::Screen)) {
+        auto       resources = context->Resources();
+        const auto texel     = resources->TexelSize();
+        const auto viewport  = resources->Viewport();
+        writer.Write(Output::TexelSize, texel);
+        writer.Write(Output::TexelSizeHalf,
+                     rstd::array<float, 2> { texel[usize(0)] * 0.5f, texel[usize(1)] * 0.5f });
+        const float aspect =
+            viewport[usize(1)] > 0.0f ? viewport[usize(0)] / viewport[usize(1)] : 1.0f;
+        writer.Write(Output::Screen,
+                     rstd::array<float, 3> { viewport[usize(0)], viewport[usize(1)], aspect });
+    }
 
     Vector2f    parallax_position { 0.5f, 0.5f };
     const auto& parallax = m_state->CameraParallax();
@@ -542,22 +551,7 @@ auto FrameUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
 
 auto AudioUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
-    using Output = AudioUniformOutput;
-    const rstd::array<BindingEntry<Output>, 6> entries {
-        BindingEntry<Output> {
-            Output::Spectrum16Left, G_AUDIO_SPEC_16_L, UniformValueShape::Float(u32(16)) },
-        BindingEntry<Output> {
-            Output::Spectrum16Right, G_AUDIO_SPEC_16_R, UniformValueShape::Float(u32(16)) },
-        BindingEntry<Output> {
-            Output::Spectrum32Left, G_AUDIO_SPEC_32_L, UniformValueShape::Float(u32(32)) },
-        BindingEntry<Output> {
-            Output::Spectrum32Right, G_AUDIO_SPEC_32_R, UniformValueShape::Float(u32(32)) },
-        BindingEntry<Output> {
-            Output::Spectrum64Left, G_AUDIO_SPEC_64_L, UniformValueShape::Float(u32(64)) },
-        BindingEntry<Output> {
-            Output::Spectrum64Right, G_AUDIO_SPEC_64_R, UniformValueShape::Float(u32(64)) },
-    };
-    return BindEntries(sink, entries);
+    return BindGlobalProducer(sink, GlobalUniformProducer::Audio);
 }
 
 auto AudioUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
@@ -656,19 +650,7 @@ auto ColorUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
 
 auto LightUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
-    using Output = LightUniformOutput;
-    const rstd::array<BindingEntry<Output>, 6> entries {
-        BindingEntry<Output> { Output::Position, G_LP, UniformValueShape::Float(u32(12)) },
-        BindingEntry<Output> { Output::ColorLegacy, G_LCP, UniformValueShape::Float(u32(12)) },
-        BindingEntry<Output> { Output::ColorRadius, G_LCR, UniformValueShape::Float(u32(16)) },
-        BindingEntry<Output> {
-            Output::DirectionType, G_LIGHTDIRECTIONTYPE, UniformValueShape::Float(u32(16)) },
-        BindingEntry<Output> {
-            Output::ConeExponent, G_LIGHTCONEEXPONENT, UniformValueShape::Float(u32(16)) },
-        BindingEntry<Output> {
-            Output::CastShadow, G_LIGHTCASTSHADOW, UniformValueShape::Float(u32(4)) },
-    };
-    return BindEntries(sink, entries);
+    return BindGlobalProducer(sink, GlobalUniformProducer::Light);
 }
 
 auto LightUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {

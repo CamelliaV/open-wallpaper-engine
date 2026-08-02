@@ -1245,6 +1245,98 @@ Map<std::string, std::string> BuildUniformUnion(std::span<const ShaderUnit> unit
     return uniforms;
 }
 
+std::string CanonicalizeGlobalUniformAliases(std::string source) {
+    auto              view = rstd::cppstd::as_str(source).unwrap();
+    shader_lex::Lexer lexer(view);
+    std::string       out;
+    std::size_t       copied {};
+    for (auto token = lexer.Next(); token.kind != shader_lex::TokenKind::Eof;
+         token      = lexer.Next()) {
+        if (token.kind != shader_lex::TokenKind::Ident) continue;
+        auto field = FindGlobalUniform(token.text);
+        if (field.is_none() || (**field).alias.is_empty() || token.text != (**field).alias)
+            continue;
+        const auto begin = token.offset.to_primitive();
+        out.append(source, copied, begin - copied);
+        out.append(rstd::cppstd::as_string_view((**field).name));
+        copied = begin + token.text.size().to_primitive();
+    }
+    if (copied == 0) return source;
+    out.append(source, copied, std::string::npos);
+    return out;
+}
+
+Set<std::string> ReferencedUniformNames(std::span<const ShaderUnit> units) {
+    Set<std::string> names;
+    for (const auto& unit : units) {
+        auto              body = StripUniforms(unit.src);
+        shader_lex::Lexer lexer(rstd::cppstd::as_str(body).unwrap());
+        for (auto token = lexer.Next(); token.kind != shader_lex::TokenKind::Eof;
+             token      = lexer.Next()) {
+            if (token.kind == shader_lex::TokenKind::Ident) {
+                names.insert(rstd::cppstd::to_string(token.text));
+            }
+        }
+    }
+    return names;
+}
+
+struct UniformCompileInterface {
+    bool                          legacy { false };
+    Map<std::string, std::string> local;
+};
+
+UniformCompileInterface BuildUniformInterface(std::span<ShaderUnit> units) {
+    UniformCompileInterface result;
+    for (const auto& unit : units) {
+        for (const auto& [name, type] : unit.preprocess_info.uniforms) {
+            auto field = FindGlobalUniform(rstd::cppstd::as_str(name).unwrap());
+            if (field.is_none()) continue;
+            const auto expected = LayoutUniform(rstd::cppstd::as_string_view((**field).type));
+            const auto authored = LayoutUniform(type);
+            if (expected.hlsl_ty != authored.hlsl_ty || expected.array != authored.array) {
+                rstd_warn("uniform {} type {} does not match canonical type {}; using legacy ABI",
+                          name,
+                          type,
+                          (**field).type);
+                result.legacy = true;
+            }
+        }
+    }
+    if (result.legacy) {
+        result.local = BuildUniformUnion(units);
+        return result;
+    }
+
+    for (auto& unit : units) {
+        unit.src = CanonicalizeGlobalUniformAliases(rstd::move(unit.src));
+        Map<std::string, std::string> canonical;
+        for (const auto& [name, type] : unit.preprocess_info.uniforms) {
+            auto field = FindGlobalUniform(rstd::cppstd::as_str(name).unwrap());
+            if (field.is_none()) {
+                MergeUniform(canonical, name, type);
+                continue;
+            }
+            MergeUniform(canonical,
+                         rstd::cppstd::to_string((**field).name),
+                         rstd::cppstd::as_string_view((**field).type));
+        }
+        unit.preprocess_info.uniforms = rstd::move(canonical);
+    }
+
+    const auto referenced = ReferencedUniformNames(units);
+    for (const auto& unit : units) {
+        for (const auto& [name, type] : unit.preprocess_info.uniforms) {
+            if (FindGlobalUniform(rstd::cppstd::as_str(name).unwrap()).is_some() ||
+                ! referenced.contains(name)) {
+                continue;
+            }
+            MergeUniform(result.local, name, type);
+        }
+    }
+    return result;
+}
+
 usize LinearUniformElementCount(std::string_view ty) {
     const auto [base_ty, array] = SplitUniformType(ty);
     if (! array.empty()) return usize();
@@ -1281,15 +1373,17 @@ void ShapeShaderDefaults(std::span<const ShaderUnit> units, ShaderInfo& info) {
     ShapeShaderValues(info.baseConstSvs, uniforms);
 }
 
-// Emit `cbuffer ww_Uniforms { ... };` body with explicit std140 `:packoffset`
-// per member. glslang's HLSL frontend hard-codes HLSL cbuffer packing on
+// Emit a cbuffer with explicit std140 `:packoffset` per member.
+// glslang's HLSL frontend hard-codes HLSL cbuffer packing on
 // HLSL sources (see ShaderLang.cpp `setHlslOffsets` when EShSourceHlsl);
 // without `packoffset`, scalars get packed into the trailing padding of
 // vec3 / vec3[] members. Explicit offsets keep the shared block layout
 // identical across stages and leave physical padding to reflected serialization.
-inline std::string EmitCBufferStd140(const Map<std::string, std::string>& uniforms_union) {
+inline std::string EmitCBufferStd140(const Map<std::string, std::string>& uniforms_union,
+                                     std::string_view block_name, u32 set, u32 binding) {
     std::string out;
-    out += "[[vk::binding(0, 0)]] cbuffer ww_Uniforms {\n";
+    out += "[[vk::binding(" + std::to_string(binding.to_primitive()) + ", " +
+           std::to_string(set.to_primitive()) + ")]] cbuffer " + std::string(block_name) + " {\n";
     std::size_t offset = 0;
     for (const auto& [name, ty] : uniforms_union) {
         const auto  layout    = LayoutUniform(ty);
@@ -1318,9 +1412,28 @@ inline std::string EmitCBufferStd140(const Map<std::string, std::string>& unifor
     return out;
 }
 
-inline std::string
-Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo* pre, const PreprocessorInfo* next,
-               const Map<std::string, std::string>* uniforms_union_in = nullptr) {
+inline std::string EmitGlobalCBufferStd140() {
+    std::string out;
+    out += "[[vk::binding(" + std::to_string(kGlobalUniformBinding.to_primitive()) + ", " +
+           std::to_string(kGlobalUniformSet.to_primitive()) + ")]] cbuffer " +
+           rstd::cppstd::to_string(kGlobalUniformBlockName) + " {\n";
+    for (const auto& field : GlobalUniformFields()) {
+        const auto layout = LayoutUniform(rstd::cppstd::as_string_view(field.type));
+        const auto offset = field.offset.to_primitive();
+        const auto reg    = offset / 16;
+        const auto comp   = (offset % 16) / 4;
+        out += "    " + layout.hlsl_ty + " " + rstd::cppstd::to_string(field.name) +
+               std::string(layout.array) + " : packoffset(c" + std::to_string(reg);
+        if (comp != 0) out += "." + std::string(1, "xyzw"[comp]);
+        out += ");\n";
+    }
+    out += "};\n";
+    return out;
+}
+
+inline std::string Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo* pre,
+                                  const PreprocessorInfo*        next,
+                                  const UniformCompileInterface* interface = nullptr) {
     // GS: feed glslang's HLSL frontend. Strip GLSL-style top-level `in`/`out`
     // decls, emit HLSL structs (WW_VSOut/WW_PSIn) + ww_Uniforms cbuffer, and
     // rewrite `void main()` to the entry signature `point WW_VSOut IN[1],
@@ -1363,10 +1476,9 @@ Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo* pre, const Prepro
         synth += EmitGSHLSLStruct("WW_VSOut", std::move(in_decls));
         synth += EmitGSHLSLStruct("WW_PSIn", std::move(out_decls));
 
-        // Cross-stage uniform union as an HLSL cbuffer matching the VS/FS
-        // block at binding 0, set 0. One reflected layout feeds every stage.
+        // Legacy callers still synthesize one cross-stage uniform block.
         Map<std::string, std::string> uniforms_union_local;
-        if (! uniforms_union_in) {
+        if (! interface) {
             auto absorb = [&](const Map<std::string, std::string>& m) {
                 for (const auto& [k, v] : m) MergeUniform(uniforms_union_local, k, v);
             };
@@ -1375,10 +1487,16 @@ Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo* pre, const Prepro
             if (next) absorb(next->uniforms);
         }
         const Map<std::string, std::string>& uniforms_union =
-            uniforms_union_in ? *uniforms_union_in : uniforms_union_local;
+            interface ? interface->local : uniforms_union_local;
+        if (interface && ! interface->legacy) synth += EmitGlobalCBufferStd140();
         if (! uniforms_union.empty()) {
-            synth += "\n// === auto-generated shared uniforms (HLSL, std140 via packoffset) ===\n";
-            synth += EmitCBufferStd140(uniforms_union);
+            synth += "\n// === auto-generated draw uniforms (HLSL, std140 via packoffset) ===\n";
+            synth += EmitCBufferStd140(uniforms_union,
+                                       interface && ! interface->legacy
+                                           ? rstd::cppstd::as_string_view(kDrawUniformBlockName)
+                                           : "ww_Uniforms",
+                                       kDrawUniformSet,
+                                       u32(0));
         }
 
         body = RewriteGSMain(std::move(body));
@@ -1388,12 +1506,10 @@ Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo* pre, const Prepro
     // Strip `attribute/varying` lines and collect them as structured decls.
     auto [io_decls, stage1] = ScanAndStripIO(unit.src);
 
-    // Strip `uniform sampler2D NAME;` lines; re-emitted below as explicit
-    // `layout(set=0, binding=N) uniform sampler2D NAME;` decls.
+    // Strip sampler declarations; they are re-emitted with explicit bindings.
     auto [sampler_decls, stage2] = ScanAndStripSamplers(stage1);
 
-    // Strip non-sampler `uniform TYPE NAME;` lines too; re-emitted as
-    // members of a cross-stage UBO `ww_Uniforms` at (set=0, binding=0).
+    // Strip non-sampler declarations; they are re-emitted through the selected ABI.
     std::string stage3 = StripUniforms(stage2);
 
     // Partition IO decls into VS-attributes (`a` storage) and varyings
@@ -1423,11 +1539,9 @@ Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo* pre, const Prepro
     // wrapper that copies between the struct and the statics.
     SynthOutput synth = SynthesizeHLSLEntry(unit.stage, attrs, varyings);
 
-    // Cross-stage uniform union → single HLSL cbuffer at (set=0, binding=0).
-    // Uses the global union from CompileToSpv when provided so VS / GS / FS
-    // all see the same offsets (alphabetical, identical layout).
+    // Legacy callers still synthesize one cross-stage uniform block.
     Map<std::string, std::string> uniforms_union_local;
-    if (! uniforms_union_in) {
+    if (! interface) {
         auto absorb = [&](const Map<std::string, std::string>& m) {
             for (const auto& [k, v] : m) MergeUniform(uniforms_union_local, k, v);
         };
@@ -1436,18 +1550,23 @@ Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo* pre, const Prepro
         if (next) absorb(next->uniforms);
     }
     const Map<std::string, std::string>& uniforms_union =
-        uniforms_union_in ? *uniforms_union_in : uniforms_union_local;
+        interface ? interface->local : uniforms_union_local;
 
     std::string uniform_block;
+    if (interface && ! interface->legacy) uniform_block += EmitGlobalCBufferStd140();
     if (! uniforms_union.empty()) {
         uniform_block +=
-            "\n// === auto-generated shared uniforms (HLSL, std140 via packoffset) ===\n";
-        uniform_block += EmitCBufferStd140(uniforms_union);
+            "\n// === auto-generated draw uniforms (HLSL, std140 via packoffset) ===\n";
+        uniform_block += EmitCBufferStd140(uniforms_union,
+                                           interface && ! interface->legacy
+                                               ? rstd::cppstd::as_string_view(kDrawUniformBlockName)
+                                               : "ww_Uniforms",
+                                           kDrawUniformSet,
+                                           u32(0));
     }
 
-    // Texture2D + paired SamplerState per stripped sampler. Bindings start
-    // at 1 (binding 0 holds the ww_Uniforms cbuffer). `vk::combinedImageSampler`
-    // marks the pair as a single descriptor on the Vulkan side.
+    // Binding 0 stays reserved for the draw uniform block. `vk::combinedImageSampler`
+    // joins each texture and sampler pair into one Vulkan descriptor.
     Set<std::string> sampler_seen;
     std::string      sampler_block;
     if (! sampler_decls.empty()) sampler_block += "\n// === auto-generated samplers (HLSL) ===\n";
@@ -1456,11 +1575,13 @@ Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo* pre, const Prepro
         if (! sampler_seen.insert(s.name).second) continue;
         const char* tex_ty   = HLSLSamplerType(s.sampler_type);
         const char* state_ty = HLSLSamplerStateType(s.sampler_type);
+        sampler_block +=
+            "[[vk::combinedImageSampler]][[vk::binding(" + std::to_string(sampler_idx) + ", " +
+            std::to_string(kDrawUniformSet.to_primitive()) + ")]] " + tex_ty + " " + s.name + ";\n";
         sampler_block += "[[vk::combinedImageSampler]][[vk::binding(" +
-                         std::to_string(sampler_idx) + ", 0)]] " + tex_ty + " " + s.name + ";\n";
-        sampler_block += "[[vk::combinedImageSampler]][[vk::binding(" +
-                         std::to_string(sampler_idx) + ", 0)]] " + state_ty + " " + s.name +
-                         "_ww_sampler;\n";
+                         std::to_string(sampler_idx) + ", " +
+                         std::to_string(kDrawUniformSet.to_primitive()) + ")]] " + state_ty + " " +
+                         s.name + "_ww_sampler;\n";
         ++sampler_idx;
     }
 
@@ -1476,7 +1597,7 @@ using ShaderCacheDigest = std::array<std::uint8_t, 20>;
 
 constexpr std::array<std::uint8_t, 8> kShaderCacheMagic { 'O', 'W', 'E', 'S', 'P', 'V', '3', 0 };
 constexpr std::uint32_t               kShaderCacheFormatVersion = 3;
-constexpr std::uint32_t               kShaderCacheAbiVersion    = 9;
+constexpr std::uint32_t               kShaderCacheAbiVersion    = 11;
 // 8-byte magic, six u32 fields, and four SHA-1 digests total 112 bytes.
 constexpr std::uint32_t kShaderCacheHeaderSize = static_cast<std::uint32_t>(
     kShaderCacheMagic.size() + 6 * sizeof(std::uint32_t) + 4 * ShaderCacheDigest {}.size());
@@ -2392,13 +2513,13 @@ bool ShaderParser::CompileToSpv(std::string_view scene_id, std::span<ShaderUnit>
     ShapeShaderDefaults(units, *shader_info);
 
     auto compile = [](std::span<ShaderUnit> units, std::vector<ShaderCode>& codes) {
-        // Build the cross-stage uniform union UP FRONT over ALL stages. Doing
-        // this per-unit with just pre/next neighbours misses any uniform that
+        // Build the cross-stage interface before rewriting each source. Using
+        // only adjacent sources misses uniforms that
         // lives on a non-adjacent stage (e.g. FS-only `g_Brightness` not seen
         // by VS in a 3-stage VS→GS→FS chain), which results in different UBO
         // sizes per stage and the runtime allocating a buffer too small for
         // the longest stage.
-        auto uniforms_union = BuildUniformUnion(units);
+        auto uniform_interface = BuildUniformInterface(units);
 
         std::vector<vulkan::ShaderCompUnit> vunits(units.size());
         for (std::size_t i = 0; i < units.size(); i++) {
@@ -2408,7 +2529,7 @@ bool ShaderParser::CompileToSpv(std::string_view scene_id, std::span<ShaderUnit>
             PreprocessorInfo* post_info =
                 i + 1 < units.size() ? &units[i + 1].preprocess_info : nullptr;
 
-            unit.src = Finalprocessor(unit, pre_info, post_info, &uniforms_union);
+            unit.src = Finalprocessor(unit, pre_info, post_info, &uniform_interface);
 
             vunit.src   = unit.src;
             vunit.stage = unit.stage;
@@ -2516,7 +2637,7 @@ void ShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
     desc.sampler_bindings.clear();
     constexpr std::string_view texture_prefix { "g_Texture" };
     for (const auto& [name, binding] : reflected.binding_map) {
-        if (binding.descriptorType != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+        if (binding.layout.descriptorType != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
             ! std::string_view(name).starts_with(texture_prefix)) {
             continue;
         }
@@ -2539,6 +2660,7 @@ void ShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
 
     struct BindingRecord {
         std::string name;
+        uint32_t    set { 0 };
         uint32_t    binding { 0 };
         uint32_t    descriptor_type { 0 };
         uint32_t    descriptor_count { 0 };
@@ -2557,6 +2679,7 @@ void ShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
     };
 
     auto binding_less = [](const BindingRecord& lhs, const BindingRecord& rhs) {
+        if (lhs.set != rhs.set) return lhs.set < rhs.set;
         if (lhs.binding != rhs.binding) return lhs.binding < rhs.binding;
         return lhs.name < rhs.name;
     };
@@ -2573,10 +2696,11 @@ void ShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
     for (const auto& [name, binding] : reflected.binding_map) {
         bindings.push_back(BindingRecord {
             .name             = name,
-            .binding          = binding.binding,
-            .descriptor_type  = static_cast<uint32_t>(binding.descriptorType),
-            .descriptor_count = binding.descriptorCount,
-            .stage_flags      = binding.stageFlags,
+            .set              = binding.set,
+            .binding          = binding.layout.binding,
+            .descriptor_type  = static_cast<uint32_t>(binding.layout.descriptorType),
+            .descriptor_count = binding.layout.descriptorCount,
+            .stage_flags      = binding.layout.stageFlags,
         });
     }
     std::sort(bindings.begin(), bindings.end(), binding_less);
@@ -2606,6 +2730,7 @@ void ShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
     utils::hash_combine(seed, bindings.size());
     for (const auto& binding : bindings) {
         utils::hash_combine(seed, binding.name);
+        utils::hash_combine(seed, binding.set);
         utils::hash_combine(seed, binding.binding);
         utils::hash_combine(seed, binding.descriptor_type);
         utils::hash_combine(seed, binding.descriptor_count);
@@ -2624,6 +2749,87 @@ void ShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
         }
     }
     desc.descriptor_layout_hash = seed;
+
+    desc.uniform_blocks.clear();
+    bool canonical_abi = false;
+    for (const auto& block : reflected.blocks) {
+        std::size_t block_seed {};
+        utils::hash_combine(block_seed, block.set);
+        utils::hash_combine(block_seed, block.binding);
+        utils::hash_combine(block_seed, block.name);
+        utils::hash_combine(block_seed, block.size);
+        for (const auto& [name, member] : block.member_map) {
+            utils::hash_combine(block_seed, name);
+            utils::hash_combine(block_seed, member.offset);
+            utils::hash_combine(block_seed, member.size.to_primitive());
+        }
+        const bool shared = rstd::cppstd::as_str(block.name).unwrap() == kGlobalUniformBlockName;
+        canonical_abi     = canonical_abi || shared;
+        desc.uniform_blocks.push_back(SceneShaderUniformBlockInterface {
+            .name    = block.name,
+            .set     = u32(block.set),
+            .binding = u32(block.binding),
+            .scope =
+                shared ? SceneShaderUniformBlockScope::Shared : SceneShaderUniformBlockScope::Local,
+            .identity = shared ? kGlobalUniformSchemaIdentity : u64(block_seed),
+        });
+    }
+
+    desc.descriptor_sets.clear();
+    for (const auto& binding : bindings) {
+        SceneShaderDescriptorSetInterface* target = nullptr;
+        for (auto& set : desc.descriptor_sets) {
+            if (set.set == u32(binding.set)) target = rstd::addressof(set);
+        }
+        if (target == nullptr) {
+            desc.descriptor_sets.push_back(SceneShaderDescriptorSetInterface {
+                .set = u32(binding.set),
+                .push_descriptor =
+                    ! canonical_abi || binding.set != kGlobalUniformSet.to_primitive(),
+                .identity = canonical_abi && binding.set == kGlobalUniformSet.to_primitive()
+                                ? kGlobalUniformSchemaIdentity
+                                : u64(),
+            });
+            target = rstd::addressof(desc.descriptor_sets.back());
+        }
+        target->bindings.push_back(SceneShaderDescriptorBindingInterface {
+            .name             = binding.name,
+            .binding          = u32(binding.binding),
+            .descriptor_type  = u32(binding.descriptor_type),
+            .descriptor_count = u32(binding.descriptor_count),
+            .stage_flags      = u32(canonical_abi && binding.set == kGlobalUniformSet.to_primitive()
+                                        ? VK_SHADER_STAGE_ALL_GRAPHICS
+                                        : binding.stage_flags),
+        });
+    }
+    if (canonical_abi) {
+        bool has_draw_set = false;
+        for (const auto& set : desc.descriptor_sets) has_draw_set |= set.set == kDrawUniformSet;
+        if (! has_draw_set) {
+            desc.descriptor_sets.push_back(SceneShaderDescriptorSetInterface {
+                .set             = kDrawUniformSet,
+                .push_descriptor = true,
+            });
+        }
+    }
+    for (auto& set : desc.descriptor_sets) {
+        if (set.identity != u64()) continue;
+        std::size_t set_seed {};
+        utils::hash_combine(set_seed, set.set.to_primitive());
+        for (const auto& binding : set.bindings) {
+            utils::hash_combine(set_seed, binding.name);
+            utils::hash_combine(set_seed, binding.binding.to_primitive());
+            utils::hash_combine(set_seed, binding.descriptor_type.to_primitive());
+            utils::hash_combine(set_seed, binding.descriptor_count.to_primitive());
+            utils::hash_combine(set_seed, binding.stage_flags.to_primitive());
+        }
+        set.identity = u64(set_seed);
+    }
+    std::sort(desc.descriptor_sets.begin(),
+              desc.descriptor_sets.end(),
+              [](const auto& lhs, const auto& rhs) {
+                  return lhs.set < rhs.set;
+              });
 }
 
 CompileSceneShaderVariantResult
@@ -2706,6 +2912,8 @@ ShaderParser::CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs::
     shader->matrix_abi        = ShaderMatrixAbi::Hlsl;
     shader->codes             = std::move(spvs);
     shader->sampler_bindings  = result.variant.sampler_bindings;
+    shader->uniform_blocks    = result.variant.uniform_blocks;
+    shader->descriptor_sets   = result.variant.descriptor_sets;
     shader->default_uniforms  = result.info.svs;
     result.shader             = std::move(shader);
     result.ok                 = true;
@@ -2796,6 +3004,13 @@ CompileMaterialShaderResult ShaderParser::CompileMaterialShader(const Json&     
                                                r.tex_info,
                                                cache);
     r.ok          = ok;
-    if (! ok) r.error = "CompileToSpv failed";
+    if (! ok) {
+        r.error = "CompileToSpv failed";
+        return r;
+    }
+    SceneShaderVariantDesc variant;
+    ShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(variant, units, r.spvs);
+    r.uniform_blocks  = rstd::move(variant.uniform_blocks);
+    r.descriptor_sets = rstd::move(variant.descriptor_sets);
     return r;
 }

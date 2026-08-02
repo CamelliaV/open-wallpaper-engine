@@ -113,6 +113,19 @@ auto SceneShaderArtifactProvider::LoadShader(const resource::ShaderRequest& requ
     }
     artifact.uniform_blocks.reserve(usize((**reflection).reflected.blocks.size()));
     for (const auto& block : (**reflection).reflected.blocks) {
+        auto scope = resource::ShaderArtifactUniformBlock::Scope::Local;
+        u64  identity {};
+        for (const auto& declared : m_shader->uniform_blocks) {
+            if (declared.name != block.name || declared.set != u32(block.set) ||
+                declared.binding != u32(block.binding)) {
+                continue;
+            }
+            scope    = declared.scope == SceneShaderUniformBlockScope::Shared
+                           ? resource::ShaderArtifactUniformBlock::Scope::Shared
+                           : resource::ShaderArtifactUniformBlock::Scope::Local;
+            identity = declared.identity;
+            break;
+        }
         auto members = rstd::vec::Vec<resource::ShaderArtifactUniformMember>::with_capacity(
             usize(block.member_map.size()));
         for (const auto& [name, member] : block.member_map) {
@@ -136,20 +149,98 @@ auto SceneShaderArtifactProvider::LoadShader(const resource::ShaderRequest& requ
             });
         }
         artifact.uniform_blocks.push(resource::ShaderArtifactUniformBlock {
-            .name    = rstd::string::String::make(rstd::cppstd::as_str(block.name).unwrap()),
-            .size    = usize(block.size),
-            .members = rstd::move(members),
+            .name     = rstd::string::String::make(rstd::cppstd::as_str(block.name).unwrap()),
+            .size     = usize(block.size),
+            .set      = u32(block.set),
+            .binding  = u32(block.binding),
+            .scope    = scope,
+            .identity = identity,
+            .members  = rstd::move(members),
         });
     }
     artifact.descriptor_bindings.reserve(usize((**reflection).reflected.binding_map.size()));
     for (const auto& [name, binding] : (**reflection).reflected.binding_map) {
         artifact.descriptor_bindings.push(resource::ShaderArtifactDescriptorBinding {
             .name             = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
-            .binding          = u32(binding.binding),
-            .descriptor_type  = u32(static_cast<rstd::uint32_t>(binding.descriptorType)),
-            .descriptor_count = u32(binding.descriptorCount),
-            .stage_flags      = u32(binding.stageFlags),
+            .set              = u32(binding.set),
+            .binding          = u32(binding.layout.binding),
+            .descriptor_type  = u32(static_cast<rstd::uint32_t>(binding.layout.descriptorType)),
+            .descriptor_count = u32(binding.layout.descriptorCount),
+            .stage_flags      = u32(binding.layout.stageFlags),
         });
+    }
+    if (! m_shader->descriptor_sets.empty()) {
+        artifact.descriptor_sets.reserve(usize(m_shader->descriptor_sets.size()));
+        for (const auto& declared : m_shader->descriptor_sets) {
+            auto bindings =
+                rstd::vec::Vec<resource::ShaderArtifactDescriptorBinding>::with_capacity(
+                    usize(declared.bindings.size()));
+            for (const auto& binding : declared.bindings) {
+                bindings.push(resource::ShaderArtifactDescriptorBinding {
+                    .name             = String::make(rstd::cppstd::as_str(binding.name).unwrap()),
+                    .set              = declared.set,
+                    .binding          = binding.binding,
+                    .descriptor_type  = binding.descriptor_type,
+                    .descriptor_count = binding.descriptor_count,
+                    .stage_flags      = binding.stage_flags,
+                });
+            }
+            artifact.descriptor_sets.push(resource::ShaderArtifactDescriptorSet {
+                .set             = declared.set,
+                .push_descriptor = declared.push_descriptor,
+                .identity        = declared.identity,
+                .bindings        = rstd::move(bindings),
+            });
+        }
+    } else {
+        for (const auto& binding : artifact.descriptor_bindings) {
+            resource::ShaderArtifactDescriptorSet* target = nullptr;
+            for (auto& set : artifact.descriptor_sets) {
+                if (set.set == binding.set) target = rstd::addressof(set);
+            }
+            if (target == nullptr) {
+                artifact.descriptor_sets.push(resource::ShaderArtifactDescriptorSet {
+                    .set = binding.set,
+                });
+                target = rstd::addressof(
+                    artifact.descriptor_sets[artifact.descriptor_sets.len() - usize(1)]);
+            }
+            target->bindings.push(binding.clone());
+        }
+        if (! artifact.descriptor_sets.is_empty()) {
+            auto push_set = artifact.descriptor_sets[usize()].set;
+            for (const auto& set : artifact.descriptor_sets) {
+                if (set.set > push_set) push_set = set.set;
+            }
+            for (auto& set : artifact.descriptor_sets) {
+                set.push_descriptor = set.set == push_set;
+            }
+        }
+    }
+    rstd::slice_::sort_unstable_by(artifact.descriptor_sets.as_mut_slice().as_mut_ref(),
+                                   [](const auto& lhs, const auto& rhs) {
+                                       return lhs.set < rhs.set;
+                                   });
+    for (const auto& active : artifact.descriptor_bindings) {
+        bool compatible = false;
+        for (const auto& set : artifact.descriptor_sets) {
+            if (set.set != active.set) continue;
+            for (const auto& declared : set.bindings) {
+                if (declared.binding != active.binding) continue;
+                compatible = declared.descriptor_type == active.descriptor_type &&
+                             declared.descriptor_count == active.descriptor_count &&
+                             (declared.stage_flags & active.stage_flags) == active.stage_flags;
+            }
+        }
+        if (! compatible) {
+            return rstd::Err(resource::ResourceError {
+                .kind = resource::ResourceErrorKind::MissingDefinition,
+                .message =
+                    rstd::format("shader descriptor requirement does not cover binding {}:{}",
+                                 active.set,
+                                 active.binding),
+            });
+        }
     }
     artifact.vertex_inputs.reserve(usize((**reflection).reflected.input_location_map.size()));
     for (const auto& [name, input] : (**reflection).reflected.input_location_map) {
@@ -182,9 +273,11 @@ auto ShaderReflectionFromArtifact(const resource::ShaderArtifact& artifact) -> S
     for (rstd::usize index {}; index < artifact.uniform_blocks.len(); ++index) {
         const auto&            block = artifact.uniform_blocks[index];
         ShaderReflected::Block prepared {
-            .index = static_cast<int>(index.to_primitive()),
-            .size  = static_cast<unsigned>(block.size.to_primitive()),
-            .name  = rstd::cppstd::to_string(block.name.as_str()),
+            .index   = static_cast<int>(index.to_primitive()),
+            .size    = static_cast<unsigned>(block.size.to_primitive()),
+            .name    = rstd::cppstd::to_string(block.name.as_str()),
+            .set     = block.set.to_primitive(),
+            .binding = block.binding.to_primitive(),
         };
         for (const auto& member : block.members) {
             ShaderReflected::BlockedUniform reflected_member {
@@ -213,13 +306,17 @@ auto ShaderReflectionFromArtifact(const resource::ShaderArtifact& artifact) -> S
     for (const auto& binding : artifact.descriptor_bindings) {
         reflected.binding_map.emplace(
             rstd::cppstd::to_string(binding.name.as_str()),
-            VkDescriptorSetLayoutBinding {
-                .binding = binding.binding.to_primitive(),
-                .descriptorType =
-                    static_cast<VkDescriptorType>(binding.descriptor_type.to_primitive()),
-                .descriptorCount    = binding.descriptor_count.to_primitive(),
-                .stageFlags         = binding.stage_flags.to_primitive(),
-                .pImmutableSamplers = nullptr,
+            ShaderReflected::Binding {
+                .set = binding.set.to_primitive(),
+                .layout =
+                    VkDescriptorSetLayoutBinding {
+                        .binding = binding.binding.to_primitive(),
+                        .descriptorType =
+                            static_cast<VkDescriptorType>(binding.descriptor_type.to_primitive()),
+                        .descriptorCount    = binding.descriptor_count.to_primitive(),
+                        .stageFlags         = binding.stage_flags.to_primitive(),
+                        .pImmutableSamplers = nullptr,
+                    },
             });
     }
     for (const auto& input : artifact.vertex_inputs) {

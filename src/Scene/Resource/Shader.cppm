@@ -108,23 +108,36 @@ struct ShaderArtifactUniformMember {
 };
 
 struct ShaderArtifactUniformBlock {
-    String                                      name;
-    usize                                       size {};
+    String name;
+    usize  size {};
+    u32    set {};
+    u32    binding {};
+    enum class Scope : rstd::uint8_t
+    {
+        Shared,
+        Local,
+    } scope { Scope::Local };
+    u64                                         identity {};
     rstd::vec::Vec<ShaderArtifactUniformMember> members;
 
     auto clone() const -> ShaderArtifactUniformBlock {
         auto cloned = rstd::vec::Vec<ShaderArtifactUniformMember>::with_capacity(members.len());
         for (const auto& member : members) cloned.push(member.clone());
         return ShaderArtifactUniformBlock {
-            .name    = name.clone(),
-            .size    = size,
-            .members = rstd::move(cloned),
+            .name     = name.clone(),
+            .size     = size,
+            .set      = set,
+            .binding  = binding,
+            .scope    = scope,
+            .identity = identity,
+            .members  = rstd::move(cloned),
         };
     }
 };
 
 struct ShaderArtifactDescriptorBinding {
     String name;
+    u32    set {};
     u32    binding {};
     u32    descriptor_type {};
     u32    descriptor_count { u32(1) };
@@ -133,10 +146,30 @@ struct ShaderArtifactDescriptorBinding {
     auto clone() const -> ShaderArtifactDescriptorBinding {
         return ShaderArtifactDescriptorBinding {
             .name             = name.clone(),
+            .set              = set,
             .binding          = binding,
             .descriptor_type  = descriptor_type,
             .descriptor_count = descriptor_count,
             .stage_flags      = stage_flags,
+        };
+    }
+};
+
+struct ShaderArtifactDescriptorSet {
+    u32                                             set {};
+    bool                                            push_descriptor { false };
+    u64                                             identity {};
+    rstd::vec::Vec<ShaderArtifactDescriptorBinding> bindings;
+
+    auto clone() const -> ShaderArtifactDescriptorSet {
+        auto cloned =
+            rstd::vec::Vec<ShaderArtifactDescriptorBinding>::with_capacity(bindings.len());
+        for (const auto& binding : bindings) cloned.push(binding.clone());
+        return ShaderArtifactDescriptorSet {
+            .set             = set,
+            .push_descriptor = push_descriptor,
+            .identity        = identity,
+            .bindings        = rstd::move(cloned),
         };
     }
 };
@@ -163,6 +196,7 @@ struct ShaderArtifact {
     rstd::vec::Vec<ShaderArtifactStage> stages;
     rstd::vec::Vec<ShaderArtifactUniformBlock>      uniform_blocks;
     rstd::vec::Vec<ShaderArtifactDescriptorBinding> descriptor_bindings;
+    rstd::vec::Vec<ShaderArtifactDescriptorSet>     descriptor_sets;
     rstd::vec::Vec<ShaderArtifactVertexInput>       vertex_inputs;
 
     auto clone() const -> ShaderArtifact {
@@ -174,6 +208,9 @@ struct ShaderArtifact {
         auto cloned_bindings = rstd::vec::Vec<ShaderArtifactDescriptorBinding>::with_capacity(
             descriptor_bindings.len());
         for (const auto& binding : descriptor_bindings) cloned_bindings.push(binding.clone());
+        auto cloned_sets =
+            rstd::vec::Vec<ShaderArtifactDescriptorSet>::with_capacity(descriptor_sets.len());
+        for (const auto& set : descriptor_sets) cloned_sets.push(set.clone());
         auto cloned_inputs =
             rstd::vec::Vec<ShaderArtifactVertexInput>::with_capacity(vertex_inputs.len());
         for (const auto& input : vertex_inputs) cloned_inputs.push(input.clone());
@@ -185,6 +222,7 @@ struct ShaderArtifact {
             .stages              = rstd::move(cloned_stages),
             .uniform_blocks      = rstd::move(cloned_blocks),
             .descriptor_bindings = rstd::move(cloned_bindings),
+            .descriptor_sets     = rstd::move(cloned_sets),
             .vertex_inputs       = rstd::move(cloned_inputs),
         };
     }

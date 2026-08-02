@@ -31,6 +31,7 @@ struct RenderPassUseHandleTag;
 struct FramebufferUseHandleTag;
 struct ExternalUseHandleTag;
 struct DescriptorLayoutHandleTag;
+struct PipelineLayoutHandleTag;
 struct DescriptorBindingHandleTag;
 
 using TextureHandle           = ResourceHandle<TextureHandleTag>;
@@ -48,6 +49,7 @@ using RenderPassUseHandle     = ResourceHandle<RenderPassUseHandleTag>;
 using FramebufferUseHandle    = ResourceHandle<FramebufferUseHandleTag>;
 using ExternalUseHandle       = ResourceHandle<ExternalUseHandleTag>;
 using DescriptorLayoutHandle  = ResourceHandle<DescriptorLayoutHandleTag>;
+using PipelineLayoutHandle    = ResourceHandle<PipelineLayoutHandleTag>;
 using DescriptorBindingHandle = ResourceHandle<DescriptorBindingHandleTag>;
 
 } // namespace owe::resource

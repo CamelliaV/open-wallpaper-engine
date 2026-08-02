@@ -103,10 +103,11 @@ struct UniformBufferUpdate {
             -> Result<empty, UniformBufferUpdateError> {
             return rstd::trait_call<0>(this, context, buffers);
         }
+        auto Buffer() const -> resource::BufferUseHandle { return rstd::trait_call<1>(this); }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::Update>;
+    using Funcs = TraitFuncs<&T::Update, &T::Buffer>;
 };
 
 struct BoundUniformOutput {
@@ -162,11 +163,14 @@ struct UniformBindingPrepareContext {
         auto ResolveSource(UniformSourceId source) const -> Option<ref<dyn<UniformSource>>> {
             return rstd::trait_call<4>(this, source);
         }
+        auto ResolveBlock(u64 identity) const -> Option<ref<UniformBlockDefinition>> {
+            return rstd::trait_call<5>(this, identity);
+        }
     };
 
     template<typename T>
     using Funcs = TraitFuncs<&T::ResolveDraw, &T::DrawItemFor, &T::GlobalSources, &T::NodeSources,
-                             &T::ResolveSource>;
+                             &T::ResolveSource, &T::ResolveBlock>;
 };
 
 class SceneUniformBindingPrepareContext {
@@ -179,6 +183,7 @@ public:
     auto GlobalSources() const -> slice<UniformSourceAttachment>;
     auto NodeSources(SceneNodeId) const -> slice<UniformSourceAttachment>;
     auto ResolveSource(UniformSourceId) const -> Option<ref<dyn<UniformSource>>>;
+    auto ResolveBlock(u64 identity) const -> Option<ref<UniformBlockDefinition>>;
 
 private:
     mutable ref<Scene> m_scene;
@@ -194,6 +199,7 @@ public:
     auto Update(ref<dyn<UniformBufferFrameContext>>,
                 mut_ref<dyn<resource::BufferContentWriter>>) const
         -> Result<empty, UniformBufferUpdateError>;
+    auto Buffer() const -> resource::BufferUseHandle { return m_buffer; }
 
     auto WriteSlot(usize slot_index, UniformValueView value) const
         -> Result<bool, UniformBufferUpdateError>;
@@ -217,12 +223,40 @@ private:
     mutable bool           m_uploaded { false };
 };
 
+class SharedUniformBufferBinding {
+public:
+    SharedUniformBufferBinding(resource::BufferUseHandle, UniformBufferLayout,
+                               Vec<BoundUniformSource>, ShaderMatrixConvention, ShaderMatrixAbi);
+
+    auto Update(ref<dyn<UniformBufferFrameContext>>,
+                mut_ref<dyn<resource::BufferContentWriter>>) const
+        -> Result<empty, UniformBufferUpdateError>;
+    auto Buffer() const -> resource::BufferUseHandle { return m_buffer; }
+    auto WriteSlot(usize slot_index, UniformValueView value) const
+        -> Result<bool, UniformBufferUpdateError>;
+
+private:
+    resource::BufferUseHandle       m_buffer;
+    UniformBufferLayout             m_layout;
+    mutable Vec<BoundUniformSource> m_sources;
+    mutable rstd::vec::Vec<u8>      m_data;
+    ShaderMatrixConvention          m_matrix_convention { ShaderMatrixConvention::ColumnVector };
+    ShaderMatrixAbi                 m_matrix_abi { ShaderMatrixAbi::NativeSpirv };
+    mutable bool                    m_uploaded { false };
+};
+
 auto MakeUniformBufferBinding(
     ref<dyn<UniformBindingPrepareContext>>, SceneDrawItemId, resource::BufferUseHandle,
     const resource::ShaderArtifactUniformBlock&, Vec<PreparedUniformTextureMetadata> textures = {},
     SceneRenderViewKind    render_view       = SceneRenderViewKind::Primary,
     ShaderMatrixConvention matrix_convention = ShaderMatrixConvention::ColumnVector,
     ShaderMatrixAbi        matrix_abi        = ShaderMatrixAbi::NativeSpirv)
+    -> Result<Box<dyn<UniformBufferUpdate>>, UniformBufferUpdateError>;
+
+auto MakeSharedUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>>,
+                                    resource::BufferUseHandle,
+                                    const resource::ShaderArtifactUniformBlock&,
+                                    ShaderMatrixConvention, ShaderMatrixAbi)
     -> Result<Box<dyn<UniformBufferUpdate>>, UniformBufferUpdateError>;
 
 } // namespace owe::vulkan

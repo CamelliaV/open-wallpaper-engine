@@ -256,14 +256,24 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
 
         for (auto pb : bindings) {
             auto& b = *pb;
-            if (! b.accessed) continue;
+            if (! b.accessed && b.descriptor_type != SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                continue;
 
             auto bind_name = std::string(b.name).empty() && b.type_description->type_name != nullptr
                                  ? b.type_description->type_name
                                  : b.name;
 
             if (exists(ref.binding_map, bind_name)) {
-                auto& bind = ref.binding_map[bind_name];
+                auto&      bind = ref.binding_map[bind_name];
+                const auto descriptor_type =
+                    b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+                        ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                        : static_cast<VkDescriptorType>(b.descriptor_type);
+                if (bind.set != b.set || bind.layout.binding != b.binding ||
+                    bind.layout.descriptorType != descriptor_type) {
+                    rstd_error("descriptor {} differs across shader stages", bind_name);
+                    return false;
+                }
                 if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
                     auto block_index = uniform_block_indices.find(bind_name);
                     if (block_index == uniform_block_indices.end() ||
@@ -274,7 +284,7 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                         return false;
                     }
                 }
-                bind.stageFlags |= stage;
+                bind.layout.stageFlags |= stage;
                 continue;
             }
             if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
@@ -284,6 +294,8 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                     ShaderReflected::Block { .index      = static_cast<int>(ref.blocks.size()),
                                              .size       = block.size,
                                              .name       = std::move(block_name),
+                                             .set        = b.set,
+                                             .binding    = b.binding,
                                              .member_map = {} });
                 auto& ref_block                  = ref.blocks.back();
                 uniform_block_indices[bind_name] = usize(ref.blocks.size() - 1);
@@ -319,7 +331,10 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                 return false;
             }
 
-            ref.binding_map[bind_name] = vkbinding;
+            ref.binding_map[bind_name] = ShaderReflected::Binding {
+                .set    = b.set,
+                .layout = vkbinding,
+            };
         }
 
         if (stage == VK_SHADER_STAGE_VERTEX_BIT) {

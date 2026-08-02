@@ -42,6 +42,12 @@ public:
     void Reset() {
         m_submissions.Reset();
         m_uploads.Reset();
+        m_pipeline_cache.Reset();
+        m_framebuffer_cache.Reset();
+        m_descriptor_system.Reset();
+        m_pipeline_layouts.Reset();
+        m_descriptor_layouts.Reset();
+        m_render_pass_cache.Reset();
         m_buffer_entries.Reset();
         m_texture_entries.Reset();
         if (m_buffer_manager.is_some()) m_buffer_manager->get()->destroy();
@@ -50,13 +56,8 @@ public:
         m_image_uploads  = None();
         m_textures       = None();
         m_shader_entries.Reset();
-        m_descriptor_layouts.Reset();
-        m_descriptor_system.Reset();
         m_states.Reset();
         m_memory.Reset();
-        m_pipeline_cache.Reset();
-        m_render_pass_cache.Reset();
-        m_framebuffer_cache.Reset();
         m_pipeline_diagnostics.Reset();
         m_framebuffer_diagnostics.Reset();
     }
@@ -82,6 +83,7 @@ public:
     auto Buffers() -> BufferRegistry& { return m_buffer_entries; }
     auto Shaders() -> ShaderRegistry& { return m_shader_entries; }
     auto DescriptorLayouts() -> DescriptorLayoutRegistry& { return m_descriptor_layouts; }
+    auto PipelineLayouts() -> PipelineLayoutRegistry& { return m_pipeline_layouts; }
     auto Descriptors() -> DescriptorSystem& { return m_descriptor_system; }
     auto Uploads() -> UploadScheduler& { return m_uploads; }
     auto Submissions() -> SubmissionTracker& { return m_submissions; }
@@ -107,6 +109,7 @@ private:
     BufferRegistry                          m_buffer_entries;
     ShaderRegistry                          m_shader_entries;
     DescriptorLayoutRegistry                m_descriptor_layouts;
+    PipelineLayoutRegistry                  m_pipeline_layouts;
     DescriptorSystem                        m_descriptor_system;
     UploadScheduler                         m_uploads;
     SubmissionTracker                       m_submissions;

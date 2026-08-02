@@ -796,6 +796,7 @@ struct DeviceCapabilities {
     bool           timeline_semaphore { false };
     bool           synchronization2 { false };
     bool           push_descriptor { false };
+    rstd::uint32_t max_push_descriptors { 0 };
     bool           memory_budget { false };
     bool           external_memory_fd { false };
     bool           external_memory_dma_buf { false };
@@ -1054,14 +1055,26 @@ struct BufferBackend {
 // ---------- GraphicsPipeline.hpp ----------
 
 struct PipelineParameters {
-    vvk::Pipeline       handle;
-    vvk::PipelineLayout layout;
+    vvk::Pipeline    handle;
+    VkPipelineLayout layout { VK_NULL_HANDLE };
 };
 
 struct DescriptorSetInfo {
     bool push_descriptor { false };
 
-    std::vector<VkDescriptorSetLayoutBinding> bindings;
+    Vec<VkDescriptorSetLayoutBinding> bindings;
+
+    auto clone() const -> DescriptorSetInfo {
+        auto cloned = Vec<VkDescriptorSetLayoutBinding>::with_capacity(bindings.len());
+        for (const auto& binding : bindings) {
+            auto copied = binding;
+            cloned.push(rstd::move(copied));
+        }
+        return DescriptorSetInfo {
+            .push_descriptor = push_descriptor,
+            .bindings        = rstd::move(cloned),
+        };
+    }
 };
 
 class GraphicsPipeline : NoCopy, NoMove {
@@ -1070,7 +1083,7 @@ public:
     ~GraphicsPipeline();
 
     void toDefault();
-    bool create(const Device&, VkRenderPass, PipelineParameters&);
+    bool create(const Device&, VkRenderPass, VkPipelineLayout, PipelineParameters&);
 
     VkPipelineMultisampleStateCreateInfo   multisample {};
     VkPipelineRasterizationStateCreateInfo raster {};
@@ -1085,7 +1098,6 @@ public:
     GraphicsPipeline& setLogicOp(bool enable, VkLogicOp);
 
     GraphicsPipeline& setRenderPass(vvk::RenderPass);
-    GraphicsPipeline& setDescriptorSetLayouts(std::span<const VkDescriptorSetLayout>);
     GraphicsPipeline& addStage(Uni_ShaderSpv&&);
     GraphicsPipeline&
         addInputAttributeDescription(std::span<const VkVertexInputAttributeDescription>);
@@ -1112,7 +1124,6 @@ private:
     VkPipelineColorBlendStateCreateInfo              m_color;
     std::vector<VkDynamicState>                      m_dynamic_states;
     std::vector<VkPipelineColorBlendAttachmentState> m_color_attachments;
-    std::vector<VkDescriptorSetLayout>               m_descriptor_set_layouts;
     Map<VkShaderStageFlagBits, Uni_ShaderSpv>        m_stage_spv_map;
 };
 

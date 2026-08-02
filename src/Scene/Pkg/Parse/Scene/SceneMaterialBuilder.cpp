@@ -489,6 +489,8 @@ auto BuildMaterial(fs::VFS& vfs, ShaderCache& shader_cache,
     ShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
         variant_desc, sd_units, shader->codes);
     shader->sampler_bindings = variant_desc.sampler_bindings;
+    shader->uniform_blocks   = variant_desc.uniform_blocks;
+    shader->descriptor_sets  = variant_desc.descriptor_sets;
 
     material.blenmode    = blend_mode;
     material.depth_test  = ParseEnabled(wpmat.depthtest);

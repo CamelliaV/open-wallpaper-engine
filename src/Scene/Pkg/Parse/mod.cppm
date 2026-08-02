@@ -16,4 +16,5 @@ export import :shader_parser;
 export import :sound_parser;
 export import :tex_image_parser;
 export import :uniform;
+export import :global_uniform;
 export import :uniform_source;

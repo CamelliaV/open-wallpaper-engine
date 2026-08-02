@@ -14,9 +14,263 @@ export namespace owe::resource_registry
 
 using namespace owe::vulkan;
 
-struct PipelineResourceEntry {
-    PipelineParameters                               pipeline;
+struct PipelineLayoutRequest {
+    Vec<DescriptorSetInfo>   descriptor_sets;
+    Vec<VkPushConstantRange> push_constants;
+
+    auto clone() const -> PipelineLayoutRequest {
+        auto cloned_sets = Vec<DescriptorSetInfo>::with_capacity(descriptor_sets.len());
+        for (const auto& descriptor_set : descriptor_sets) {
+            cloned_sets.push(descriptor_set.clone());
+        }
+        auto cloned_ranges = Vec<VkPushConstantRange>::with_capacity(push_constants.len());
+        for (const auto& range : push_constants) {
+            auto copied = range;
+            cloned_ranges.push(rstd::move(copied));
+        }
+        return PipelineLayoutRequest {
+            .descriptor_sets = rstd::move(cloned_sets),
+            .push_constants  = rstd::move(cloned_ranges),
+        };
+    }
+};
+
+struct PipelinePushConstantSchema {
+    rstd::uint32_t stage_flags {};
+    rstd::uint32_t offset {};
+    rstd::uint32_t size {};
+
+    friend bool operator==(const PipelinePushConstantSchema&,
+                           const PipelinePushConstantSchema&) = default;
+};
+
+struct PipelineLayoutSchema {
     rstd::vec::Vec<resource::DescriptorLayoutHandle> descriptor_layouts;
+    rstd::vec::Vec<PipelinePushConstantSchema>       push_constants;
+
+    auto clone() const -> PipelineLayoutSchema {
+        return PipelineLayoutSchema {
+            .descriptor_layouts = descriptor_layouts.clone(),
+            .push_constants     = push_constants.clone(),
+        };
+    }
+
+    friend bool operator==(const PipelineLayoutSchema&, const PipelineLayoutSchema&) = default;
+};
+
+struct PipelineLayoutResourceEntry {
+    resource::PipelineLayoutHandle                   handle;
+    rstd::vec::Vec<resource::DescriptorLayoutHandle> descriptor_layouts;
+    rstd::vec::Vec<PipelinePushConstantSchema>       push_constants;
+    rstd::uint64_t                                   push_constant_identity {};
+    vvk::PipelineLayout                              layout;
+};
+
+struct PipelineLayoutResult {
+    resource::PipelineLayoutHandle               handle;
+    rstd::sync::Arc<PipelineLayoutResourceEntry> physical;
+};
+
+} // namespace owe::resource_registry
+
+export namespace rstd
+{
+
+template<>
+struct Impl<hash::Hash, owe::resource_registry::PipelineLayoutSchema>
+    : ImplBase<owe::resource_registry::PipelineLayoutSchema> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        const auto& schema = this->self();
+        hash::hash_into(schema.descriptor_layouts.len(), state);
+        for (const auto& layout : schema.descriptor_layouts) hash::hash_into(layout, state);
+        hash::hash_into(schema.push_constants.len(), state);
+        for (const auto& range : schema.push_constants) {
+            hash::hash_into(range.stage_flags, state);
+            hash::hash_into(range.offset, state);
+            hash::hash_into(range.size, state);
+        }
+    }
+};
+
+} // namespace rstd
+
+export namespace owe::resource_registry
+{
+
+using namespace owe::vulkan;
+
+class PipelineLayoutRegistry {
+public:
+    auto Ensure(const Device& device, const PipelineLayoutRequest& request,
+                DescriptorLayoutRegistry& descriptor_layouts)
+        -> Result<PipelineLayoutResult, resource::ResourceError> {
+        auto vk_layouts =
+            rstd::vec::Vec<VkDescriptorSetLayout>::with_capacity(request.descriptor_sets.len());
+        auto layout_handles = rstd::vec::Vec<resource::DescriptorLayoutHandle>::with_capacity(
+            request.descriptor_sets.len());
+        for (const auto& descriptor_set : request.descriptor_sets) {
+            auto ensured = descriptor_layouts.Ensure(device, descriptor_set);
+            if (ensured.is_err()) return Err(rstd::move(ensured).unwrap_err_unchecked());
+            auto handle   = rstd::move(ensured).unwrap_unchecked();
+            auto resolved = descriptor_layouts.Resolve(handle);
+            if (resolved.is_none()) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::MissingDefinition,
+                    .message = rstd::format("descriptor layout unavailable"),
+                });
+            }
+            layout_handles.push(resource::DescriptorLayoutHandle {
+                .index      = handle.index,
+                .generation = handle.generation,
+            });
+            auto vk_layout = *(**resolved).layout;
+            vk_layouts.push(rstd::move(vk_layout));
+        }
+
+        auto push_constants =
+            rstd::vec::Vec<PipelinePushConstantSchema>::with_capacity(request.push_constants.len());
+        for (const auto& range : request.push_constants) {
+            if (range.stageFlags == 0 || range.size == 0) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::MissingDefinition,
+                    .message = rstd::format("invalid pipeline push constant range"),
+                });
+            }
+            push_constants.push(PipelinePushConstantSchema {
+                .stage_flags = range.stageFlags,
+                .offset      = range.offset,
+                .size        = range.size,
+            });
+        }
+        rstd::slice_::sort_unstable_by(push_constants.as_mut_slice().as_mut_ref(),
+                                       [](const auto& lhs, const auto& rhs) {
+                                           if (lhs.offset != rhs.offset)
+                                               return lhs.offset < rhs.offset;
+                                           if (lhs.size != rhs.size) return lhs.size < rhs.size;
+                                           return lhs.stage_flags < rhs.stage_flags;
+                                       });
+
+        PipelineLayoutSchema schema {
+            .descriptor_layouts = rstd::move(layout_handles),
+            .push_constants     = rstd::move(push_constants),
+        };
+        if (auto existing = m_handles.get(schema); existing.is_some()) {
+            auto physical = m_entries.get(**existing);
+            if (physical.is_some()) {
+                return Ok(PipelineLayoutResult {
+                    .handle   = **existing,
+                    .physical = (**physical).clone(),
+                });
+            }
+        }
+
+        auto vk_push_constants =
+            rstd::vec::Vec<VkPushConstantRange>::with_capacity(schema.push_constants.len());
+        for (const auto& range : schema.push_constants) {
+            vk_push_constants.push(VkPushConstantRange {
+                .stageFlags = range.stage_flags,
+                .offset     = range.offset,
+                .size       = range.size,
+            });
+        }
+        VkPipelineLayoutCreateInfo create_info {
+            .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .pNext          = nullptr,
+            .flags          = {},
+            .setLayoutCount = static_cast<rstd::uint32_t>(vk_layouts.len().to_primitive()),
+            .pSetLayouts    = vk_layouts.data(),
+            .pushConstantRangeCount =
+                static_cast<rstd::uint32_t>(vk_push_constants.len().to_primitive()),
+            .pPushConstantRanges = vk_push_constants.data(),
+        };
+        vvk::PipelineLayout layout;
+        if (device.handle().CreatePipelineLayout(create_info, layout) != VK_SUCCESS) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = rstd::format("create pipeline layout failed"),
+            });
+        }
+
+        auto handle                 = NextHandle();
+        auto push_constant_identity = PushConstantIdentity(schema.push_constants.as_slice());
+        auto entry =
+            rstd::sync::Arc<PipelineLayoutResourceEntry>::make(PipelineLayoutResourceEntry {
+                .handle                 = handle,
+                .descriptor_layouts     = schema.descriptor_layouts.clone(),
+                .push_constants         = schema.push_constants.clone(),
+                .push_constant_identity = push_constant_identity,
+                .layout                 = rstd::move(layout),
+            });
+        (void)m_handles.insert(schema.clone(), handle);
+        (void)m_entries.insert(handle, entry.clone());
+        return Ok(PipelineLayoutResult {
+            .handle   = handle,
+            .physical = rstd::move(entry),
+        });
+    }
+
+    auto Resolve(resource::PipelineLayoutHandle handle) const
+        -> Option<rstd::sync::Arc<PipelineLayoutResourceEntry>> {
+        auto entry = m_entries.get(handle);
+        if (entry.is_none()) return None();
+        return Some((**entry).clone());
+    }
+
+    void PruneExpired() {
+        m_entries.retain([&](const resource::PipelineLayoutHandle&,
+                             rstd::sync::Arc<PipelineLayoutResourceEntry>& entry) {
+            if (entry.strong_count() > usize(1)) return true;
+            auto schema = PipelineLayoutSchema {
+                .descriptor_layouts = entry->descriptor_layouts.clone(),
+                .push_constants     = entry->push_constants.clone(),
+            };
+            (void)m_handles.remove(schema);
+            return false;
+        });
+    }
+
+    void Reset() {
+        m_handles.clear();
+        m_entries.clear();
+        m_next_index = u64();
+        ++m_generation;
+        if (m_generation == u64()) ++m_generation;
+    }
+
+    auto Size() const noexcept -> usize { return m_entries.len(); }
+
+private:
+    static auto PushConstantIdentity(slice<PipelinePushConstantSchema> ranges) -> rstd::uint64_t {
+        rstd::uint64_t identity = 1469598103934665603ULL;
+        auto           mix      = [&](rstd::uint32_t value) {
+            identity ^= value;
+            identity *= 1099511628211ULL;
+        };
+        for (const auto& range : ranges) {
+            mix(range.stage_flags);
+            mix(range.offset);
+            mix(range.size);
+        }
+        return identity;
+    }
+
+    auto NextHandle() -> resource::PipelineLayoutHandle {
+        return { .index = m_next_index++, .generation = m_generation };
+    }
+
+    rstd::collections::HashMap<PipelineLayoutSchema, resource::PipelineLayoutHandle> m_handles;
+    rstd::collections::HashMap<resource::PipelineLayoutHandle,
+                               rstd::sync::Arc<PipelineLayoutResourceEntry>>
+        m_entries;
+    u64 m_generation { 1 };
+    u64 m_next_index { 0 };
+};
+
+struct PipelineResourceEntry {
+    PipelineParameters                           pipeline;
+    rstd::sync::Arc<PipelineLayoutResourceEntry> layout;
 };
 
 struct PipelineResourceResult {
@@ -206,7 +460,7 @@ private:
 };
 
 inline bool HasPipelineResources(const PipelineParameters& pipeline) {
-    return static_cast<bool>(pipeline.handle) || static_cast<bool>(pipeline.layout);
+    return static_cast<bool>(pipeline.handle) || pipeline.layout != VK_NULL_HANDLE;
 }
 
 inline bool HasPipelineResources(const PipelineResourceEntry& entry) {
@@ -410,8 +664,7 @@ private:
 class PipelineRegistry {
 public:
     auto Ensure(const Device& device, PipelineResourceRequest request,
-                RenderPassRegistry&                          render_pass_cache,
-                resource_registry::DescriptorLayoutRegistry& descriptor_layouts)
+                RenderPassRegistry& render_pass_cache, PipelineLayoutRegistry& pipeline_layouts)
         -> Option<PipelineResourceResult> {
         auto desc = MakePipelineResourceDesc(request);
         auto key  = MakePipelineCacheKey(desc);
@@ -434,25 +687,11 @@ public:
 
         auto render_pass = render_pass_cache.Ensure(device, desc.render_pass);
         if (render_pass.is_none()) return None();
+        auto pipeline_layout = pipeline_layouts.Resolve(desc.pipeline_layout);
+        if (pipeline_layout.is_none()) return None();
 
-        auto entry                 = rstd::sync::Arc<PipelineResourceEntry>::make();
-        auto vk_descriptor_layouts = rstd::vec::Vec<VkDescriptorSetLayout>::with_capacity(
-            usize(desc.descriptor_sets.size()));
-        entry->descriptor_layouts.reserve(usize(desc.descriptor_sets.size()));
-        for (const auto& descriptor_set : desc.descriptor_sets) {
-            auto layout = descriptor_layouts.Ensure(device, descriptor_set);
-            if (layout.is_err()) return None();
-            auto handle   = rstd::move(layout).unwrap_unchecked();
-            auto resolved = descriptor_layouts.Resolve(handle);
-            if (resolved.is_none()) return None();
-            entry->descriptor_layouts.push(resource::DescriptorLayoutHandle {
-                .index      = handle.index,
-                .generation = handle.generation,
-            });
-            auto vk_layout = *(**resolved).layout;
-            vk_descriptor_layouts.push(rstd::move(vk_layout));
-        }
-        GraphicsPipeline pipeline;
+        GraphicsPipeline   pipeline;
+        PipelineParameters pipeline_parameters;
         pipeline.toDefault();
         pipeline.depth       = desc.depth;
         pipeline.raster      = desc.raster;
@@ -468,15 +707,20 @@ public:
             .setViewportScissorCount(desc.viewport_count, desc.scissor_count)
             .setDynamicStates(desc.dynamic_states)
             .addInputBindingDescription(desc.vertex_bindings)
-            .addInputAttributeDescription(desc.vertex_attrs)
-            .setDescriptorSetLayouts(std::span<const VkDescriptorSetLayout>(
-                vk_descriptor_layouts.data(), vk_descriptor_layouts.len().to_primitive()));
+            .addInputAttributeDescription(desc.vertex_attrs);
         for (auto& spv : desc.shader_stages) {
             pipeline.addStage(Box<ShaderSpv>::make(std::move(spv)));
         }
-        if (! pipeline.create(device, **render_pass->render_pass, entry->pipeline)) {
+        if (! pipeline.create(device,
+                              **render_pass->render_pass,
+                              *(**pipeline_layout).layout,
+                              pipeline_parameters)) {
             return None();
         }
+        auto entry  = rstd::sync::Arc<PipelineResourceEntry>::make(PipelineResourceEntry {
+            .pipeline = rstd::move(pipeline_parameters),
+            .layout   = (*pipeline_layout).clone(),
+        });
         auto handle = NextHandle();
         (void)m_handles.insert(handle, entry.downgrade());
         (void)m_entries.insert(key,
@@ -584,14 +828,12 @@ private:
 
 class PipelineResourceSystem {
 public:
-    explicit PipelineResourceSystem(const Device&                                device,
-                                    resource_registry::DescriptorLayoutRegistry& descriptor_layouts,
-                                    PipelineResourceCache&                       pipeline_cache,
-                                    RenderPassResourceCache&                     render_pass_cache)
+    explicit PipelineResourceSystem(const Device& device, PipelineLayoutRegistry& pipeline_layouts,
+                                    PipelineResourceCache&   pipeline_cache,
+                                    RenderPassResourceCache& render_pass_cache)
         : m_device(ref<Device>::from_raw_parts(rstd::addressof(device))),
-          m_descriptor_layouts(
-              rstd::mut_ref<resource_registry::DescriptorLayoutRegistry>::from_raw_parts(
-                  rstd::addressof(descriptor_layouts))),
+          m_pipeline_layouts(rstd::mut_ref<PipelineLayoutRegistry>::from_raw_parts(
+              rstd::addressof(pipeline_layouts))),
           m_pipeline_cache(
               mut_ref<PipelineResourceCache>::from_raw_parts(rstd::addressof(pipeline_cache))),
           m_render_pass_cache(mut_ref<RenderPassResourceCache>::from_raw_parts(
@@ -599,14 +841,14 @@ public:
 
     auto CreateGraphicsPipeline(PipelineResourceRequest request) -> Option<PipelineResourceResult> {
         return m_pipeline_cache->Ensure(
-            *m_device, std::move(request), *m_render_pass_cache, *m_descriptor_layouts);
+            *m_device, std::move(request), *m_render_pass_cache, *m_pipeline_layouts);
     }
 
 private:
-    ref<Device>                                                m_device;
-    rstd::mut_ref<resource_registry::DescriptorLayoutRegistry> m_descriptor_layouts;
-    mut_ref<PipelineResourceCache>                             m_pipeline_cache;
-    mut_ref<RenderPassResourceCache>                           m_render_pass_cache;
+    ref<Device>                           m_device;
+    rstd::mut_ref<PipelineLayoutRegistry> m_pipeline_layouts;
+    mut_ref<PipelineResourceCache>        m_pipeline_cache;
+    mut_ref<RenderPassResourceCache>      m_render_pass_cache;
 };
 
 } // namespace owe::resource_registry

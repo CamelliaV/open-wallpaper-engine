@@ -16,6 +16,7 @@ import wescene.spec_names;
 import wescene.rgraph;
 import :vulkan_pass;
 import :resource;
+import :pipeline_layout;
 import :pass_common;
 import :pre_pass;
 import :fin_pass;
@@ -166,6 +167,8 @@ struct RenderProgram {
     rstd::Option<rstd::mut_ref<FinPass>>                    frame_finpass;
     rstd::vec::Vec<Box<dyn<UniformBufferUpdate>>>           uniform_update_owners;
     rstd::vec::Vec<ref<dyn<UniformBufferUpdate>>>           uniform_updates;
+    resource_registry::DescriptorBindingRecordState         descriptor_record_state;
+    PipelineLayoutAssignments                               pipeline_layout_assignments;
     rstd::Option<resource_registry::ResourcePrepareSession> resource_prepare_session;
     bool                                                    loaded { false };
 
@@ -173,6 +176,7 @@ struct RenderProgram {
         uniform_updates.clear();
         uniform_update_owners.clear();
         resource_prepare_session = rstd::None();
+        pipeline_layout_assignments.entries.clear();
         scopes.clear();
         pass_records.clear();
         resource_plan       = {};
@@ -641,12 +645,85 @@ struct RenderProgram {
                 return RenderProgramPrepareStatus::Failed;
             }
         }
+        Vec<PipelineLayoutRequirement> layout_requirements;
+        for (auto& record : pass_records) {
+            auto pass = resolve(record);
+            if (pass.is_none()) continue;
+            auto                  uses = pass->resourceUses();
+            PreparedPassResources resources(rr.resources.Prepared(), uses);
+            auto                  requirement = pass->pipelineLayoutRequirement(resources);
+            if (requirement.is_err()) {
+                auto error = rstd::move(requirement).unwrap_err_unchecked();
+                rstd_error("collect pipeline layout failed for {}: {}",
+                           record.pass_name,
+                           error.message.as_str());
+                return RenderProgramPrepareStatus::Failed;
+            }
+            auto value = rstd::move(requirement).unwrap_unchecked();
+            if (value.is_some()) layout_requirements.push(rstd::move(*value));
+        }
+        auto planned = PlanPipelineLayouts(layout_requirements.as_slice(),
+                                           device.capabilities().push_descriptor,
+                                           u32(device.capabilities().max_push_descriptors),
+                                           u32(device.limits().maxPushConstantsSize),
+                                           rstd::addressof(device.limits()));
+        if (planned.is_err()) {
+            auto error = rstd::move(planned).unwrap_err_unchecked();
+            rstd_error("plan pipeline layouts failed: {}", error.message.as_str());
+            return RenderProgramPrepareStatus::Failed;
+        }
+        auto layout_plan = rstd::move(planned).unwrap_unchecked();
+        for (const auto& conflict : layout_plan.conflicts) {
+            rstd_debug("pipeline {} did not join layout family {}: {}",
+                       conflict.pipeline.index,
+                       conflict.family,
+                       conflict.message.as_str());
+        }
+        PipelineLayoutAssignments next_layout_assignments;
+        for (auto& family : layout_plan.families) {
+            auto layout = rr.resources.PreparePipelineLayout(device, family.request);
+            if (layout.is_err()) {
+                auto error = rstd::move(layout).unwrap_err_unchecked();
+                rstd_error("prepare pipeline layout failed: {}", error.message.as_str());
+                return RenderProgramPrepareStatus::Failed;
+            }
+            auto handle = rstd::move(layout).unwrap_unchecked();
+            for (const auto& pipeline : family.pipelines) {
+                next_layout_assignments.entries.push(PipelineLayoutAssignment {
+                    .pipeline = pipeline,
+                    .layout   = handle,
+                });
+            }
+        }
+        bool layout_assignment_changed = false;
+        for (auto& record : pass_records) {
+            auto pass = resolve(record);
+            if (pass.is_none()) continue;
+            bool pass_changed = false;
+            for (const auto& pipeline : pass->resourceUses().pipelines) {
+                auto previous = pipeline_layout_assignments.Resolve(pipeline);
+                auto next     = next_layout_assignments.Resolve(pipeline);
+                if (previous.is_some() == next.is_some() &&
+                    (previous.is_none() || *previous == *next)) {
+                    continue;
+                }
+                pass_changed = true;
+                break;
+            }
+            if (! pass_changed) continue;
+            record.invalidatePipeline();
+            layout_assignment_changed = true;
+        }
+        if (layout_assignment_changed) loaded = false;
+        pipeline_layout_assignments = rstd::move(next_layout_assignments);
         auto graphics =
             rstd::dyn<owe::resource_registry::GraphicsResourcePreparer>::from_ref(rr.resources);
         PassPrepareContext prepare_context {
             .resources = rstd::ref<owe::resource_registry::PreparedResourceTable>::from_raw_parts(
                 rstd::addressof(rr.resources.Prepared())),
-            .graphics = graphics.as_mut_ref(),
+            .graphics         = graphics.as_mut_ref(),
+            .pipeline_layouts = rstd::ref<PipelineLayoutAssignments>::from_raw_parts(
+                rstd::addressof(pipeline_layout_assignments)),
         };
         for (auto& record : pass_records) {
             auto pass = resolve(record);
@@ -670,11 +747,12 @@ struct RenderProgram {
         uniform_update_owners.clear();
         SceneUniformBindingPrepareContext uniform_prepare_impl(scene);
         auto uniform_prepare = dyn<UniformBindingPrepareContext>::from_ref(uniform_prepare_impl);
+        Vec<resource::BufferUseHandle> prepared_uniform_buffers;
         for (auto& record : pass_records) {
             auto pass = resolve(record);
             if (pass.is_none()) continue;
             PreparedPassResources resources(rr.resources.Prepared(), record.resources);
-            auto created = pass->createUniformBufferUpdate(uniform_prepare.as_ref(), resources);
+            auto created = pass->createUniformBufferUpdates(uniform_prepare.as_ref(), resources);
             if (created.is_err()) {
                 auto error = rstd::move(created).unwrap_err_unchecked();
                 rstd_error("prepare uniform binding failed for {}: {}",
@@ -682,9 +760,18 @@ struct RenderProgram {
                            error.message.as_str());
                 return RenderProgramPrepareStatus::Failed;
             }
-            auto binding = rstd::move(created).unwrap_unchecked();
-            if (binding.is_some()) {
-                uniform_update_owners.push(rstd::move(binding).unwrap_unchecked());
+            auto bindings = rstd::move(created).unwrap_unchecked();
+            for (auto& binding : bindings) {
+                bool exists = false;
+                for (const auto& prepared : prepared_uniform_buffers) {
+                    if (prepared == binding->Buffer()) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (exists) continue;
+                prepared_uniform_buffers.push(binding->Buffer());
+                uniform_update_owners.push(rstd::move(binding));
             }
         }
         uniform_updates.reserve(uniform_update_owners.len());
@@ -804,6 +891,9 @@ struct RenderProgram {
                 rstd::mut_ref<vvk::CommandBuffer>::from_raw_parts(rstd::addressof(rr.command)),
             .resources =
                 rstd::ref<PreparedPassResources>::from_raw_parts(rstd::addressof(resources)),
+            .descriptor_state =
+                rstd::mut_ref<resource_registry::DescriptorBindingRecordState>::from_raw_parts(
+                    rstd::addressof(descriptor_record_state)),
         };
         callback(*pass, context);
     }
@@ -849,6 +939,7 @@ struct RenderProgram {
     }
 
     bool record(RenderingResources& rr, RecordedBufferUploads& recorded_uploads) {
+        descriptor_record_state.Reset();
         if (! rr.resources.RecordPendingUploads(rr.command, recorded_uploads)) {
             rstd_error("record dynamic buffer uploads failed");
             return false;

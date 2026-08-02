@@ -706,6 +706,66 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
     EXPECT_FLOAT_EQ(value, 7.0f);
 }
 
+TEST(UniformBufferBinding, UpdatesRegisteredSharedBlockOncePerVersion) {
+    owe::Scene scene;
+    auto       registrar = rstd::dyn<owe::UniformSourceRegistrar>::from_ref(scene);
+    auto       state     = std::make_shared<uniform_test::StaticSourceState>(
+        uniform_test::StaticSourceState { .value = 4.0f });
+    auto source  = registrar->Register(rstd::boxed::Box<rstd::dyn<owe::UniformSource>>::make(
+        uniform_test::StaticSource("shared_value", state)));
+    auto sources = rstd::vec::Vec<owe::UniformSourceAttachment>::make();
+    sources.push(owe::UniformSourceAttachment { .source = source });
+    ASSERT_TRUE(scene.RegisterUniformBlock(owe::UniformBlockDefinition {
+        .identity = rstd::u64(42),
+        .name     = rstd::string::String::make("SharedBlock"_str),
+        .scope    = owe::UniformBlockScope::Shared,
+        .sources  = rstd::move(sources),
+    }));
+
+    auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
+    members.push(owe::resource::ShaderArtifactUniformMember {
+        .name   = rstd::string::String::make("shared_value"_str),
+        .offset = rstd::u32(),
+        .size   = rstd::usize(4),
+    });
+    auto block = owe::resource::ShaderArtifactUniformBlock {
+        .name     = rstd::string::String::make("SharedBlock"_str),
+        .size     = rstd::usize(4),
+        .set      = rstd::u32(3),
+        .binding  = rstd::u32(2),
+        .scope    = owe::resource::ShaderArtifactUniformBlock::Scope::Shared,
+        .identity = rstd::u64(42),
+        .members  = rstd::move(members),
+    };
+    const auto buffer =
+        owe::resource::BufferUseHandle { .index = rstd::u64(8), .generation = rstd::u64(1) };
+    owe::vulkan::SceneUniformBindingPrepareContext prepare_impl(scene);
+    auto prepare = rstd::dyn<owe::vulkan::UniformBindingPrepareContext>::from_ref(prepare_impl);
+    auto update =
+        owe::vulkan::MakeSharedUniformBufferBinding(prepare.as_ref(),
+                                                    buffer,
+                                                    block,
+                                                    owe::ShaderMatrixConvention::ColumnVector,
+                                                    owe::ShaderMatrixAbi::NativeSpirv);
+    ASSERT_TRUE(update.is_ok());
+
+    uniform_test::BufferWriter writer;
+    auto writer_trait   = rstd::dyn<owe::resource::BufferContentWriter>::from_ref(writer);
+    auto texture_frames = rstd::dyn<owe::SceneTextureAnimationView>::from_ref(scene);
+    owe::vulkan::ProgramUniformFrameContext frame_impl(
+        scene.Runtime().Frame(), { 1.0f, 1.0f }, texture_frames.as_ref());
+    auto frame = rstd::dyn<owe::vulkan::UniformBufferFrameContext>::from_ref(frame_impl);
+    auto owner = rstd::move(update).unwrap_unchecked();
+    ASSERT_TRUE(owner->Update(frame.as_ref(), writer_trait.as_mut_ref()).is_ok());
+    ASSERT_TRUE(owner->Update(frame.as_ref(), writer_trait.as_mut_ref()).is_ok());
+    EXPECT_EQ(owner->Buffer(), buffer);
+    EXPECT_EQ(writer.update_count, rstd::u64(1));
+    ASSERT_EQ(writer.bytes.size(), 4u);
+    float value {};
+    std::memcpy(&value, writer.bytes.data(), sizeof(value));
+    EXPECT_FLOAT_EQ(value, 4.0f);
+}
+
 TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
     owe::resource::ShaderArtifact artifact;
     artifact.matrix_convention = owe::ShaderMatrixConvention::RowVector;
@@ -726,12 +786,17 @@ TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
         .size   = rstd::usize(4),
     });
     artifact.uniform_blocks.push(owe::resource::ShaderArtifactUniformBlock {
-        .name    = rstd::string::String::make("Globals"_str),
-        .size    = rstd::usize(32),
-        .members = rstd::move(members),
+        .name     = rstd::string::String::make("Globals"_str),
+        .size     = rstd::usize(32),
+        .set      = rstd::u32(4),
+        .binding  = rstd::u32(7),
+        .scope    = owe::resource::ShaderArtifactUniformBlock::Scope::Shared,
+        .identity = rstd::u64(91),
+        .members  = rstd::move(members),
     });
     artifact.descriptor_bindings.push(owe::resource::ShaderArtifactDescriptorBinding {
         .name    = rstd::string::String::make("g_Texture0"_str),
+        .set     = rstd::u32(4),
         .binding = rstd::u32(2),
         .descriptor_type =
             rstd::u32(static_cast<rstd::uint32_t>(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)),
@@ -754,8 +819,11 @@ TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
     EXPECT_EQ(stages[0]->entry_point, "main");
     EXPECT_EQ(stages[0]->spirv.size(), 3u);
     ASSERT_EQ(reflection.blocks.size(), 1u);
+    EXPECT_EQ(reflection.blocks[0].set, 4u);
+    EXPECT_EQ(reflection.blocks[0].binding, 7u);
     EXPECT_EQ(reflection.blocks[0].member_map.at("g_Time").offset, 16u);
-    EXPECT_EQ(reflection.binding_map.at("g_Texture0").binding, 2u);
+    EXPECT_EQ(reflection.binding_map.at("g_Texture0").layout.binding, 2u);
+    EXPECT_EQ(reflection.binding_map.at("g_Texture0").set, 4u);
     EXPECT_EQ(reflection.input_location_map.at("a_Position").format, VK_FORMAT_R32G32_SFLOAT);
 }
 
@@ -1170,22 +1238,299 @@ TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
     EXPECT_EQ(fin_diag[0].role, "frame-result");
 }
 
+TEST(PipelineLayoutPlanner, MergesCompatibleRequirementsWithOneGlobalPrefix) {
+    auto pipeline = [](rstd::u64 index) {
+        return owe::resource::PipelineUseHandle {
+            .index      = index,
+            .generation = rstd::u64(1),
+        };
+    };
+    auto global_set = [](rstd::uint32_t stages) {
+        auto bindings = rstd::vec::Vec<owe::vulkan::PipelineLayoutBindingRequirement>::make();
+        bindings.push(owe::vulkan::PipelineLayoutBindingRequirement {
+            .binding          = rstd::u32(),
+            .descriptor_type  = rstd::u32(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+            .descriptor_count = rstd::u32(1),
+            .stage_flags      = rstd::u32(stages),
+            .shared_identity  = rstd::Some(rstd::u64(77)),
+        });
+        return owe::vulkan::PipelineLayoutSetRequirement {
+            .set      = rstd::u32(),
+            .bindings = rstd::move(bindings),
+        };
+    };
+    auto local_set = [](rstd::u32 binding, rstd::uint32_t stages) {
+        auto bindings = rstd::vec::Vec<owe::vulkan::PipelineLayoutBindingRequirement>::make();
+        bindings.push(owe::vulkan::PipelineLayoutBindingRequirement {
+            .binding          = binding,
+            .descriptor_type  = rstd::u32(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+            .descriptor_count = rstd::u32(1),
+            .stage_flags      = rstd::u32(stages),
+        });
+        return owe::vulkan::PipelineLayoutSetRequirement {
+            .set             = rstd::u32(2),
+            .push_descriptor = true,
+            .bindings        = rstd::move(bindings),
+        };
+    };
+
+    auto first_sets = rstd::vec::Vec<owe::vulkan::PipelineLayoutSetRequirement>::make();
+    first_sets.push(global_set(VK_SHADER_STAGE_VERTEX_BIT));
+    first_sets.push(local_set(rstd::u32(3), VK_SHADER_STAGE_FRAGMENT_BIT));
+    auto second_sets = rstd::vec::Vec<owe::vulkan::PipelineLayoutSetRequirement>::make();
+    second_sets.push(global_set(VK_SHADER_STAGE_FRAGMENT_BIT));
+    second_sets.push(local_set(rstd::u32(4), VK_SHADER_STAGE_VERTEX_BIT));
+
+    auto requirements = rstd::vec::Vec<owe::vulkan::PipelineLayoutRequirement>::make();
+    requirements.push(owe::vulkan::PipelineLayoutRequirement {
+        .pipeline        = pipeline(rstd::u64(1)),
+        .descriptor_sets = rstd::move(first_sets),
+    });
+    requirements.push(owe::vulkan::PipelineLayoutRequirement {
+        .pipeline        = pipeline(rstd::u64(2)),
+        .descriptor_sets = rstd::move(second_sets),
+    });
+
+    auto planned = owe::vulkan::PlanPipelineLayouts(requirements.as_slice(), true, rstd::u32(32));
+    ASSERT_TRUE(planned.is_ok());
+    auto plan = rstd::move(planned).unwrap_unchecked();
+    ASSERT_EQ(plan.families.len(), rstd::usize(1));
+    const auto& family = plan.families[rstd::usize()];
+    ASSERT_EQ(family.pipelines.len(), rstd::usize(2));
+    ASSERT_EQ(family.request.descriptor_sets.len(), rstd::usize(3));
+    ASSERT_EQ(family.request.descriptor_sets[rstd::usize()].bindings.len(), rstd::usize(1));
+    EXPECT_FALSE(family.request.descriptor_sets[rstd::usize()].push_descriptor);
+    EXPECT_EQ(family.request.descriptor_sets[rstd::usize()].bindings[rstd::usize()].stageFlags,
+              VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+    EXPECT_TRUE(family.request.descriptor_sets[rstd::usize(1)].bindings.is_empty());
+    ASSERT_EQ(family.request.descriptor_sets[rstd::usize(2)].bindings.len(), rstd::usize(2));
+    EXPECT_TRUE(family.request.descriptor_sets[rstd::usize(2)].push_descriptor);
+    EXPECT_EQ(family.request.descriptor_sets[rstd::usize(2)].bindings[rstd::usize()].binding, 3u);
+    EXPECT_EQ(family.request.descriptor_sets[rstd::usize(2)].bindings[rstd::usize(1)].binding, 4u);
+}
+
+TEST(PipelineLayoutPlanner, SplitsLocalConflictsAndRejectsGlobalConflicts) {
+    auto make_requirement = [](rstd::u64        pipeline_index,
+                               VkDescriptorType local_type,
+                               rstd::u64        global_identity) {
+        auto global_bindings =
+            rstd::vec::Vec<owe::vulkan::PipelineLayoutBindingRequirement>::make();
+        global_bindings.push(owe::vulkan::PipelineLayoutBindingRequirement {
+            .binding          = rstd::u32(),
+            .descriptor_type  = rstd::u32(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+            .descriptor_count = rstd::u32(1),
+            .stage_flags      = rstd::u32(VK_SHADER_STAGE_ALL_GRAPHICS),
+            .shared_identity  = rstd::Some(global_identity),
+        });
+        auto local_bindings = rstd::vec::Vec<owe::vulkan::PipelineLayoutBindingRequirement>::make();
+        local_bindings.push(owe::vulkan::PipelineLayoutBindingRequirement {
+            .binding          = rstd::u32(),
+            .descriptor_type  = rstd::u32(local_type),
+            .descriptor_count = rstd::u32(1),
+            .stage_flags      = rstd::u32(VK_SHADER_STAGE_FRAGMENT_BIT),
+        });
+        auto sets = rstd::vec::Vec<owe::vulkan::PipelineLayoutSetRequirement>::make();
+        sets.push(owe::vulkan::PipelineLayoutSetRequirement {
+            .set      = rstd::u32(),
+            .bindings = rstd::move(global_bindings),
+        });
+        sets.push(owe::vulkan::PipelineLayoutSetRequirement {
+            .set             = rstd::u32(1),
+            .push_descriptor = true,
+            .bindings        = rstd::move(local_bindings),
+        });
+        return owe::vulkan::PipelineLayoutRequirement {
+            .pipeline =
+                owe::resource::PipelineUseHandle {
+                    .index      = pipeline_index,
+                    .generation = rstd::u64(1),
+                },
+            .descriptor_sets = rstd::move(sets),
+        };
+    };
+
+    auto local_conflicts = rstd::vec::Vec<owe::vulkan::PipelineLayoutRequirement>::make();
+    local_conflicts.push(
+        make_requirement(rstd::u64(1), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, rstd::u64(9)));
+    local_conflicts.push(
+        make_requirement(rstd::u64(2), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, rstd::u64(9)));
+    auto split = owe::vulkan::PlanPipelineLayouts(local_conflicts.as_slice(), true, rstd::u32(32));
+    ASSERT_TRUE(split.is_ok());
+    auto split_plan = rstd::move(split).unwrap_unchecked();
+    EXPECT_EQ(split_plan.families.len(), rstd::usize(2));
+    ASSERT_EQ(split_plan.conflicts.len(), rstd::usize(1));
+    EXPECT_FALSE(split_plan.conflicts[rstd::usize()].message.is_empty());
+
+    auto global_conflicts = rstd::vec::Vec<owe::vulkan::PipelineLayoutRequirement>::make();
+    global_conflicts.push(
+        make_requirement(rstd::u64(1), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, rstd::u64(9)));
+    global_conflicts.push(
+        make_requirement(rstd::u64(2), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, rstd::u64(10)));
+    auto rejected =
+        owe::vulkan::PlanPipelineLayouts(global_conflicts.as_slice(), true, rstd::u32(32));
+    EXPECT_TRUE(rejected.is_err());
+}
+
+TEST(PipelineLayoutPlanner, ResolvesUnsupportedAndOversizedPushSetsAsOrdinary) {
+    auto bindings = rstd::vec::Vec<owe::vulkan::PipelineLayoutBindingRequirement>::make();
+    bindings.push(owe::vulkan::PipelineLayoutBindingRequirement {
+        .binding          = rstd::u32(4),
+        .descriptor_type  = rstd::u32(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+        .descriptor_count = rstd::u32(3),
+        .stage_flags      = rstd::u32(VK_SHADER_STAGE_FRAGMENT_BIT),
+    });
+    auto sets = rstd::vec::Vec<owe::vulkan::PipelineLayoutSetRequirement>::make();
+    sets.push(owe::vulkan::PipelineLayoutSetRequirement {
+        .set             = rstd::u32(3),
+        .push_descriptor = true,
+        .bindings        = rstd::move(bindings),
+    });
+    auto requirements = rstd::vec::Vec<owe::vulkan::PipelineLayoutRequirement>::make();
+    requirements.push(owe::vulkan::PipelineLayoutRequirement {
+        .pipeline =
+            owe::resource::PipelineUseHandle {
+                .index      = rstd::u64(1),
+                .generation = rstd::u64(1),
+            },
+        .descriptor_sets = rstd::move(sets),
+    });
+
+    auto unsupported =
+        owe::vulkan::PlanPipelineLayouts(requirements.as_slice(), false, rstd::u32());
+    ASSERT_TRUE(unsupported.is_ok());
+    EXPECT_FALSE(unsupported.unwrap_unchecked()
+                     .families[rstd::usize()]
+                     .request.descriptor_sets[rstd::usize(3)]
+                     .push_descriptor);
+
+    auto oversized = owe::vulkan::PlanPipelineLayouts(requirements.as_slice(), true, rstd::u32(2));
+    ASSERT_TRUE(oversized.is_ok());
+    EXPECT_FALSE(oversized.unwrap_unchecked()
+                     .families[rstd::usize()]
+                     .request.descriptor_sets[rstd::usize(3)]
+                     .push_descriptor);
+
+    VkPhysicalDeviceLimits limits {};
+    limits.maxBoundDescriptorSets   = 8;
+    limits.maxDescriptorSetSamplers = 2;
+    auto over_device_limit          = owe::vulkan::PlanPipelineLayouts(
+        requirements.as_slice(), true, rstd::u32(32), rstd::u32(128), &limits);
+    EXPECT_TRUE(over_device_limit.is_err());
+}
+
+TEST(PipelineLayoutPlanner, CanonicalizesPushConstantsBeforeCreatingFamilies) {
+    auto requirement = [](rstd::u64 index, rstd::uint32_t stage, rstd::uint32_t offset) {
+        auto ranges = rstd::vec::Vec<VkPushConstantRange>::make();
+        ranges.push(VkPushConstantRange {
+            .stageFlags = stage,
+            .offset     = offset,
+            .size       = 16,
+        });
+        return owe::vulkan::PipelineLayoutRequirement {
+            .pipeline =
+                owe::resource::PipelineUseHandle {
+                    .index      = index,
+                    .generation = rstd::u64(1),
+                },
+            .push_constants = rstd::move(ranges),
+        };
+    };
+
+    auto compatible = rstd::vec::Vec<owe::vulkan::PipelineLayoutRequirement>::make();
+    compatible.push(requirement(rstd::u64(1), VK_SHADER_STAGE_VERTEX_BIT, 0));
+    compatible.push(requirement(rstd::u64(2), VK_SHADER_STAGE_FRAGMENT_BIT, 0));
+    auto planned = owe::vulkan::PlanPipelineLayouts(
+        compatible.as_slice(), true, rstd::u32(32), rstd::u32(128));
+    ASSERT_TRUE(planned.is_ok());
+    auto plan = rstd::move(planned).unwrap_unchecked();
+    ASSERT_EQ(plan.families.len(), rstd::usize(1));
+    ASSERT_EQ(plan.families[rstd::usize()].request.push_constants.len(), rstd::usize(1));
+    EXPECT_EQ(plan.families[rstd::usize()].request.push_constants[rstd::usize()].stageFlags,
+              VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    auto too_small =
+        owe::vulkan::PlanPipelineLayouts(compatible.as_slice(), true, rstd::u32(32), rstd::u32(8));
+    EXPECT_TRUE(too_small.is_err());
+
+    auto overlapping = rstd::vec::Vec<owe::vulkan::PipelineLayoutRequirement>::make();
+    overlapping.push(requirement(rstd::u64(1), VK_SHADER_STAGE_VERTEX_BIT, 0));
+    overlapping.push(requirement(rstd::u64(2), VK_SHADER_STAGE_VERTEX_BIT, 8));
+    auto rejected = owe::vulkan::PlanPipelineLayouts(
+        overlapping.as_slice(), true, rstd::u32(32), rstd::u32(128));
+    EXPECT_TRUE(rejected.is_err());
+
+    auto exact_then_partial = rstd::vec::Vec<owe::vulkan::PipelineLayoutRequirement>::make();
+    auto disjoint_ranges    = rstd::vec::Vec<VkPushConstantRange>::make();
+    disjoint_ranges.push(VkPushConstantRange {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .offset     = 0,
+        .size       = 16,
+    });
+    disjoint_ranges.push(VkPushConstantRange {
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset     = 8,
+        .size       = 16,
+    });
+    exact_then_partial.push(owe::vulkan::PipelineLayoutRequirement {
+        .pipeline =
+            owe::resource::PipelineUseHandle {
+                .index      = rstd::u64(1),
+                .generation = rstd::u64(1),
+            },
+        .push_constants = rstd::move(disjoint_ranges),
+    });
+    exact_then_partial.push(requirement(rstd::u64(2), VK_SHADER_STAGE_FRAGMENT_BIT, 0));
+    auto exact_overlap = owe::vulkan::PlanPipelineLayouts(
+        exact_then_partial.as_slice(), true, rstd::u32(32), rstd::u32(128));
+    EXPECT_TRUE(exact_overlap.is_err());
+}
+
+TEST(PipelineLayoutPlanner, SplitsCompatibleSupersetsAtDeviceLimits) {
+    auto requirement = [](rstd::u64 pipeline_index, rstd::u32 binding) {
+        auto bindings = rstd::vec::Vec<owe::vulkan::PipelineLayoutBindingRequirement>::make();
+        bindings.push(owe::vulkan::PipelineLayoutBindingRequirement {
+            .binding          = binding,
+            .descriptor_type  = rstd::u32(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+            .descriptor_count = rstd::u32(1),
+            .stage_flags      = rstd::u32(VK_SHADER_STAGE_FRAGMENT_BIT),
+        });
+        auto sets = rstd::vec::Vec<owe::vulkan::PipelineLayoutSetRequirement>::make();
+        sets.push(owe::vulkan::PipelineLayoutSetRequirement {
+            .set      = rstd::u32(1),
+            .bindings = rstd::move(bindings),
+        });
+        return owe::vulkan::PipelineLayoutRequirement {
+            .pipeline =
+                owe::resource::PipelineUseHandle {
+                    .index      = pipeline_index,
+                    .generation = rstd::u64(1),
+                },
+            .descriptor_sets = rstd::move(sets),
+        };
+    };
+
+    auto requirements = rstd::vec::Vec<owe::vulkan::PipelineLayoutRequirement>::make();
+    requirements.push(requirement(rstd::u64(1), rstd::u32(3)));
+    requirements.push(requirement(rstd::u64(2), rstd::u32(4)));
+    VkPhysicalDeviceLimits limits {};
+    limits.maxBoundDescriptorSets   = 8;
+    limits.maxDescriptorSetSamplers = 1;
+    auto planned                    = owe::vulkan::PlanPipelineLayouts(
+        requirements.as_slice(), false, rstd::u32(), rstd::u32(128), &limits);
+    ASSERT_TRUE(planned.is_ok());
+    auto plan = rstd::move(planned).unwrap_unchecked();
+    EXPECT_EQ(plan.families.len(), rstd::usize(2));
+    EXPECT_EQ(plan.conflicts.len(), rstd::usize(1));
+}
+
 TEST(PipelineCacheDiagnostics, RecordsStableKeys) {
     auto make_request = [](VkPrimitiveTopology topology) {
         owe::vulkan::PipelineResourceRequest request;
-        request.topology = topology;
-        request.descriptor_sets.push_back(owe::vulkan::DescriptorSetInfo {
-            .push_descriptor = true,
-            .bindings =
-                {
-                    VkDescriptorSetLayoutBinding {
-                        .binding         = 0,
-                        .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                        .descriptorCount = 1,
-                        .stageFlags      = VK_SHADER_STAGE_VERTEX_BIT,
-                    },
-                },
-        });
+        request.topology        = topology;
+        request.pipeline_layout = owe::resource::PipelineLayoutHandle {
+            .index      = rstd::u64(7),
+            .generation = rstd::u64(1),
+        };
         request.vertex_bindings.push_back(VkVertexInputBindingDescription {
             .binding   = 0,
             .stride    = 16,
@@ -1210,7 +1555,10 @@ TEST(PipelineCacheDiagnostics, RecordsStableKeys) {
     auto key_b =
         owe::vulkan::MakePipelineCacheKey(make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST));
     auto key_c = owe::vulkan::MakePipelineCacheKey(make_request(VK_PRIMITIVE_TOPOLOGY_POINT_LIST));
-    auto desc_request = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    auto layout_request                  = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    layout_request.pipeline_layout.index = rstd::u64(8);
+    auto key_layout                      = owe::vulkan::MakePipelineCacheKey(layout_request);
+    auto desc_request                    = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     auto key_from_desc =
         owe::vulkan::MakePipelineCacheKey(owe::vulkan::MakePipelineResourceDesc(desc_request));
     auto primitive_restart_request = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
@@ -1243,6 +1591,7 @@ TEST(PipelineCacheDiagnostics, RecordsStableKeys) {
     EXPECT_TRUE(owe::vulkan::SamePipelineCacheKey(key_a, key_b));
     EXPECT_TRUE(owe::vulkan::SamePipelineCacheKey(key_a, key_from_desc));
     EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_c));
+    EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_layout));
     EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_primitive_restart));
     EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_viewport));
     EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_logic_op));

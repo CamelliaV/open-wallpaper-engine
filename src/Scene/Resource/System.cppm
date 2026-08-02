@@ -73,12 +73,13 @@ struct GraphicsResourcePreparer {
             return rstd::trait_call<2>(this, use, device, desc);
         }
 
-        auto PrepareDescriptor(const vulkan::Device&           device,
-                               resource::PipelineUseHandle     pipeline_use,
+        auto PrepareDescriptor(const vulkan::Device&       device,
+                               resource::PipelineUseHandle pipeline_use, u32 set_index,
                                slice<DescriptorImageBinding>   images,
-                               Option<DescriptorBufferBinding> buffer)
+                               Option<DescriptorBufferBinding> buffer, DescriptorBindingReuse reuse)
             -> Result<resource::DescriptorBindingHandle, resource::ResourceError> {
-            return rstd::trait_call<3>(this, device, pipeline_use, images, rstd::move(buffer));
+            return rstd::trait_call<3>(
+                this, device, pipeline_use, set_index, images, rstd::move(buffer), reuse);
         }
 
         auto UpdateDescriptorImages(resource::DescriptorBindingHandle handle,
@@ -262,12 +263,20 @@ public:
         }
     }
 
+    auto PreparePipelineLayout(const vulkan::Device& device, const PipelineLayoutRequest& request)
+        -> Result<resource::PipelineLayoutHandle, resource::ResourceError> {
+        auto prepared = m_registries.PipelineLayouts().Ensure(
+            device, request, m_registries.DescriptorLayouts());
+        if (prepared.is_err()) return Err(rstd::move(prepared).unwrap_err_unchecked());
+        return Ok(rstd::move(prepared).unwrap_unchecked().handle);
+    }
+
     auto PreparePipeline(resource::PipelineUseHandle   pipeline_use,
                          resource::RenderPassUseHandle render_pass_use,
                          const vulkan::Device& device, vulkan::PipelineResourceRequest request)
         -> Result<PipelinePreparation, resource::ResourceError> {
         PipelineResourceSystem system(device,
-                                      m_registries.DescriptorLayouts(),
+                                      m_registries.PipelineLayouts(),
                                       m_registries.PipelineCache(),
                                       m_registries.RenderPassCache());
         auto                   result = system.CreateGraphicsPipeline(std::move(request));
@@ -381,26 +390,27 @@ public:
     }
 
     auto PrepareDescriptor(const vulkan::Device& device, resource::PipelineUseHandle pipeline_use,
-                           slice<DescriptorImageBinding>   images,
-                           Option<DescriptorBufferBinding> buffer)
+                           u32 set_index, slice<DescriptorImageBinding> images,
+                           Option<DescriptorBufferBinding> buffer, DescriptorBindingReuse reuse)
         -> Result<resource::DescriptorBindingHandle, resource::ResourceError> {
         auto pipeline = m_prepared.Resolve(pipeline_use);
-        if (pipeline.is_none() || (**pipeline).physical->descriptor_layouts.is_empty()) {
+        if (pipeline.is_none() || rstd::as_cast<usize>(set_index) >=
+                                      (**pipeline).physical->layout->descriptor_layouts.len()) {
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::MissingDefinition,
                 .message = rstd::format("pipeline descriptor layout unavailable"),
             });
         }
         auto layout = m_registries.DescriptorLayouts().Resolve(
-            (**pipeline).physical->descriptor_layouts[usize()]);
+            (**pipeline).physical->layout->descriptor_layouts[rstd::as_cast<usize>(set_index)]);
         if (layout.is_none()) {
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::MissingDefinition,
                 .message = rstd::format("descriptor layout unavailable"),
             });
         }
-        auto prepared =
-            m_registries.Descriptors().Prepare(device, **layout, images, rstd::move(buffer));
+        auto prepared = m_registries.Descriptors().Prepare(
+            device, set_index.to_primitive(), **layout, images, rstd::move(buffer), reuse);
         if (prepared.is_err()) return Err(rstd::move(prepared).unwrap_err_unchecked());
         auto binding = rstd::move(prepared).unwrap_unchecked();
         auto handle  = binding.handle;
@@ -540,6 +550,7 @@ public:
 
     void Collect(mut_ref<dyn<vulkan::MemoryBudgetSource>> memory) {
         m_registries.PipelineCache().PruneExpired();
+        m_registries.PipelineLayouts().PruneExpired();
         m_registries.RenderPassCache().PruneExpired();
         m_registries.FramebufferCache().PruneExpired();
         m_registries.Memory().Refresh(memory.as_ref());
@@ -633,12 +644,14 @@ struct Impl<owe::resource_registry::GraphicsResourcePreparer,
         return this->self().PrepareRenderPass(use, device, desc);
     }
 
-    auto PrepareDescriptor(const owe::vulkan::Device&                              device,
-                           owe::resource::PipelineUseHandle                        pipeline_use,
+    auto PrepareDescriptor(const owe::vulkan::Device&       device,
+                           owe::resource::PipelineUseHandle pipeline_use, u32 set_index,
                            slice<owe::resource_registry::DescriptorImageBinding>   images,
-                           Option<owe::resource_registry::DescriptorBufferBinding> buffer)
+                           Option<owe::resource_registry::DescriptorBufferBinding> buffer,
+                           owe::resource_registry::DescriptorBindingReuse          reuse)
         -> Result<owe::resource::DescriptorBindingHandle, owe::resource::ResourceError> {
-        return this->self().PrepareDescriptor(device, pipeline_use, images, rstd::move(buffer));
+        return this->self().PrepareDescriptor(
+            device, pipeline_use, set_index, images, rstd::move(buffer), reuse);
     }
 
     auto UpdateDescriptorImages(owe::resource::DescriptorBindingHandle                handle,

@@ -162,12 +162,14 @@ private:
 // blob per stage (currently always vertex+fragment in that order).
 // On ok=false, error carries a short diagnostic.
 struct CompileMaterialShaderResult {
-    bool                       ok { false };
-    std::vector<ShaderCode>    spvs;
-    ShaderInfo                 info;
-    std::vector<ShaderTexInfo> tex_info;
-    std::string                error;
-    std::string                shader_name;
+    bool                                           ok { false };
+    std::vector<ShaderCode>                        spvs;
+    ShaderInfo                                     info;
+    std::vector<ShaderTexInfo>                     tex_info;
+    std::vector<SceneShaderUniformBlockInterface>  uniform_blocks;
+    std::vector<SceneShaderDescriptorSetInterface> descriptor_sets;
+    std::string                                    error;
+    std::string                                    shader_name;
 };
 
 struct CompileSceneShaderVariantResult {

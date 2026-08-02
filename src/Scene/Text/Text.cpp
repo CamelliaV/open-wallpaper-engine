@@ -599,7 +599,7 @@ namespace
 {
 
 constexpr const char* kTextShaderHlsl = R"hlsl(
-[[vk::binding(0, 0)]] cbuffer ww_Uniforms {
+[[vk::binding(0, 1)]] cbuffer ww_Uniforms {
     column_major float4x4 g_ModelViewProjectionMatrix;
 };
 
@@ -622,9 +622,9 @@ PSInput main_vs(VSInput i) {
     return o;
 }
 
-[[vk::combinedImageSampler]][[vk::binding(1, 0)]]
+[[vk::combinedImageSampler]][[vk::binding(1, 1)]]
 Texture2D<float4> g_Texture0;
-[[vk::combinedImageSampler]][[vk::binding(1, 0)]]
+[[vk::combinedImageSampler]][[vk::binding(1, 1)]]
 SamplerState g_Texture0_sampler;
 
 float4 main_ps(PSInput i) : SV_Target {
@@ -634,7 +634,7 @@ float4 main_ps(PSInput i) : SV_Target {
 )hlsl";
 
 constexpr const char* kTextCopyBackgroundShaderHlsl = R"hlsl(
-[[vk::binding(0, 0)]] cbuffer ww_Uniforms {
+[[vk::binding(0, 1)]] cbuffer ww_Uniforms {
     column_major float4x4 g_ModelViewProjectionMatrix;
     column_major float4x4 g_EffectModelViewProjectionMatrix;
 };
@@ -656,9 +656,9 @@ PSInput main_vs(VSInput i) {
     return o;
 }
 
-[[vk::combinedImageSampler]][[vk::binding(1, 0)]]
+[[vk::combinedImageSampler]][[vk::binding(1, 1)]]
 Texture2D<float4> g_Texture0;
-[[vk::combinedImageSampler]][[vk::binding(1, 0)]]
+[[vk::combinedImageSampler]][[vk::binding(1, 1)]]
 SamplerState g_Texture0_sampler;
 
 float4 main_ps(PSInput i) : SV_Target {

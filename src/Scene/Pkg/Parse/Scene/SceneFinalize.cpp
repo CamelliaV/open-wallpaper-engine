@@ -122,7 +122,6 @@ void FinalizeUniformSources(SceneParseContext& context) {
     const auto audio_source = registrar->Register(
         Box<dyn<UniformSource>>::make(AudioUniformSource { context.uniform_state.clone() }));
     (void)writer->AttachGlobal(frame_source, 0);
-    (void)writer->AttachGlobal(audio_source, 0);
 
     Vec<ref<SceneLight>> lights;
     auto                 owned_lights = scene.Lights();
@@ -131,7 +130,16 @@ void FinalizeUniformSources(SceneParseContext& context) {
         lights.push(owned_lights[index].as_ref());
     const auto light_source = registrar->Register(
         Box<dyn<UniformSource>>::make(LightUniformSource { rstd::move(lights) }));
-    (void)writer->AttachGlobal(light_source, 0);
+    auto shared_sources = Vec<UniformSourceAttachment>::make();
+    shared_sources.push(UniformSourceAttachment { .source = frame_source });
+    shared_sources.push(UniformSourceAttachment { .source = audio_source });
+    shared_sources.push(UniformSourceAttachment { .source = light_source });
+    (void)scene.RegisterUniformBlock(UniformBlockDefinition {
+        .identity = kGlobalUniformSchemaIdentity,
+        .name     = String::make(kGlobalUniformBlockName),
+        .scope    = UniformBlockScope::Shared,
+        .sources  = rstd::move(shared_sources),
+    });
 
     for (auto& draft : context.text_uniform_configs) {
         auto node_id = scene.ResourceIndex().nodeId(*draft.node);

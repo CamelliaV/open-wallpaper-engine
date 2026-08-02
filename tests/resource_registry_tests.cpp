@@ -940,7 +940,12 @@ TEST(PreparedResourceTable, PinsEveryPreparedGenerationInOneLeaseSet) {
             },
     }));
 
-    auto pipeline = rstd::sync::Arc<owe::resource_registry::PipelineResourceEntry>::make();
+    auto pipeline_layout =
+        rstd::sync::Arc<owe::resource_registry::PipelineLayoutResourceEntry>::make();
+    auto pipeline = rstd::sync::Arc<owe::resource_registry::PipelineResourceEntry>::make(
+        owe::resource_registry::PipelineResourceEntry {
+            .layout = pipeline_layout.clone(),
+        });
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedPipeline {
         .use =
             owe::resource::PipelineUseHandle { .index = rstd::u64(3), .generation = rstd::u64(4) },
@@ -1004,25 +1009,25 @@ TEST(PreparedResourceTable, PinsEveryPreparedGenerationInOneLeaseSet) {
 }
 
 TEST(DescriptorLayoutRegistry, CanonicalizesBindingOrder) {
+    auto bindings = rstd::vec::Vec<VkDescriptorSetLayoutBinding>::make();
+    bindings.push(VkDescriptorSetLayoutBinding {
+        .binding         = 3,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
+    });
+    bindings.push(VkDescriptorSetLayoutBinding {
+        .binding         = 0,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags      = VK_SHADER_STAGE_VERTEX_BIT,
+    });
     owe::vulkan::DescriptorSetInfo first {
         .push_descriptor = true,
-        .bindings = {
-            VkDescriptorSetLayoutBinding {
-                .binding         = 3,
-                .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = 1,
-                .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding         = 0,
-                .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .descriptorCount = 1,
-                .stageFlags      = VK_SHADER_STAGE_VERTEX_BIT,
-            },
-        },
+        .bindings        = rstd::move(bindings),
     };
-    auto second = first;
-    std::reverse(second.bindings.begin(), second.bindings.end());
+    auto second = first.clone();
+    rstd::swap(second.bindings[rstd::usize()], second.bindings[rstd::usize(1)]);
 
     auto first_schema  = owe::resource_registry::DescriptorLayoutRegistry::CanonicalSchema(first);
     auto second_schema = owe::resource_registry::DescriptorLayoutRegistry::CanonicalSchema(second);
@@ -1033,21 +1038,21 @@ TEST(DescriptorLayoutRegistry, CanonicalizesBindingOrder) {
 }
 
 TEST(DescriptorLayoutRegistry, RejectsDuplicateBindings) {
+    auto bindings = rstd::vec::Vec<VkDescriptorSetLayoutBinding>::make();
+    bindings.push(VkDescriptorSetLayoutBinding {
+        .binding         = 1,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags      = VK_SHADER_STAGE_VERTEX_BIT,
+    });
+    bindings.push(VkDescriptorSetLayoutBinding {
+        .binding         = 1,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
+    });
     owe::vulkan::DescriptorSetInfo info {
-        .bindings = {
-            VkDescriptorSetLayoutBinding {
-                .binding         = 1,
-                .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .descriptorCount = 1,
-                .stageFlags      = VK_SHADER_STAGE_VERTEX_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding         = 1,
-                .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = 1,
-                .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-        },
+        .bindings = rstd::move(bindings),
     };
 
     EXPECT_TRUE(owe::resource_registry::DescriptorLayoutRegistry::CanonicalSchema(info).is_err());
@@ -1063,12 +1068,14 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
         .image   = image,
     });
     auto prepared =
-        descriptors.PreparePush(images.as_slice(),
+        descriptors.PreparePush(3,
+                                images.as_slice(),
                                 rstd::Some(owe::resource_registry::DescriptorBufferBinding {
                                     .binding = 0,
                                     .offset  = 64,
                                     .size    = 128,
                                 }));
+    EXPECT_EQ(prepared.set_index, 3u);
     auto handle = prepared.handle;
 
     EXPECT_TRUE(handle.Valid());
@@ -1095,6 +1102,95 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
     EXPECT_EQ(completed->program_generation, rstd::u64());
     EXPECT_EQ(completed->descriptors.len(), rstd::usize(1));
     EXPECT_EQ(submissions.InFlight(), rstd::usize());
+}
+
+TEST(DescriptorSystem, RejectsActiveWritesOutsideThePipelineLayout) {
+    auto bindings = rstd::vec::Vec<owe::resource_registry::DescriptorBindingSchema>::make();
+    bindings.push(owe::resource_registry::DescriptorBindingSchema {
+        .binding          = 0,
+        .descriptor_type  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptor_count = 1,
+        .stage_flags      = VK_SHADER_STAGE_VERTEX_BIT,
+    });
+    owe::resource_registry::DescriptorLayoutEntry layout {
+        .handle =
+            owe::resource::DescriptorLayoutHandle {
+                .index      = rstd::u64(1),
+                .generation = rstd::u64(1),
+            },
+        .schema =
+            owe::resource_registry::DescriptorSetSchema {
+                .push_descriptor = true,
+                .bindings        = rstd::move(bindings),
+            },
+    };
+    auto images = rstd::vec::Vec<owe::resource_registry::DescriptorImageBinding>::make();
+    images.push(owe::resource_registry::DescriptorImageBinding {
+        .binding = 2,
+    });
+
+    owe::resource_registry::DescriptorSystem descriptors;
+    owe::vulkan::Device                      device;
+    auto rejected = descriptors.Prepare(device,
+                                        1,
+                                        layout,
+                                        images.as_slice(),
+                                        rstd::None(),
+                                        owe::resource_registry::DescriptorBindingReuse::Exclusive);
+    EXPECT_TRUE(rejected.is_err());
+}
+
+TEST(DescriptorSystem, TracksBoundSetsAtArbitraryIndices) {
+    owe::resource_registry::DescriptorBindingRecordState state;
+    auto layout = owe::resource::DescriptorLayoutHandle {
+        .index      = rstd::u64(12),
+        .generation = rstd::u64(3),
+    };
+
+    EXPECT_TRUE(state.BindRequired(4, layout, VK_NULL_HANDLE));
+    EXPECT_FALSE(state.BindRequired(4, layout, VK_NULL_HANDLE));
+
+    state.Push(7);
+    EXPECT_FALSE(state.BindRequired(4, layout, VK_NULL_HANDLE));
+
+    state.Push(4);
+    EXPECT_TRUE(state.BindRequired(4, layout, VK_NULL_HANDLE));
+}
+
+TEST(DescriptorSystem, InvalidatesBindingsFromTheFirstIncompatiblePipelineSet) {
+    auto layout = [](rstd::u64 index) {
+        return owe::resource::DescriptorLayoutHandle {
+            .index      = index,
+            .generation = rstd::u64(1),
+        };
+    };
+    auto pipeline = [](rstd::u64 index) {
+        return owe::resource::PipelineLayoutHandle {
+            .index      = index,
+            .generation = rstd::u64(1),
+        };
+    };
+
+    auto first = rstd::vec::Vec<owe::resource::DescriptorLayoutHandle>::make();
+    first.push(layout(rstd::u64(10)));
+    first.push(layout(rstd::u64(11)));
+    first.push(layout(rstd::u64(12)));
+    auto second = rstd::vec::Vec<owe::resource::DescriptorLayoutHandle>::make();
+    second.push(layout(rstd::u64(10)));
+    second.push(layout(rstd::u64(21)));
+    second.push(layout(rstd::u64(12)));
+
+    owe::resource_registry::DescriptorBindingRecordState state;
+    state.UsePipeline(pipeline(rstd::u64(1)), first.as_slice(), 7u);
+    EXPECT_TRUE(state.BindRequired(0, first[rstd::usize()], VK_NULL_HANDLE));
+    EXPECT_TRUE(state.BindRequired(2, first[rstd::usize(2)], VK_NULL_HANDLE));
+
+    state.UsePipeline(pipeline(rstd::u64(2)), second.as_slice(), 7u);
+    EXPECT_FALSE(state.BindRequired(0, second[rstd::usize()], VK_NULL_HANDLE));
+    EXPECT_TRUE(state.BindRequired(2, second[rstd::usize(2)], VK_NULL_HANDLE));
+
+    state.UsePipeline(pipeline(rstd::u64(3)), second.as_slice(), 8u);
+    EXPECT_TRUE(state.BindRequired(0, second[rstd::usize()], VK_NULL_HANDLE));
 }
 
 TEST(UploadScheduler, TracksTimelineReadiness) {
