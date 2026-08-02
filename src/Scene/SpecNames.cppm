@@ -175,6 +175,7 @@ inline constexpr ref<str> G_PARALLAXPOSITION               = "g_ParallaxPosition
 inline constexpr ref<str> G_MORPHWEIGHTS                   = "g_MorphWeights"_str;
 inline constexpr ref<str> G_MORPHOFFSETS                   = "g_MorphOffsets"_str;
 inline constexpr ref<str> G_VIEWPORTVIEWPROJECTIONMATRICES = "g_ViewportViewProjectionMatrices"_str;
+inline constexpr ref<str> G_SHADOWATLASTRANSFORMS          = "g_ShadowAtlasTransforms"_str;
 inline constexpr ref<str> G_VIEWUP                         = "g_ViewUp"_str;
 inline constexpr ref<str> G_VIEWRIGHT                      = "g_ViewRight"_str;
 inline constexpr ref<str> G_VIEWFORWARD                    = "g_ViewForward"_str;

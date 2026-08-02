@@ -131,7 +131,8 @@ public:
 
     int takeLastFrameSyncFd();
 
-    bool getDrmRenderNode(std::uint32_t& out_major, std::uint32_t& out_minor) const;
+    bool               getDrmRenderNode(std::uint32_t& out_major, std::uint32_t& out_minor) const;
+    DeviceCapabilities deviceCapabilities() const;
 
     /* Tick all registered video-tex decoders. No-op when no scene
      * texture has been recognised as a VIDEO container. Invoked from

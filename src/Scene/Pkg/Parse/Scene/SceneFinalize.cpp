@@ -123,17 +123,29 @@ void FinalizeUniformSources(SceneParseContext& context) {
         Box<dyn<UniformSource>>::make(AudioUniformSource { context.uniform_state.clone() }));
     (void)writer->AttachGlobal(frame_source, 0);
 
-    Vec<ref<SceneLight>> lights;
-    auto                 owned_lights = scene.Lights();
+    Vec<ref<SceneLight>>    lights;
+    Option<ref<SceneLight>> shadow_light;
+    auto                    owned_lights = scene.Lights();
     lights.reserve(owned_lights.len());
-    for (usize index {}; index < owned_lights.len(); ++index)
+    for (usize index {}; index < owned_lights.len(); ++index) {
         lights.push(owned_lights[index].as_ref());
+        const auto& light = *owned_lights[index];
+        if (shadow_light.is_none() && light.type() == SceneLightType::Directional &&
+            light.desc().cast_shadow) {
+            shadow_light = Some(owned_lights[index].as_ref());
+        }
+    }
     const auto light_source = registrar->Register(
         Box<dyn<UniformSource>>::make(LightUniformSource { rstd::move(lights) }));
     auto shared_sources = Vec<UniformSourceAttachment>::make();
     shared_sources.push(UniformSourceAttachment { .source = frame_source });
     shared_sources.push(UniformSourceAttachment { .source = audio_source });
     shared_sources.push(UniformSourceAttachment { .source = light_source });
+    if (context.shader_environment.directional_shadow && shadow_light.is_some()) {
+        const auto shadow_source = registrar->Register(Box<dyn<UniformSource>>::make(
+            ShadowUniformSource { (*active_camera).clone(), *shadow_light }));
+        shared_sources.push(UniformSourceAttachment { .source = shadow_source });
+    }
     (void)scene.RegisterUniformBlock(UniformBlockDefinition {
         .identity = kGlobalUniformSchemaIdentity,
         .name     = String::make(kGlobalUniformBlockName),

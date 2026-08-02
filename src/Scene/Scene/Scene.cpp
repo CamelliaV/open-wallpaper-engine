@@ -730,6 +730,8 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
     m_render_items.clear();
     m_texture_descs.clear();
     m_render_target_descs.clear();
+    m_shadow_definitions.clear();
+    m_shadow_casters.clear();
     m_render_item_ids.clear();
     m_texture_desc_ids.clear();
     m_render_target_desc_ids.clear();
@@ -745,6 +747,10 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
     scene.RebuildResourceIndex();
 
     const auto& index = scene.ResourceIndex();
+
+    for (const auto& definition : scene.ShadowDefinitions()) {
+        m_shadow_definitions.push(definition.Clone());
+    }
 
     Vec<String> texture_keys;
     auto        texture_names = scene.TextureNames();
@@ -840,6 +846,16 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
                                                .source_layer    = source_layer,
                                                .submesh_index   = item.submesh_index,
                                                .output_override = output_override });
+        auto view = index.resolve(item.id);
+        if (node == nullptr || ! node->shadow.cast || view.is_none() || view->material == nullptr ||
+            ! view->material->shadow_variant || m_shadow_definitions.is_empty()) {
+            continue;
+        }
+        m_shadow_casters.push(RenderShadowCasterRecord {
+            .render_item    = id,
+            .material       = view->material->shadow_variant,
+            .instance_count = rstd::as_cast<u32>(m_shadow_definitions[usize()].viewports.len()),
+        });
     }
 
     auto linked_ids = m_linked_layer_ids.iter();
@@ -1963,6 +1979,14 @@ auto Scene::RegisterPostProcess(Box<ScenePostProcess> post_process) -> mut_ref<S
 
 auto Scene::PostProcesses() const -> slice<Box<ScenePostProcess>> {
     return m_post_processes.as_slice();
+}
+
+void Scene::RegisterShadowDefinition(SceneShadowDefinition definition) {
+    m_shadow_definitions.push(rstd::move(definition));
+}
+
+auto Scene::ShadowDefinitions() const -> slice<SceneShadowDefinition> {
+    return m_shadow_definitions.as_slice();
 }
 
 bool Scene::ApplyUserCameraPathVisibilityBindings(std::string_view key, const Json& property) {

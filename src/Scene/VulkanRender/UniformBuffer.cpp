@@ -123,7 +123,17 @@ public:
                 if (shape.rows <= last.row || shape.columns <= last.column ||
                     slot.count < shape.min_array_count || slot.count > shape.max_array_count) {
                     return Err(UniformError {
-                        .message = rstd::format("uniform {} matrix shape mismatch", shader_member),
+                        .message = rstd::format(
+                            "uniform {} matrix shape mismatch: reflected {}x{}[{}], source "
+                            "accepts at least {}x{}[{}..{}]",
+                            shader_member,
+                            slot.matrix_rows,
+                            slot.matrix_columns,
+                            slot.count,
+                            shape.rows,
+                            shape.columns,
+                            shape.min_array_count,
+                            shape.max_array_count),
                     });
                 }
             } else {
@@ -752,7 +762,8 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
                               const resource::ShaderArtifactUniformBlock& block,
                               Vec<PreparedUniformTextureMetadata>         textures,
                               SceneRenderViewKind                         render_view,
-                              ShaderMatrixConvention matrix_convention, ShaderMatrixAbi matrix_abi)
+                              ShaderMatrixConvention matrix_convention, ShaderMatrixAbi matrix_abi,
+                              Option<ref<SceneMaterial>> material_override)
     -> Result<Box<dyn<UniformBufferUpdate>>, UniformBufferUpdateError> {
     auto draw = prepare->ResolveDraw(draw_item);
     if (draw.is_none()) {
@@ -760,7 +771,8 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
             .message = String::make("uniform binding scene data is unavailable"_str),
         });
     }
-    if (! draw->material->customShader.shader) {
+    auto material = material_override.unwrap_or(draw->material);
+    if (! material->customShader.shader) {
         return Err(UniformBufferUpdateError {
             .message = String::make("uniform binding shader metadata is unavailable"_str),
         });
@@ -844,13 +856,13 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
         ++source_ordinal;
     }
 
-    const auto&          shader = *draw->material->customShader.shader;
+    const auto&          shader = *material->customShader.shader;
     UniformBufferBinding binding(draw->draw_item,
                                  buffer,
                                  rstd::move(layout),
                                  rstd::move(sources),
                                  shader.default_uniforms,
-                                 draw->material,
+                                 material,
                                  rstd::move(textures),
                                  render_view,
                                  matrix_convention,

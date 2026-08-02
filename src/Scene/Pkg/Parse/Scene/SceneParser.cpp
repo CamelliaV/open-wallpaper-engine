@@ -35,15 +35,31 @@ auto owe::SceneParser::Parse(ref<str> scene_id, ref<wpscene::SceneDocument> docu
         return ExpandSceneObjects(document, vfs, options.user_properties);
     }();
     auto objects = rstd::move(expanded.objects);
+    bool has_directional_shadow_light { false };
+    bool has_directional_shadow_caster { false };
+    for (const auto& object : objects) {
+        if (object.is_Light()) {
+            const auto& light = object.as_Light().value;
+            has_directional_shadow_light =
+                has_directional_shadow_light ||
+                ((light.light == "directional" || light.light == "ldirectional") &&
+                 light.castshadow);
+        } else if (object.is_Model()) {
+            has_directional_shadow_caster =
+                has_directional_shadow_caster || object.as_Model().value.castshadow;
+        }
+    }
 
-    auto context_span  = SceneLoadSpan(options.load_bench, &SceneLoadProbeIds::parse_context);
-    auto context       = BuildContext(vfs_owner,
-                                      scene_id,
-                                      metadata,
-                                      ResolveOrthoProjectionExtent(metadata, objects.as_slice()),
-                                      options.user_properties,
-                                      rstd::move(options.shader_cache_dir));
-    auto runtime_input = Arc<UniformRuntimeInput>::make(context.uniform_state.clone());
+    auto context_span = SceneLoadSpan(options.load_bench, &SceneLoadProbeIds::parse_context);
+    auto context = BuildContext(vfs_owner,
+                                scene_id,
+                                metadata,
+                                ResolveOrthoProjectionExtent(metadata, objects.as_slice()),
+                                options.user_properties,
+                                rstd::move(options.shader_cache_dir),
+                                options.capabilities.directional_shadow &&
+                                    has_directional_shadow_light && has_directional_shadow_caster);
+    auto runtime_input             = Arc<UniformRuntimeInput>::make(context.uniform_state.clone());
     context.hidden_link_source_ids = rstd::move(expanded.hidden_link_source_ids);
     context.linked_source_ids      = rstd::move(expanded.linked_source_ids);
     IndexSceneDocument(context, document, objects.as_slice());

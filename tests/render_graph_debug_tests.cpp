@@ -311,6 +311,81 @@ TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
     }
 }
 
+TEST(SceneRenderGraph, OrdersShadowAtlasWriterBeforeReceiver) {
+    owe::Scene scene;
+    scene.RegisterRenderTarget(String::make("_rt_default"_str),
+                               owe::SceneRenderTarget { .width = 1280, .height = 720 });
+    scene.RegisterRenderTarget(String::make("_rt_shadowAtlas"_str),
+                               owe::SceneRenderTarget {
+                                   .width  = 768,
+                                   .height = 256,
+                                   .kind   = owe::SceneRenderTargetKind::DepthSampled,
+                               });
+    auto viewports = Vec<owe::SceneShadowViewport>::make();
+    viewports.push(owe::SceneShadowViewport {
+        .width  = rstd::f32(256.0f),
+        .height = rstd::f32(256.0f),
+    });
+    scene.RegisterShadowDefinition(owe::SceneShadowDefinition {
+        .target    = String::make("_rt_shadowAtlas"_str),
+        .viewports = rstd::move(viewports),
+    });
+
+    auto caster                    = Arc<owe::SceneNode>::make();
+    caster->shadow.cast            = true;
+    auto               caster_mesh = std::make_shared<owe::SceneMesh>();
+    owe::SceneMaterial caster_material;
+    caster_material.name                 = "caster-main";
+    caster_material.shadow_variant       = std::make_shared<owe::SceneMaterial>();
+    caster_material.shadow_variant->name = "caster-shadow";
+    caster_mesh->AddMaterial(rstd::move(caster_material));
+    caster_mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
+    caster->AddMesh(rstd::move(caster_mesh));
+    scene.RootMut()->AppendChild(caster.clone());
+
+    auto               receiver      = Arc<owe::SceneNode>::make();
+    auto               receiver_mesh = std::make_shared<owe::SceneMesh>();
+    owe::SceneMaterial receiver_material;
+    receiver_material.name     = "receiver";
+    receiver_material.textures = { "_rt_shadowAtlas" };
+    receiver_mesh->AddMaterial(rstd::move(receiver_material));
+    receiver_mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
+    receiver->AddMesh(rstd::move(receiver_mesh));
+    scene.RootMut()->AppendChild(receiver.clone());
+
+    auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
+    ASSERT_EQ(snapshot.ShadowCasters().len(), usize(1));
+    auto graph   = owe::sceneToRenderGraph(scene, snapshot);
+    auto ordered = graph->topologicalOrder();
+    ASSERT_TRUE(ordered.is_ok());
+    auto order = rstd::move(ordered).unwrap_unchecked();
+
+    Option<usize> shadow_index;
+    Option<usize> receiver_index;
+    for (usize index {}; index < order.len(); ++index) {
+        auto pass = graph->passState(order[index]);
+        ASSERT_TRUE(pass.is_some());
+        if (pass->name == "caster-shadow"_str) shadow_index = Some(index);
+        if (pass->name == "receiver"_str) receiver_index = Some(index);
+    }
+    ASSERT_TRUE(shadow_index.is_some());
+    ASSERT_TRUE(receiver_index.is_some());
+    EXPECT_LT(*shadow_index, *receiver_index);
+
+    auto plan = graph->resourcePlan();
+    bool atlas_write { false };
+    bool atlas_read { false };
+    for (const auto& texture : plan.textures) {
+        if (texture.request.name != "_rt_shadowAtlas"_str) continue;
+        atlas_write = atlas_write || texture.access == owe::resource::ResourceAccess::Write ||
+                      texture.access == owe::resource::ResourceAccess::ReadWrite;
+        atlas_read  = atlas_read || texture.access == owe::resource::ResourceAccess::Read ||
+                      texture.access == owe::resource::ResourceAccess::ReadWrite;
+    }
+    EXPECT_TRUE(atlas_write);
+    EXPECT_TRUE(atlas_read);
+}
+
 TEST(SceneRenderGraph, SharesOneLinkTargetForMultipleConsumers) {
     owe::Scene scene;
     scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });

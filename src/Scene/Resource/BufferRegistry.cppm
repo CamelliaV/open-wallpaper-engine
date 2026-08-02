@@ -185,7 +185,9 @@ private:
         if (ticket.is_none()) {
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::BackendFailure,
-                .message = rstd::format("queue buffer write failed"),
+                .message = rstd::format("queue {} buffer bytes into {} byte allocation failed",
+                                        content.len(),
+                                        physical->buffer.size()),
             });
         }
         physical->source_generation = source_generation;

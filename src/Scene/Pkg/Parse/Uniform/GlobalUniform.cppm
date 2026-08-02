@@ -14,6 +14,7 @@ enum class GlobalUniformProducer : rstd::uint8_t
     Frame,
     Audio,
     Light,
+    Shadow,
 };
 
 struct GlobalUniformField {
@@ -30,13 +31,13 @@ inline constexpr u32      kGlobalUniformSet { u32(0) };
 inline constexpr u32      kGlobalUniformBinding { u32(0) };
 inline constexpr u32      kDrawUniformSet { u32(1) };
 inline constexpr u32      kDrawUniformBinding { u32(0) };
-inline constexpr u64      kGlobalUniformSchemaIdentity { u64(0x5745474c4f424101ULL) };
-inline constexpr usize    kGlobalUniformBlockSize { usize(4000) };
+inline constexpr u64      kGlobalUniformSchemaIdentity { u64(0x5745474c4f424102ULL) };
+inline constexpr usize    kGlobalUniformBlockSize { usize(4432) };
 inline constexpr ref<str> kGlobalUniformBlockName { "ww_GlobalUniforms"_str };
 inline constexpr ref<str> kDrawUniformBlockName { "ww_DrawUniforms"_str };
 
 inline auto GlobalUniformFields() -> slice<GlobalUniformField> {
-    static const array<GlobalUniformField, 18> fields {
+    static const array<GlobalUniformField, 20> fields {
         GlobalUniformField { G_TIME,
                              {},
                              "float"_str,
@@ -163,6 +164,20 @@ inline auto GlobalUniformFields() -> slice<GlobalUniformField> {
                              UniformOutputId { u32(5) },
                              UniformValueShape::Float(u32(4)),
                              u32(3936) },
+        GlobalUniformField { G_VIEWPORTVIEWPROJECTIONMATRICES,
+                             {},
+                             "mat4[6]"_str,
+                             GlobalUniformProducer::Shadow,
+                             UniformOutputId { u32(0) },
+                             UniformValueShape::MatrixArray(u32(4), u32(4), usize(6), usize(6)),
+                             u32(4000) },
+        GlobalUniformField { G_SHADOWATLASTRANSFORMS,
+                             {},
+                             "vec4[3]"_str,
+                             GlobalUniformProducer::Shadow,
+                             UniformOutputId { u32(1) },
+                             UniformValueShape::Float(u32(12)),
+                             u32(4384) },
     };
     return fields.as_slice();
 }

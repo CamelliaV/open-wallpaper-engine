@@ -30,6 +30,29 @@ Option<TextureRequest> TextureRequestFromScene(owe::Scene& scene, std::string_vi
     return Some(MakeRenderTargetTextureRequest(name, **target));
 }
 
+bool IsDepthSampled(const TextureBindingRequest& binding) {
+    return binding.request.is_some() && binding.request->definition.is_some() &&
+           owe::resource::HasTextureUsage(binding.request->definition->usage,
+                                          owe::resource::TextureUsage::DepthAttachment);
+}
+
+VkImageLayout SampledLayout(const TextureBindingRequest& binding) {
+    return IsDepthSampled(binding) ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                   : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+}
+
+owe::SceneMaterial* ResolvePassMaterial(const CustomShaderPass::Desc& desc) {
+    if (desc.material_override) return desc.material_override.get();
+    if (desc.node.is_none() || ! (*desc.node)->MeshShared()) return nullptr;
+    const auto& mesh          = *(*desc.node)->MeshShared();
+    const auto  submesh_index = desc.submesh_index.to_primitive();
+    if (submesh_index >= mesh.Submeshes().size()) return nullptr;
+    const auto& submesh = mesh.Submeshes()[submesh_index];
+    const auto& slots   = mesh.MaterialSlots();
+    if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return nullptr;
+    return slots[submesh.material_slot].get();
+}
+
 } // namespace
 
 PassInvalidationFlags CustomShaderPass::finalizeResourceRequests(Scene& scene) {
@@ -48,8 +71,28 @@ PassInvalidationFlags CustomShaderPass::finalizeResourceRequests(Scene& scene) {
     if (! m_desc.output.empty() && IsSpecTex(output_name)) {
         auto target = scene.RenderTarget(output_name);
         if (target.is_some()) {
-            const auto& rt             = **target;
-            auto        output_request = MakeRenderTargetTextureRequest(m_desc.output, rt);
+            const auto& rt = **target;
+            if (m_desc.depth_only) {
+                auto depth_request = MakeRenderTargetTextureRequest(m_desc.output, rt);
+                if (SetTextureRequestIfChanged(m_desc.depth_request,
+                                               Some(rstd::move(depth_request)))) {
+                    flags |= ToPassInvalidationFlags(PassInvalidation::Resources) |
+                             ToPassInvalidationFlags(PassInvalidation::Framebuffer);
+                }
+                if (SetTextureRequestIfChanged(m_desc.output_request, None<TextureRequest>()) ||
+                    SetTextureRequestIfChanged(m_desc.output_msaa_request,
+                                               None<TextureRequest>())) {
+                    flags |= ToPassInvalidationFlags(PassInvalidation::Resources) |
+                             ToPassInvalidationFlags(PassInvalidation::Framebuffer);
+                }
+                if (! m_desc.has_depth_attachment || m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
+                    m_desc.has_depth_attachment = true;
+                    m_desc.samples              = VK_SAMPLE_COUNT_1_BIT;
+                    flags |= PassInvalidationAll;
+                }
+                return flags;
+            }
+            auto output_request = MakeRenderTargetTextureRequest(m_desc.output, rt);
             if (SetTextureRequestIfChanged(m_desc.output_request, std::move(output_request))) {
                 flags |= ToPassInvalidationFlags(PassInvalidation::Resources) |
                          ToPassInvalidationFlags(PassInvalidation::Framebuffer);
@@ -114,19 +157,17 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
     auto&             mesh          = *(*m_desc.node)->Mesh();
     const std::size_t submesh_index = m_desc.submesh_index.to_primitive();
     if (submesh_index >= mesh.Submeshes().size()) return;
-    const auto& submesh = mesh.Submeshes()[submesh_index];
-    const auto& slots   = mesh.MaterialSlots();
-    if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return;
-    auto& material = *slots[submesh.material_slot];
-    if (! material.customShader.shader) return;
+    const auto& submesh  = mesh.Submeshes()[submesh_index];
+    auto*       material = ResolvePassMaterial(m_desc);
+    if (material == nullptr || ! material->customShader.shader) return;
 
     m_desc.pipeline_use    = rstd::Some(context.ReservePipeline());
     m_desc.render_pass_use = rstd::Some(context.ReserveRenderPass());
     m_desc.framebuffer_use = rstd::Some(context.ReserveFramebuffer());
-    auto shader_request    = MakeSceneShaderRequest(*material.customShader.shader);
+    auto shader_request    = MakeSceneShaderRequest(*material->customShader.shader);
     auto artifact_request  = shader_request.clone();
     m_desc.shader_use =
-        rstd::Some(context.AddShader(rstd::move(shader_request), *material.customShader.shader));
+        rstd::Some(context.AddShader(rstd::move(shader_request), *material->customShader.shader));
 
     auto artifact = context.ShaderArtifact(artifact_request);
     if (artifact.is_some()) {
@@ -137,7 +178,7 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
                 auto name =
                     block.scope == resource::ShaderArtifactUniformBlock::Scope::Shared
                         ? rstd::format("shared-uniform:{}", block.identity)
-                    : m_desc.draw_item.Valid()
+                    : m_desc.draw_item.Valid() && ! m_desc.material_override
                         ? (m_desc.render_view == SceneRenderViewKind::Primary
                                ? rstd::format("{}:{}:{}",
                                               BuildDrawBufferResourceName(m_desc.draw_item,
@@ -436,6 +477,7 @@ std::vector<PassTextureRequestDiagnostic> CustomShaderPass::textureRequestDiagno
 MaterialTextureBindingRefresh
 CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& render_scene) {
     MaterialTextureBindingRefresh result;
+    if (m_desc.material_override) return result;
     if (m_desc.node.is_none() || (*m_desc.node)->Mesh() == nullptr) return result;
 
     auto&             mesh          = *(*m_desc.node)->Mesh();
@@ -555,14 +597,18 @@ auto CustomShaderPass::createUniformBufferUpdates(ref<dyn<UniformBindingPrepareC
             block.scope == resource::ShaderArtifactUniformBlock::Scope::Shared
                 ? MakeSharedUniformBufferBinding(
                       prepare, use.use, block, artifact.matrix_convention, artifact.matrix_abi)
-                : MakeUniformBufferBinding(prepare,
-                                           draw_item,
-                                           use.use,
-                                           block,
-                                           textures.clone(),
-                                           m_desc.render_view,
-                                           artifact.matrix_convention,
-                                           artifact.matrix_abi);
+                : MakeUniformBufferBinding(
+                      prepare,
+                      draw_item,
+                      use.use,
+                      block,
+                      textures.clone(),
+                      m_desc.render_view,
+                      artifact.matrix_convention,
+                      artifact.matrix_abi,
+                      m_desc.material_override
+                          ? Some(ref<SceneMaterial>::from_raw_parts(m_desc.material_override.get()))
+                          : None<ref<SceneMaterial>>());
         if (binding.is_err()) return Err(rstd::move(binding).unwrap_err_unchecked());
         updates.push(rstd::move(binding).unwrap_unchecked());
     }
@@ -574,7 +620,14 @@ bool CustomShaderPass::prepareResourceStates(
     m_desc.sampled_barriers.Clear();
     for (const auto& binding : m_desc.texture_bindings) {
         if (binding.use.is_none()) continue;
-        auto barrier = states->Prepare(*binding.use, resource_registry::TextureStateKind::Sampled);
+        const bool depth = IsDepthSampled(binding);
+        auto       range = resource_registry::TextureSubresourceRange {
+            .aspect = depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+        };
+        auto barrier = states->Prepare(*binding.use,
+                                       depth ? resource_registry::TextureStateKind::DepthSampled
+                                             : resource_registry::TextureStateKind::Sampled,
+                                       range);
         if (barrier.is_none()) {
             rstd_error("prepare sampled texture state failed for {}", binding.name);
             return false;
@@ -593,7 +646,9 @@ bool CustomShaderPass::prepareResourceStates(
         return false;
     }
     if (m_desc.depth_use.is_some() &&
-        ! states->Set(*m_desc.depth_use, resource_registry::TextureStateKind::DepthAttachment)) {
+        ! states->Set(*m_desc.depth_use,
+                      m_desc.depth_only ? resource_registry::TextureStateKind::DepthSampled
+                                        : resource_registry::TextureStateKind::DepthAttachment)) {
         rstd_error("prepare depth texture state failed for {}", m_desc.output);
         return false;
     }
@@ -633,25 +688,38 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
         if (target.is_none()) return;
         const auto& rt  = **target;
         out_force_clear = rt.force_clear && ! m_desc.preserve_output;
-        if (m_desc.output_use.is_none()) return;
-        auto prepared = context.resources->Resolve(*m_desc.output_use);
-        if (prepared.is_none()) {
-            rstd_error("prepared output texture {} not found", tex_name);
-            return;
-        }
-        vk_output                 = (**prepared).image.getActive();
-        m_desc.output_extent      = { vk_output.extent.width, vk_output.extent.height };
-        output_attachment_request = rstd::Some((**prepared).request.clone());
-        m_desc.samples            = TextureSampleCount(rt.sample_count);
-        if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
-            if (m_desc.output_msaa_use.is_none()) return;
-            auto msaa = context.resources->Resolve(*m_desc.output_msaa_use);
-            if (msaa.is_none()) {
-                rstd_error("prepared MSAA texture {} not found", tex_name);
+        if (m_desc.depth_only) {
+            if (m_desc.depth_use.is_none()) return;
+            auto prepared = context.resources->Resolve(*m_desc.depth_use);
+            if (prepared.is_none()) {
+                rstd_error("prepared depth output texture {} not found", tex_name);
                 return;
             }
-            vk_output_msaa          = (**msaa).image.getActive();
-            msaa_attachment_request = rstd::Some((**msaa).request.clone());
+            vk_depth                 = (**prepared).image.getActive();
+            m_desc.output_extent     = { vk_depth.extent.width, vk_depth.extent.height };
+            depth_attachment_request = Some((**prepared).request.clone());
+            m_desc.samples           = VK_SAMPLE_COUNT_1_BIT;
+        } else {
+            if (m_desc.output_use.is_none()) return;
+            auto prepared = context.resources->Resolve(*m_desc.output_use);
+            if (prepared.is_none()) {
+                rstd_error("prepared output texture {} not found", tex_name);
+                return;
+            }
+            vk_output                 = (**prepared).image.getActive();
+            m_desc.output_extent      = { vk_output.extent.width, vk_output.extent.height };
+            output_attachment_request = Some((**prepared).request.clone());
+            m_desc.samples            = TextureSampleCount(rt.sample_count);
+            if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
+                if (m_desc.output_msaa_use.is_none()) return;
+                auto msaa = context.resources->Resolve(*m_desc.output_msaa_use);
+                if (msaa.is_none()) {
+                    rstd_error("prepared MSAA texture {} not found", tex_name);
+                    return;
+                }
+                vk_output_msaa          = (**msaa).image.getActive();
+                msaa_attachment_request = Some((**msaa).request.clone());
+            }
         }
     }
 
@@ -659,27 +727,31 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
     SceneMesh&        mesh          = *(*m_desc.node)->Mesh();
     const std::size_t submesh_index = m_desc.submesh_index.to_primitive();
     if (mesh.Submeshes().empty() || submesh_index >= mesh.Submeshes().size()) return;
-    const auto& submesh = mesh.Submeshes()[submesh_index];
-    const auto& slots   = mesh.MaterialSlots();
-    if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return;
-    SceneMaterial& material_ref = *slots[submesh.material_slot];
+    const auto& submesh  = mesh.Submeshes()[submesh_index];
+    auto*       material = ResolvePassMaterial(m_desc);
+    if (material == nullptr) return;
+    SceneMaterial& material_ref = *material;
     auto           output_rt    = scene.RenderTarget(as_str(m_desc.output).unwrap());
     if (output_rt.is_none()) return;
-    const bool has_depth_attachment = (**output_rt).withDepth && UsesDepthAttachment(material_ref);
-    m_desc.has_depth_attachment     = has_depth_attachment;
+    m_desc.depth_clear_value = (**output_rt).depth_clear_value;
+    const bool has_depth_attachment =
+        m_desc.depth_only || ((**output_rt).withDepth && UsesDepthAttachment(material_ref));
+    m_desc.has_depth_attachment = has_depth_attachment;
     VkAttachmentLoadOp depthLoadOp { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
     if (has_depth_attachment) {
         depthLoadOp = m_desc.clear_depth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
         m_desc.depth_load_op = depthLoadOp;
 
-        if (m_desc.depth_use.is_none()) return;
-        auto depth = context.resources->Resolve(*m_desc.depth_use);
-        if (depth.is_none()) {
-            rstd_error("prepared depth texture {} not found", m_desc.output);
-            return;
+        if (! m_desc.depth_only) {
+            if (m_desc.depth_use.is_none()) return;
+            auto depth = context.resources->Resolve(*m_desc.depth_use);
+            if (depth.is_none()) {
+                rstd_error("prepared depth texture {} not found", m_desc.output);
+                return;
+            }
+            vk_depth                 = (**depth).image.getActive();
+            depth_attachment_request = Some((**depth).request.clone());
         }
-        vk_depth                 = (**depth).image.getActive();
-        depth_attachment_request = rstd::Some((**depth).request.clone());
     }
 
     std::vector<Uni_ShaderSpv> spvs;
@@ -796,7 +868,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
         pipeline_state.setSampleCount(m_desc.samples);
         SetAlphaToCoverage(blendmode, pipeline_state.multisample);
         if (has_depth_attachment) SetDepthState(material_ref, pipeline_state.depth);
-        SetCullMode(material_ref.cull_mode, pipeline_state.raster);
+        SetRasterState(material_ref, device.capabilities().depth_clamp, pipeline_state.raster);
         const bool          has_index = m_desc.draw_buffers.hasIndex();
         VkPrimitiveTopology topology  = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
         switch (mesh.Primitive()) {
@@ -813,19 +885,30 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
             return;
         }
         PipelineResourceRequest pipeline_request {
-            .pipeline_layout      = *pipeline_layout,
-            .vertex_bindings      = std::move(bind_descriptions),
-            .vertex_attrs         = std::move(attr_descriptions),
-            .shader_stages        = std::move(spvs),
-            .color_blend          = color_blend,
-            .depth                = pipeline_state.depth,
-            .raster               = pipeline_state.raster,
-            .multisample          = pipeline_state.multisample,
-            .topology             = topology,
-            .color_format         = color_format,
+            .pipeline_layout = *pipeline_layout,
+            .vertex_bindings = std::move(bind_descriptions),
+            .vertex_attrs    = std::move(attr_descriptions),
+            .shader_stages   = std::move(spvs),
+            .color_blend     = color_blend,
+            .depth           = pipeline_state.depth,
+            .raster          = pipeline_state.raster,
+            .multisample     = pipeline_state.multisample,
+            .topology        = topology,
+            .viewport_count  = m_desc.viewports.is_empty()
+                                   ? 1u
+                                   : static_cast<uint32_t>(m_desc.viewports.len().to_primitive()),
+            .scissor_count   = m_desc.scissors.is_empty()
+                                   ? 1u
+                                   : static_cast<uint32_t>(m_desc.scissors.len().to_primitive()),
+            .color_format    = color_format,
             .color_final_layout   = color_final_layout,
             .color_load_op        = loadOp,
             .depth_load_op        = depthLoadOp,
+            .depth_store_op       = VK_ATTACHMENT_STORE_OP_STORE,
+            .depth_final_layout   = m_desc.depth_only
+                                        ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                        : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            .has_color_attachment = ! m_desc.depth_only,
             .has_depth_attachment = has_depth_attachment,
         };
         m_desc.pipeline_cache_key.reset();
@@ -853,17 +936,19 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
 
     {
         const bool has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
-        if (output_attachment_request.is_none()) return;
+        if (! m_desc.depth_only && output_attachment_request.is_none()) return;
         if (has_msaa && msaa_attachment_request.is_none()) return;
         if (has_depth_attachment && depth_attachment_request.is_none()) return;
 
         std::vector<FramebufferAttachmentDesc> attachments;
-        attachments.reserve((has_msaa ? 2u : 1u) + (has_depth_attachment ? 1u : 0u));
-        if (has_msaa) {
+        attachments.reserve((m_desc.depth_only ? 0u : (has_msaa ? 2u : 1u)) +
+                            (has_depth_attachment ? 1u : 0u));
+        if (! m_desc.depth_only && has_msaa) {
             attachments.push_back(
                 MakeFramebufferAttachment(*msaa_attachment_request, vk_output_msaa));
         }
-        attachments.push_back(MakeFramebufferAttachment(*output_attachment_request, vk_output));
+        if (! m_desc.depth_only)
+            attachments.push_back(MakeFramebufferAttachment(*output_attachment_request, vk_output));
         if (has_depth_attachment) {
             attachments.push_back(MakeFramebufferAttachment(*depth_attachment_request, vk_depth));
         }
@@ -910,6 +995,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
                 images.push(resource_registry::DescriptorImageBinding {
                     .binding = static_cast<rstd::uint32_t>(binding),
                     .image   = slots.getActive(),
+                    .layout  = SampledLayout(m_desc.texture_bindings[index]),
                 });
             }
             rstd::Option<resource_registry::DescriptorBufferBinding> buffer = rstd::None();
@@ -977,7 +1063,8 @@ bool CustomShaderPass::canJoinRenderScopeAfter(const VulkanPass& previous) const
     if (prev_pass == nullptr) return false;
     if (! prepared() || ! prev_pass->prepared()) return false;
     if (m_desc.clear_output || m_desc.clear_depth) return false;
-    if (m_desc.color_load_op != VK_ATTACHMENT_LOAD_OP_LOAD) return false;
+    if (m_desc.depth_only != prev_pass->m_desc.depth_only) return false;
+    if (! m_desc.depth_only && m_desc.color_load_op != VK_ATTACHMENT_LOAD_OP_LOAD) return false;
     if (m_desc.has_depth_attachment && m_desc.depth_load_op != VK_ATTACHMENT_LOAD_OP_LOAD)
         return false;
 
@@ -1052,6 +1139,7 @@ bool CustomShaderPass::update(PassUpdateContext& context) {
                         .image   = (**prepared)
                                        .image.slots[static_cast<std::size_t>(
                                            m_desc.descriptor_image_slots[index])],
+                        .layout  = SampledLayout(binding),
                     });
                 }
                 auto updated =
@@ -1092,12 +1180,12 @@ void CustomShaderPass::beginRenderScope(PassRecordContext& context) {
     auto&                outext   = m_desc.output_extent;
     const bool           has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
     const rstd::uint32_t clear_count =
-        (has_msaa ? 2u : 1u) + (m_desc.has_depth_attachment ? 1u : 0u);
+        (m_desc.depth_only ? 0u : (has_msaa ? 2u : 1u)) + (m_desc.has_depth_attachment ? 1u : 0u);
     rstd::array<VkClearValue, 3> clears {};
-    clears[usize()] = m_desc.clear_value;
+    if (! m_desc.depth_only) clears[usize()] = m_desc.clear_value;
     if (m_desc.has_depth_attachment) {
-        const rstd::uint32_t depth_index        = has_msaa ? 2u : 1u;
-        clears[usize(depth_index)].depthStencil = { 1.0f, 0 };
+        const rstd::uint32_t depth_index        = m_desc.depth_only ? 0u : (has_msaa ? 2u : 1u);
+        clears[usize(depth_index)].depthStencil = { m_desc.depth_clear_value, 0 };
     }
     VkRenderPassBeginInfo pass_begin_info {
         .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
@@ -1116,6 +1204,11 @@ void CustomShaderPass::beginRenderScope(PassRecordContext& context) {
 }
 
 void CustomShaderPass::recordRenderScopeDraw(PassRecordContext& context) {
+    if (m_desc.depth_only && m_desc.node.is_some()) {
+        for (auto* node = m_desc.node->as_raw_ptr(); node != nullptr; node = node->Parent()) {
+            if (! node->Visible()) return;
+        }
+    }
     if (m_desc.pipeline_use.is_none()) return;
     auto pipeline = context.resources->Resolve(*m_desc.pipeline_use);
     if (pipeline.is_none()) return;
@@ -1142,8 +1235,16 @@ void CustomShaderPass::recordRenderScopeDraw(PassRecordContext& context) {
     };
     VkRect2D scissor { { 0, 0 }, { outext.width, outext.height } };
 
-    cmd.SetViewport(0, viewport);
-    cmd.SetScissor(0, scissor);
+    if (m_desc.viewports.is_empty()) {
+        cmd.SetViewport(0, viewport);
+    } else {
+        cmd.SetViewport(0, m_desc.viewports.as_slice());
+    }
+    if (m_desc.scissors.is_empty()) {
+        cmd.SetScissor(0, scissor);
+    } else {
+        cmd.SetScissor(0, m_desc.scissors.as_slice());
+    }
 
     auto& draw_buffers = m_desc.draw_buffers;
     for (usize i {}; i < draw_buffers.vertices.len(); i++) {
@@ -1171,16 +1272,22 @@ void CustomShaderPass::recordRenderScopeDraw(PassRecordContext& context) {
         const auto&       ranges =
             (submesh_index < submeshes.size()) ? submeshes[submesh_index].draw_ranges : kEmpty;
         if (ranges.empty()) {
-            cmd.DrawIndexed(draw_buffers.draw_count.to_primitive(), 1, 0, 0, 0);
+            cmd.DrawIndexed(draw_buffers.draw_count.to_primitive(),
+                            m_desc.instance_count.to_primitive(),
+                            0,
+                            0,
+                            0);
         } else {
             // Per-part drawing — preserves the file's z-order so later parts
             // overdraw earlier ones (eyelid over pupil during blink).
             for (const auto& r : ranges) {
-                cmd.DrawIndexed(r.index_count, 1, r.first_index, 0, 0);
+                cmd.DrawIndexed(
+                    r.index_count, m_desc.instance_count.to_primitive(), r.first_index, 0, 0);
             }
         }
     } else {
-        cmd.Draw(draw_buffers.draw_count.to_primitive(), 1, 0, 0);
+        cmd.Draw(
+            draw_buffers.draw_count.to_primitive(), m_desc.instance_count.to_primitive(), 0, 0);
     }
 }
 

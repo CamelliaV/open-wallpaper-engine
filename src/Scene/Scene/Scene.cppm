@@ -199,6 +199,12 @@ struct SceneTexture {
 // SceneRenderTarget.h
 // ============================================================================
 
+enum class SceneRenderTargetKind
+{
+    Color,
+    DepthSampled,
+};
+
 struct SceneRenderTarget {
     struct Bind {
         bool        enable { false };
@@ -210,12 +216,14 @@ struct SceneRenderTarget {
     std::int32_t width;
     std::int32_t height;
     // Keep authored layout dimensions separate from backend-limited allocation dimensions.
-    std::int32_t physical_width { 0 };
-    std::int32_t physical_height { 0 };
-    bool         allowReuse { false };
-    bool         withDepth { false };
-    bool         has_mipmap { false };
-    unsigned     mipmap_level { 1 };
+    std::int32_t          physical_width { 0 };
+    std::int32_t          physical_height { 0 };
+    bool                  allowReuse { false };
+    bool                  withDepth { false };
+    SceneRenderTargetKind kind { SceneRenderTargetKind::Color };
+    float                 depth_clear_value { 1.0f };
+    bool                  has_mipmap { false };
+    unsigned              mipmap_level { 1 };
     // 1 disables MSAA; only screen RT is opted-in by VulkanRender at init.
     unsigned      sample_count { 1 };
     TextureSample sample { TextureWrap::CLAMP_TO_EDGE,
@@ -719,6 +727,12 @@ public:
         SetPipelineDirty();
         return true;
     }
+    bool SetDepthCompare(CompareOp value) {
+        if (depth_compare == value) return false;
+        depth_compare = value;
+        SetPipelineDirty();
+        return true;
+    }
     bool SetCullMode(CullMode value) {
         if (cull_mode == value) return false;
         cull_mode = value;
@@ -789,11 +803,18 @@ public:
 
     bool hasSprite { false };
 
-    SceneMaterialCustomShader customShader;
-    BlendMode                 blenmode { BlendMode::Disable };
-    bool                      depth_test { false };
-    bool                      depth_write { false };
-    CullMode                  cull_mode { CullMode::None };
+    SceneMaterialCustomShader      customShader;
+    BlendMode                      blenmode { BlendMode::Disable };
+    bool                           depth_test { false };
+    bool                           depth_write { false };
+    CompareOp                      depth_compare { CompareOp::LessEqual };
+    CullMode                       cull_mode { CullMode::None };
+    bool                           depth_clamp { false };
+    bool                           depth_bias { false };
+    float                          depth_bias_constant { 0.0f };
+    float                          depth_bias_clamp { 0.0f };
+    float                          depth_bias_slope { 0.0f };
+    std::shared_ptr<SceneMaterial> shadow_variant;
 
 private:
     ShaderValue ShapeShaderValue(std::string_view uniform_name, const ShaderValue& value) const {
@@ -821,31 +842,45 @@ private:
     }
 
     void copyFrom(const SceneMaterial& other) {
-        name             = other.name;
-        textures         = other.textures;
-        texture_metadata = other.texture_metadata;
-        texture_sources  = other.texture_sources.clone();
-        defines          = other.defines;
-        hasSprite        = other.hasSprite;
-        customShader     = other.customShader.Clone();
-        blenmode         = other.blenmode;
-        depth_test       = other.depth_test;
-        depth_write      = other.depth_write;
-        cull_mode        = other.cull_mode;
+        name                = other.name;
+        textures            = other.textures;
+        texture_metadata    = other.texture_metadata;
+        texture_sources     = other.texture_sources.clone();
+        defines             = other.defines;
+        hasSprite           = other.hasSprite;
+        customShader        = other.customShader.Clone();
+        blenmode            = other.blenmode;
+        depth_test          = other.depth_test;
+        depth_write         = other.depth_write;
+        depth_compare       = other.depth_compare;
+        cull_mode           = other.cull_mode;
+        depth_clamp         = other.depth_clamp;
+        depth_bias          = other.depth_bias;
+        depth_bias_constant = other.depth_bias_constant;
+        depth_bias_clamp    = other.depth_bias_clamp;
+        depth_bias_slope    = other.depth_bias_slope;
+        shadow_variant      = other.shadow_variant;
         m_dirty_flags.store(other.m_dirty_flags.load());
     }
     void moveFrom(SceneMaterial&& other) {
-        name             = std::move(other.name);
-        textures         = std::move(other.textures);
-        texture_metadata = std::move(other.texture_metadata);
-        texture_sources  = rstd::move(other.texture_sources);
-        defines          = std::move(other.defines);
-        hasSprite        = other.hasSprite;
-        customShader     = std::move(other.customShader);
-        blenmode         = other.blenmode;
-        depth_test       = other.depth_test;
-        depth_write      = other.depth_write;
-        cull_mode        = other.cull_mode;
+        name                = std::move(other.name);
+        textures            = std::move(other.textures);
+        texture_metadata    = std::move(other.texture_metadata);
+        texture_sources     = rstd::move(other.texture_sources);
+        defines             = std::move(other.defines);
+        hasSprite           = other.hasSprite;
+        customShader        = std::move(other.customShader);
+        blenmode            = other.blenmode;
+        depth_test          = other.depth_test;
+        depth_write         = other.depth_write;
+        depth_compare       = other.depth_compare;
+        cull_mode           = other.cull_mode;
+        depth_clamp         = other.depth_clamp;
+        depth_bias          = other.depth_bias;
+        depth_bias_constant = other.depth_bias_constant;
+        depth_bias_clamp    = other.depth_bias_clamp;
+        depth_bias_slope    = other.depth_bias_slope;
+        shadow_variant      = rstd::move(other.shadow_variant);
         m_dirty_flags.store(other.m_dirty_flags.load());
     }
 
@@ -1320,6 +1355,12 @@ public:
 // can outlive its parent during the children Vec destructor.
 class SceneNode : NoCopy, NoMove {
 public:
+    struct ShadowParticipation {
+        bool cast { false };
+    };
+
+    ShadowParticipation shadow;
+
     SceneNode()
         : m_name(),
           m_dirty(true),
@@ -2149,6 +2190,35 @@ struct RenderLinkSourceRecord {
     RenderTargetDescId render_target;
 };
 
+struct SceneShadowViewport {
+    f32 x {};
+    f32 y {};
+    f32 width {};
+    f32 height {};
+    i32 scissor_x {};
+    i32 scissor_y {};
+    u32 scissor_width {};
+    u32 scissor_height {};
+};
+
+struct SceneShadowDefinition {
+    String                   target;
+    Vec<SceneShadowViewport> viewports;
+
+    auto Clone() const -> SceneShadowDefinition {
+        return {
+            .target    = target.clone(),
+            .viewports = viewports.clone(),
+        };
+    }
+};
+
+struct RenderShadowCasterRecord {
+    RenderItemId                   render_item;
+    std::shared_ptr<SceneMaterial> material;
+    u32                            instance_count { 1 };
+};
+
 struct SceneMeshDirtyEvent {
     SceneMeshId         mesh;
     SceneMeshDirtyFlags flags { SceneMeshDirtyNone };
@@ -2256,6 +2326,10 @@ public:
     slice<RenderTargetDescRecord>  RenderTargetDescs() const {
         return m_render_target_descs.as_slice();
     }
+    slice<SceneShadowDefinition> ShadowDefinitions() const {
+        return m_shadow_definitions.as_slice();
+    }
+    slice<RenderShadowCasterRecord> ShadowCasters() const { return m_shadow_casters.as_slice(); }
 
     const RenderItemRecord*        renderItem(RenderItemId id) const;
     const RenderTextureDescRecord* textureDesc(RenderTextureDescId id) const;
@@ -2274,9 +2348,11 @@ public:
 private:
     RenderSceneVersion m_version;
 
-    Vec<RenderItemRecord>        m_render_items;
-    Vec<RenderTextureDescRecord> m_texture_descs;
-    Vec<RenderTargetDescRecord>  m_render_target_descs;
+    Vec<RenderItemRecord>         m_render_items;
+    Vec<RenderTextureDescRecord>  m_texture_descs;
+    Vec<RenderTargetDescRecord>   m_render_target_descs;
+    Vec<SceneShadowDefinition>    m_shadow_definitions;
+    Vec<RenderShadowCasterRecord> m_shadow_casters;
 
     HashMap<rstd::uint64_t, RenderItemId>      m_render_item_ids;
     HashMap<String, RenderTextureDescId>       m_texture_desc_ids;
@@ -2304,6 +2380,8 @@ public:
     auto Lights() const -> slice<Box<SceneLight>>;
     auto RegisterPostProcess(Box<ScenePostProcess> post_process) -> mut_ref<ScenePostProcess>;
     auto PostProcesses() const -> slice<Box<ScenePostProcess>>;
+    void RegisterShadowDefinition(SceneShadowDefinition definition);
+    auto ShadowDefinitions() const -> slice<SceneShadowDefinition>;
 
     struct ShaderUserBinding {
         SceneMaterial* material { nullptr };
@@ -2617,6 +2695,7 @@ private:
     Arc<SceneAudioAverage>        m_audio_average { Arc<SceneAudioAverage>::make() };
     Vec<Box<SceneLight>>          m_lights;
     Vec<Box<ScenePostProcess>>    m_post_processes;
+    Vec<SceneShadowDefinition>    m_shadow_definitions;
     HashMap<String, Vec<Box<dyn<FnMut<void(ref<str>)>>>>>        m_text_user_index;
     HashMap<String, Vec<Box<dyn<FnMut<void(ref<Json>)>>>>>       m_user_property_index;
     Vec<Box<dyn<FnMut<void(f64)>>>>                              m_transform_updaters;

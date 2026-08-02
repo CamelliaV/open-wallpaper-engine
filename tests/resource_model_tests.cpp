@@ -87,6 +87,29 @@ TEST(ResourceModel, ReplacesRequestsOnlyWhenTheirDefinitionChanges) {
     EXPECT_EQ(slot->definition->width, rstd::i32(512));
 }
 
+TEST(ResourceModel, DistinguishesDepthSamplingAndComparisonSamplerDefinitions) {
+    auto attachment               = TextureRequest("shadow", rstd::u32(768));
+    attachment.definition->usage  = owe::resource::TextureUsage::DepthAttachment;
+    attachment.definition->format = owe::TextureFormat::D32F;
+
+    auto sampled = attachment.clone();
+    sampled.definition->usage =
+        owe::resource::TextureUsage::DepthAttachment | owe::resource::TextureUsage::Sampled;
+    EXPECT_FALSE(owe::resource::SameTextureRequest(attachment, sampled));
+
+    auto compared                              = sampled.clone();
+    compared.definition->sample.compare_enable = true;
+    compared.definition->sample.compare_op     = owe::CompareOp::LessEqual;
+    EXPECT_FALSE(owe::resource::SameTextureRequest(sampled, compared));
+    auto border                            = compared.clone();
+    border.definition->sample.border_color = owe::TextureBorderColor::TransparentBlack;
+    EXPECT_FALSE(owe::resource::SameTextureRequest(compared, border));
+    EXPECT_TRUE(owe::resource::HasTextureUsage(compared.definition->usage,
+                                               owe::resource::TextureUsage::DepthAttachment));
+    EXPECT_TRUE(owe::resource::HasTextureUsage(compared.definition->usage,
+                                               owe::resource::TextureUsage::Sampled));
+}
+
 TEST(ResourcePlan, OwnsBackendNeutralRequestsByTypedUseHandle) {
     owe::resource::ResourcePlan plan { .generation = rstd::u64(7) };
     plan.textures.push(owe::resource::TexturePlanEntry {

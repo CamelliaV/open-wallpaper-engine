@@ -1047,15 +1047,29 @@ private:
 
     static auto ToTextureKey(const resource::TextureDefinition& definition) -> vulkan::TextureKey {
         return vulkan::TextureKey {
-            .width  = definition.width,
-            .height = definition.height,
-            .usage  = definition.usage == resource::TextureUsage::Depth ? vulkan::TexUsage::DEPTH
-                                                                        : vulkan::TexUsage::COLOR,
-            .format = definition.format,
-            .sample = definition.sample,
+            .width        = definition.width,
+            .height       = definition.height,
+            .usage        = ToVkImageUsage(definition.usage),
+            .format       = definition.format,
+            .sample       = definition.sample,
             .mipmap_level = definition.mip_levels.to_primitive(),
             .samples      = TextureSampleCount(definition.samples),
         };
+    }
+
+    static auto ToVkImageUsage(resource::TextureUsage usage) -> VkImageUsageFlags {
+        VkImageUsageFlags flags {};
+        if (resource::HasTextureUsage(usage, resource::TextureUsage::Sampled))
+            flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
+        if (resource::HasTextureUsage(usage, resource::TextureUsage::ColorAttachment))
+            flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        if (resource::HasTextureUsage(usage, resource::TextureUsage::DepthAttachment))
+            flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        if (resource::HasTextureUsage(usage, resource::TextureUsage::TransferSource))
+            flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        if (resource::HasTextureUsage(usage, resource::TextureUsage::TransferDestination))
+            flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        return flags;
     }
 
     static auto TextureSampleCount(u32 sample_count) -> VkSampleCountFlagBits {

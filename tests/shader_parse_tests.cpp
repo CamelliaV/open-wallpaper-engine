@@ -54,6 +54,15 @@ void main(){}
     EXPECT_EQ(info.defTexs[0].second, "_rt_shadowAtlas");
 }
 
+TEST(ShaderParser, ShadowPassAnnotationSelectsCasterShader) {
+    auto info = Parse(R"(
+// [PASS] shadow shadowcasterfoliage4
+void main(){}
+)");
+
+    EXPECT_EQ(info.shadow_pass, "shadowcasterfoliage4"_str);
+}
+
 TEST(ShaderParser, TextureComboFlagSetRegardlessOfIfdef) {
     // The combo flag on a texture binding is the chicken in the
     // chicken-and-egg. With 8 slots all enabled, slot 2 is bound, so MASK=1.
@@ -795,6 +804,55 @@ TEST(ShaderParser, UsesOneCanonicalGlobalAbiForLegacyDaytimeAlias) {
         ASSERT_NE(member, global->member_map.end());
         EXPECT_EQ(member->second.offset, field.offset.to_primitive());
     }
+    const auto matrices = global->member_map.find("g_ViewportViewProjectionMatrices");
+    ASSERT_NE(matrices, global->member_map.end());
+    EXPECT_EQ(matrices->second.num, rstd::usize(6));
+}
+
+TEST(ShaderParser, KeepsShadowMatricesInCanonicalGlobalSet) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "shadow-global-uniform-abi-test";
+    desc.shader_name = "shadow-global-uniform-abi-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/shadow-global-uniform-abi-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+in uint gl_InstanceID;
+in uint gl_VertexID;
+varying uint gl_ViewportIndex;
+uniform mat4 g_ViewportViewProjectionMatrices[6];
+void main() {
+    gl_Position = mul(vec4(a_Position, 1.0),
+                      g_ViewportViewProjectionMatrices[gl_InstanceID]);
+    gl_Position.x += float(gl_VertexID) * 0.0;
+    gl_ViewportIndex = gl_InstanceID;
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/shadow-global-uniform-abi-test.frag",
+        .source     = "void main() { gl_FragColor = vec4(1.0); }",
+    });
+
+    owe::fs::VFS vfs;
+    auto         compile = owe::ShaderParser::CompileSceneShaderVariant(desc, vfs);
+    ASSERT_TRUE(compile.ok) << compile.error;
+
+    std::vector<owe::vulkan::Uni_ShaderSpv> spvs;
+    owe::vulkan::ShaderReflected            reflection;
+    ASSERT_TRUE(owe::vulkan::GenReflect(compile.shader->codes, spvs, reflection));
+    const auto global =
+        std::find_if(reflection.blocks.begin(), reflection.blocks.end(), [](const auto& block) {
+            return block.name == "ww_GlobalUniforms";
+        });
+    ASSERT_NE(global, reflection.blocks.end());
+    const auto matrices = global->member_map.find("g_ViewportViewProjectionMatrices");
+    ASSERT_NE(matrices, global->member_map.end());
+    EXPECT_EQ(matrices->second.num, rstd::usize(6));
+    EXPECT_EQ(reflection.input_location_map.size(), 1u);
+    EXPECT_TRUE(reflection.input_location_map.contains("a_Position"));
 }
 
 TEST(ShaderParser, FallsBackAsOneLegacyInterfaceOnGlobalTypeConflict) {
@@ -944,7 +1002,7 @@ void main() {
                (static_cast<std::uint32_t>(header[offset + 3]) << 24);
     };
     EXPECT_EQ(read_u32(8), 3u);
-    EXPECT_EQ(read_u32(12), 11u);
+    EXPECT_EQ(read_u32(12), 14u);
     EXPECT_EQ(read_u32(16), 112u);
     EXPECT_EQ(read_u32(24), 2u);
     const auto initial_write_time = std::filesystem::last_write_time(artifact_path);

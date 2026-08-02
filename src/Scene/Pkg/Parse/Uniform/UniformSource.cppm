@@ -55,6 +55,12 @@ enum class LightUniformOutput : rstd::uint32_t
     CastShadow,
 };
 
+enum class ShadowUniformOutput : rstd::uint32_t
+{
+    ViewProjectionMatrices,
+    AtlasTransforms,
+};
+
 enum class ColorUniformOutput : rstd::uint32_t
 {
     UserAlpha,
@@ -80,6 +86,7 @@ enum class TextureUniformOutput : rstd::uint32_t
     Mipmap0      = 16,
     Rotation0    = 32,
     Translation0 = 48,
+    Texel0       = 64,
 };
 
 enum class ParticleTrailUniformOutput : rstd::uint32_t
@@ -112,6 +119,12 @@ inline auto TextureRotationOutput(std::size_t index) -> UniformOutputId {
 
 inline auto TextureTranslationOutput(std::size_t index) -> UniformOutputId {
     const auto value = static_cast<rstd::uint32_t>(TextureUniformOutput::Translation0) +
+                       static_cast<rstd::uint32_t>(index);
+    return { .value = u32(value) };
+}
+
+inline auto TextureTexelOutput(std::size_t index) -> UniformOutputId {
+    const auto value = static_cast<rstd::uint32_t>(TextureUniformOutput::Texel0) +
                        static_cast<rstd::uint32_t>(index);
     return { .value = u32(value) };
 }
@@ -321,6 +334,22 @@ public:
 
 private:
     Vec<ref<SceneLight>> m_lights;
+};
+
+class ShadowUniformSource {
+public:
+    ShadowUniformSource(Arc<SceneCamera> camera, ref<SceneLight> light)
+        : m_camera(rstd::move(camera)), m_light(light) {}
+
+    auto Describe(mut_ref<dyn<UniformBindingSink>>) const -> Result<empty, UniformError>;
+    auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
+    auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
+        -> Result<empty, UniformError>;
+    auto AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>> { return None(); }
+
+private:
+    Arc<SceneCamera> m_camera;
+    ref<SceneLight>  m_light;
 };
 
 class TextureUniformSource {

@@ -35,6 +35,7 @@ struct PuppetLayerRegistry {
 struct SceneShaderEnvironment {
     bool fog_distance { false };
     bool fog_height { false };
+    bool directional_shadow { false };
 };
 
 enum class GeometryStageRequirement
@@ -281,8 +282,9 @@ struct ProcessOpts {
 
 SceneParseContext BuildContext(fs::VFS&, ref<str> scene_id, const wpscene::SceneMetadata&,
                                array<std::int32_t, 2>       ortho_extent,
-                               Option<ref<rstd::json::Map>> user_properties  = None(),
-                               Option<rstd::path::PathBuf>  shader_cache_dir = None());
+                               Option<ref<rstd::json::Map>> user_properties    = None(),
+                               Option<rstd::path::PathBuf>  shader_cache_dir   = None(),
+                               bool                         directional_shadow = false);
 
 void IndexSceneDocument(SceneParseContext&, ref<wpscene::SceneDocument>, slice<SceneObjectVar>);
 void ProcessContainers(SceneParseContext&, mut_ref<SceneObjectVar[]>);

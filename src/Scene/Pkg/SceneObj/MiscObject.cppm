@@ -168,6 +168,7 @@ struct ModelObject {
     std::uint32_t skin { 0 };
     bool          perspective { false };
     bool          reflected { true };
+    bool          castshadow { true };
 
     std::vector<PuppetLayer::AnimationLayer> puppet_layers;
     VisibleUserBinding                       visible_user;
@@ -197,6 +198,7 @@ struct ModelObject {
         owe::GetJsonValue(json, "skin", skin, false);
         owe::GetJsonValue(json, "perspective", perspective, false);
         owe::GetJsonValue(json, "reflected", reflected, false);
+        owe::GetJsonValue(json, "castshadow", castshadow, false);
         ReadPuppetAnimationLayers(json, puppet_layers);
         AbsorbAllFieldBindings(json, field_bindings);
         return true;

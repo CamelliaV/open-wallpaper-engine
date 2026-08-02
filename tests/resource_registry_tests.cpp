@@ -1081,6 +1081,7 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
     EXPECT_TRUE(handle.Valid());
     EXPECT_EQ(prepared.images.len(), rstd::usize(1));
     EXPECT_EQ(prepared.images[rstd::usize()].binding, 2u);
+    EXPECT_EQ(prepared.images[rstd::usize()].layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     EXPECT_EQ(prepared.images[rstd::usize()].image.generation, rstd::u64(17));
     ASSERT_TRUE(prepared.buffer.is_some());
     EXPECT_EQ(prepared.buffer->offset, 64u);
@@ -1102,6 +1103,24 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
     EXPECT_EQ(completed->program_generation, rstd::u64());
     EXPECT_EQ(completed->descriptors.len(), rstd::usize(1));
     EXPECT_EQ(submissions.InFlight(), rstd::usize());
+}
+
+TEST(DescriptorSystem, PreservesDepthSampledLayoutAcrossCloneAndUpdate) {
+    owe::resource_registry::DescriptorSystem descriptors;
+    auto images = rstd::vec::Vec<owe::resource_registry::DescriptorImageBinding>::make();
+    images.push(owe::resource_registry::DescriptorImageBinding {
+        .binding = 1,
+        .layout  = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    });
+    auto prepared = descriptors.PreparePush(2, images.as_slice(), rstd::None());
+    auto cloned   = prepared.clone();
+    ASSERT_EQ(cloned.images.len(), rstd::usize(1));
+    EXPECT_EQ(cloned.images[rstd::usize()].layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+
+    auto color_images                  = images.clone();
+    color_images[rstd::usize()].layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    ASSERT_TRUE(prepared.UpdateImages(color_images.as_slice()).is_ok());
+    EXPECT_EQ(prepared.images[rstd::usize()].layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 TEST(DescriptorSystem, RejectsActiveWritesOutsideThePipelineLayout) {
@@ -1264,6 +1283,48 @@ TEST(ResourceStateTracker, CompilesTypedUsesIntoBarrierPackets) {
     ASSERT_TRUE(sampled_after_clear.is_some());
     EXPECT_EQ(sampled_after_clear->barrier.oldLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     EXPECT_EQ(sampled_after_clear->barrier.newLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
+TEST(ResourceStateTracker, TransitionsDepthAttachmentToDepthSampled) {
+    auto use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(9), .generation = rstd::u64(3) };
+    auto request = owe::resource::TextureRequest {
+        .kind = owe::resource::TextureRequestKind::RenderTarget,
+        .name = rstd::string::String::make("shadow"_str),
+    };
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(3) };
+    plan.textures.push(owe::resource::TexturePlanEntry {
+        .handle  = use,
+        .request = request.clone(),
+        .access  = owe::resource::ResourceAccess::ReadWrite,
+    });
+
+    auto                                          allocation = TextureAllocation(1);
+    owe::resource_registry::PreparedResourceTable table(rstd::u64(3));
+    ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
+        .use = use,
+        .resource =
+            owe::resource::TextureHandle { .index = rstd::u64(10), .generation = rstd::u64(1) },
+        .request  = rstd::move(request),
+        .physical = allocation.clone(),
+        .image    = allocation->View(),
+    }));
+
+    owe::resource_registry::ResourceStateTracker states;
+    ASSERT_TRUE(states.Compile(plan, table));
+    ASSERT_TRUE(states.Set(use, owe::resource_registry::TextureStateKind::DepthAttachment));
+    auto barrier = states.Prepare(
+        use,
+        owe::resource_registry::TextureStateKind::DepthSampled,
+        owe::resource_registry::TextureSubresourceRange { .aspect = VK_IMAGE_ASPECT_DEPTH_BIT });
+    ASSERT_TRUE(barrier.is_some());
+    EXPECT_EQ(barrier->src_stage,
+              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                  VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
+    EXPECT_EQ(barrier->dst_stage, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    EXPECT_EQ(barrier->barrier.oldLayout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+    EXPECT_EQ(barrier->barrier.newLayout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+    EXPECT_EQ(barrier->barrier.subresourceRange.aspectMask, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
 TEST(ResourceStateTracker, SharesStateAcrossUsesOfOneTexture) {

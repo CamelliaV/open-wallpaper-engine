@@ -242,6 +242,10 @@ uniform vec4 g_LightsColorRadius[4];
 uniform vec4 g_LightsDirectionType[4];
 uniform vec4 g_LightsConeExponent[4];
 uniform float g_LightsCastShadow[4];
+#if LIGHTS_SHADOW_MAPPING
+uniform mat4 g_ViewportViewProjectionMatrices[6];
+uniform vec4 g_ShadowAtlasTransforms[3];
+#endif
 
 float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 viewVector,
                           float3 specularTint, float3 f0, float roughness, float metallic) {
@@ -250,7 +254,7 @@ float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 
         float type = g_LightsDirectionType[i].w;
         float3 color = g_LightsColorRadius[i].rgb;
         float shadowFactor = 1.0;
-#if OWE_IMAGE_LAYER && SCENE_ORTHO
+#if !LIGHTS_SHADOW_MAPPING && OWE_IMAGE_LAYER && SCENE_ORTHO
         // Shadow-atlas rendering is not available yet. Suppress shadow-casting
         // lights on 2D layers instead of leaking them across the whole quad.
         shadowFactor = 1.0 - step(0.5, g_LightsCastShadow[i]);
@@ -259,6 +263,20 @@ float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 
             continue;
 
         if (type > 1.5) {
+#if LIGHTS_SHADOW_MAPPING
+            if (g_LightsCastShadow[i] > 0.5) {
+                float selectedCascade = 0.0;
+                for (int cascade = 0; cascade < 3; ++cascade) {
+                    float4 projected = CalculateProjectedCoordsCascades(
+                        worldPos, g_ViewportViewProjectionMatrices[cascade]);
+                    float active = (1.0 - projected.w) * (1.0 - selectedCascade);
+                    float sampled = PerformShadowMapping(
+                        projected.xyz, g_ShadowAtlasTransforms[cascade]);
+                    shadowFactor = lerp(shadowFactor, sampled, active);
+                    selectedCascade = saturate(selectedCascade + active);
+                }
+            }
+#endif
             light += ComputePBRLightShadowInfinite(
                 normal, g_LightsDirectionType[i].xyz, viewVector, albedo, color,
                 specularTint, f0, roughness, metallic, shadowFactor);
@@ -1038,6 +1056,13 @@ inline std::string EmitGSHLSLStruct(std::string_view name, std::vector<IODecl> d
     return out;
 }
 
+inline std::string_view HLSLSystemSemantic(std::string_view name) {
+    if (name == "gl_VertexID") return "SV_VertexID";
+    if (name == "gl_InstanceID") return "SV_InstanceID";
+    if (name == "gl_ViewportIndex") return "SV_ViewportArrayIndex";
+    return {};
+}
+
 // HLSL-side struct emission for VS/FS entry points. Same as the GS variant
 // but the SV_Position field is included only when the struct represents a
 // VS output / FS input (HLSL needs it for rasterizer setup); attributes
@@ -1068,7 +1093,9 @@ inline std::string EmitVSFSStruct(std::string_view name, std::vector<IODecl> dec
         out += "    float4 _ww_sv_position : SV_Position;\n";
     }
     for (const auto& d : decls) {
-        out += "    " + ToHLSLType(d.type) + " " + d.name + d.array + " : " + d.name + ";\n";
+        const auto semantic = HLSLSystemSemantic(d.name);
+        out += "    " + ToHLSLType(d.type) + " " + d.name + d.array + " : " +
+               (semantic.empty() ? d.name : std::string(semantic)) + ";\n";
     }
     out += "};\n";
     return out;
@@ -1517,7 +1544,9 @@ inline std::string Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo
     // type; consumers only contribute names missing from that interface.
     std::vector<IODecl> attrs, varyings;
     auto add = [&](const IODecl& d, IODeclPrecedence precedence = IODeclPrecedence::KeepExisting) {
-        std::vector<IODecl>& v = (d.storage == 'a') ? attrs : varyings;
+        const bool vertex_system_input = unit.stage == ShaderType::VERTEX &&
+                                         (d.name == "gl_VertexID" || d.name == "gl_InstanceID");
+        std::vector<IODecl>& v = (d.storage == 'a' || vertex_system_input) ? attrs : varyings;
         AddIODecl(v, d, precedence);
     };
     for (const auto& d : io_decls) add(d);
@@ -1597,7 +1626,7 @@ using ShaderCacheDigest = std::array<std::uint8_t, 20>;
 
 constexpr std::array<std::uint8_t, 8> kShaderCacheMagic { 'O', 'W', 'E', 'S', 'P', 'V', '3', 0 };
 constexpr std::uint32_t               kShaderCacheFormatVersion = 3;
-constexpr std::uint32_t               kShaderCacheAbiVersion    = 11;
+constexpr std::uint32_t               kShaderCacheAbiVersion    = 14;
 // 8-byte magic, six u32 fields, and four SHA-1 digests total 112 bytes.
 constexpr std::uint32_t kShaderCacheHeaderSize = static_cast<std::uint32_t>(
     kShaderCacheMagic.size() + 6 * sizeof(std::uint32_t) + 4 * ShaderCacheDigest {}.size());
@@ -2128,6 +2157,7 @@ usize EstimateShaderAnnotations(const ShaderInfo& info) {
     }
     bytes += (info.combo_defs.len() + info.texture_uniforms.len() + info.scalar_uniforms.len()) *
              usize(512);
+    bytes += info.shadow_pass.len();
     return bytes;
 }
 
@@ -2143,6 +2173,7 @@ void MergeShaderAnnotations(ShaderInfo& target, const ShaderInfo& source) {
     for (const auto& uniform : source.scalar_uniforms) {
         target.scalar_uniforms.push(uniform.clone());
     }
+    if (! source.shadow_pass.is_empty()) target.shadow_pass = source.shadow_pass.clone();
 }
 
 } // namespace

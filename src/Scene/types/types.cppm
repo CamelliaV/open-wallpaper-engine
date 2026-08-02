@@ -141,6 +141,7 @@ enum class FillMode
 enum class TextureWrap
 {
     CLAMP_TO_EDGE,
+    CLAMP_TO_BORDER,
     REPEAT
 };
 
@@ -150,11 +151,33 @@ enum class TextureFilter
     NEAREST
 };
 
+enum class CompareOp
+{
+    Never,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Equal,
+    NotEqual,
+    Always,
+};
+
+enum class TextureBorderColor
+{
+    TransparentBlack,
+    OpaqueBlack,
+    OpaqueWhite,
+};
+
 struct TextureSample {
-    TextureWrap   wrapS { TextureWrap::REPEAT };
-    TextureWrap   wrapT { TextureWrap::REPEAT };
-    TextureFilter magFilter { TextureFilter::NEAREST };
-    TextureFilter minFilter { TextureFilter::NEAREST };
+    TextureWrap        wrapS { TextureWrap::REPEAT };
+    TextureWrap        wrapT { TextureWrap::REPEAT };
+    TextureFilter      magFilter { TextureFilter::NEAREST };
+    TextureFilter      minFilter { TextureFilter::NEAREST };
+    bool               compare_enable { false };
+    CompareOp          compare_op { CompareOp::Never };
+    TextureBorderColor border_color { TextureBorderColor::OpaqueBlack };
 };
 
 struct VideoPlaybackSnapshot {

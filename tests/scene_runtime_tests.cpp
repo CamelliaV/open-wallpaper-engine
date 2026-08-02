@@ -173,6 +173,25 @@ TEST(TransformUniformSource, AppliesGeometryTransformAfterNodeTransform) {
     EXPECT_NEAR(model[usize(13)], 140.0f, 1e-5f);
 }
 
+TEST(TransformUniformSource, NormalModelMatrixDoesNotScaleTangentSpace) {
+    auto state = Arc<owe::UniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+    auto camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1.0, 1.0, -1.0, 1.0));
+    auto resolver = Arc<owe::UniformCameraResolver>::make(rstd::move(camera));
+    auto node     = Arc<owe::SceneNode>::make();
+    node->SetScale({ 0.00636f, 0.00636f, 0.00636f });
+    auto node_state = Arc<owe::UniformNodeState>::make(node.clone(), rstd::move(resolver));
+    owe::TransformUniformSource source(state.clone(), rstd::move(node_state));
+
+    auto normal_model =
+        scene_test::Capture(owe::SceneFrame {}, source, owe::TransformUniformOutput::NormalModel);
+
+    ASSERT_EQ(normal_model.size(), usize(9));
+    EXPECT_NEAR(normal_model[usize()], 1.0f, 1e-5f);
+    EXPECT_NEAR(normal_model[usize(4)], 1.0f, 1e-5f);
+    EXPECT_NEAR(normal_model[usize(8)], 1.0f, 1e-5f);
+}
+
 TEST(TransformUniformSource, UsesResolvedPerspectiveCameraEyePosition) {
     auto state  = Arc<owe::UniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     auto camera = Arc<owe::SceneCamera>::make(
@@ -309,6 +328,44 @@ TEST(LightUniformSource, PublishesWorldDirectionAndType) {
     EXPECT_FLOAT_EQ(cast_shadow[usize()], 1.0f);
 }
 
+TEST(ShadowUniformSource, UsesAuthoredCascadeExtentAndLightObjectFrame) {
+    auto camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakePerspective(1.0, 0.1, 1000.0, 50.0));
+    camera->SetLookAt(Eigen::Vector3d::Zero(), -Eigen::Vector3d::UnitZ(), Eigen::Vector3d::UnitY());
+
+    auto                  light_node = Arc<owe::SceneNode>::make();
+    owe::SceneLight::Desc desc;
+    desc.type                 = owe::SceneLightType::Directional;
+    desc.cast_shadow          = true;
+    desc.cascade_distances[0] = 10.0f;
+    desc.cascade_distances[1] = 20.0f;
+    desc.cascade_distances[2] = 40.0f;
+    owe::SceneLight light(desc);
+    light.setNode(light_node.as_ptr());
+    owe::ShadowUniformSource source(rstd::move(camera),
+                                    ref<owe::SceneLight>::from_raw_parts(rstd::addressof(light)));
+
+    owe::SceneFrame frame;
+    auto            matrices =
+        scene_test::Capture(frame, source, owe::ShadowUniformOutput::ViewProjectionMatrices);
+    ASSERT_EQ(matrices.size(), usize(96));
+    EXPECT_NEAR(matrices[usize(8)], 0.2f, 1e-6f);
+    EXPECT_NEAR(matrices[usize(5)], 0.2f, 1e-6f);
+    EXPECT_NEAR(matrices[usize(2)], -1.0f / 80.0f, 1e-6f);
+    EXPECT_NEAR(matrices[usize(12)], 1.0f, 1e-6f);
+    EXPECT_NEAR(matrices[usize(14)], 0.5f, 1e-6f);
+    EXPECT_NEAR(matrices[usize(16 + 8)], 0.1f, 1e-6f);
+    EXPECT_NEAR(matrices[usize(32 + 8)], 0.05f, 1e-6f);
+    EXPECT_FLOAT_EQ(matrices[usize(48)], 0.0f);
+
+    auto atlas = scene_test::Capture(frame, source, owe::ShadowUniformOutput::AtlasTransforms);
+    ASSERT_EQ(atlas.size(), usize(12));
+    EXPECT_FLOAT_EQ(atlas[usize()], 0.0f);
+    EXPECT_FLOAT_EQ(atlas[usize(2)], 1.0f / 3.0f);
+    EXPECT_FLOAT_EQ(atlas[usize(4)], 1.0f / 3.0f);
+    EXPECT_FLOAT_EQ(atlas[usize(8)], 2.0f / 3.0f);
+}
+
 TEST(TextureUniformSource, StaticTextureUsesIdentityTransform) {
     owe::SceneFrame                    frame;
     scene_test::StaticTextureResources resources;
@@ -328,6 +385,27 @@ TEST(TextureUniformSource, StaticTextureUsesIdentityTransform) {
     EXPECT_FLOAT_EQ(rotation[usize(1)], 0.0f);
     EXPECT_FLOAT_EQ(rotation[usize(2)], 0.0f);
     EXPECT_FLOAT_EQ(rotation[usize(3)], 1.0f);
+}
+
+TEST(TextureUniformSource, PublishesSampleTexelExtent) {
+    owe::SceneFrame                    frame;
+    scene_test::StaticTextureResources resources;
+    scene_test::UpdateContext          context_impl(frame, resources);
+    owe::TextureUniformSource          source;
+    scene_test::UniformSink            sink_impl(owe::TextureTexelOutput(0));
+    auto context = rstd::dyn<owe::UniformUpdateContext>::from_ref(context_impl);
+    auto sink    = rstd::dyn<owe::UniformValueSink>::from_ref(sink_impl);
+
+    auto result = source.Evaluate(context.as_ref(), sink.as_mut_ref());
+
+    ASSERT_TRUE(result.is_ok());
+    ASSERT_TRUE(sink_impl.Written());
+    const auto& texel = sink_impl.Value();
+    ASSERT_EQ(texel.size(), usize(4));
+    EXPECT_FLOAT_EQ(texel[usize()], 1.0f / 512.0f);
+    EXPECT_FLOAT_EQ(texel[usize(1)], 1.0f / 512.0f);
+    EXPECT_FLOAT_EQ(texel[usize(2)], 512.0f);
+    EXPECT_FLOAT_EQ(texel[usize(3)], 512.0f);
 }
 
 TEST(AudioResponseDemand, AggregatesLeasesAndHonorsRuntimeGate) {

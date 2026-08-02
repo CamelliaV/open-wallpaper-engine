@@ -560,7 +560,8 @@ private:
 
     static auto CreateRenderPass(const Device& device, const RenderPassResourceDesc& desc)
         -> Option<vvk::RenderPass> {
-        const bool              has_resolve = desc.has_resolve_attachment;
+        const bool              has_color   = desc.has_color_attachment;
+        const bool              has_resolve = has_color && desc.has_resolve_attachment;
         VkAttachmentDescription color {
             .format         = desc.color_format,
             .samples        = desc.samples,
@@ -603,20 +604,20 @@ private:
             .layout     = desc.resolve_attachment_layout,
         };
         VkAttachmentReference depth_ref {
-            .attachment = has_resolve ? 2u : 1u,
+            .attachment = has_color ? (has_resolve ? 2u : 1u) : 0u,
             .layout     = desc.depth_attachment_layout,
         };
 
         std::vector<VkAttachmentDescription> attachments;
         attachments.reserve(3);
-        attachments.push_back(color);
+        if (has_color) attachments.push_back(color);
         if (has_resolve) attachments.push_back(resolve);
         if (desc.has_depth_attachment) attachments.push_back(depth);
 
         VkSubpassDescription subpass {
             .pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS,
-            .colorAttachmentCount    = 1,
-            .pColorAttachments       = &color_ref,
+            .colorAttachmentCount    = has_color ? 1u : 0u,
+            .pColorAttachments       = has_color ? &color_ref : nullptr,
             .pResolveAttachments     = has_resolve ? &resolve_ref : nullptr,
             .pDepthStencilAttachment = desc.has_depth_attachment ? &depth_ref : nullptr,
         };
@@ -696,9 +697,11 @@ public:
         pipeline.depth       = desc.depth;
         pipeline.raster      = desc.raster;
         pipeline.multisample = desc.multisample;
-        pipeline
-            .setColorBlendStates(
-                std::span<const VkPipelineColorBlendAttachmentState>(&desc.color_blend, 1))
+        const auto color_blends =
+            desc.render_pass.has_color_attachment
+                ? std::span<const VkPipelineColorBlendAttachmentState>(&desc.color_blend, 1)
+                : std::span<const VkPipelineColorBlendAttachmentState> {};
+        pipeline.setColorBlendStates(color_blends)
             .setCreateInfoOptions(desc.create_flags, desc.subpass)
             .setColorBlendOptions(desc.color_blend_flags, desc.blend_constants)
             .setLogicOp(desc.logic_op_enable, desc.logic_op)

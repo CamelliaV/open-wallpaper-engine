@@ -43,7 +43,8 @@ using resource_registry::PipelineResourceSystem;
 
 inline bool SameTextureSample(const TextureSample& lhs, const TextureSample& rhs) {
     return lhs.wrapS == rhs.wrapS && lhs.wrapT == rhs.wrapT && lhs.magFilter == rhs.magFilter &&
-           lhs.minFilter == rhs.minFilter;
+           lhs.minFilter == rhs.minFilter && lhs.compare_enable == rhs.compare_enable &&
+           lhs.compare_op == rhs.compare_op && lhs.border_color == rhs.border_color;
 }
 
 inline bool SameTextureKey(const TextureKey& lhs, const TextureKey& rhs) {
@@ -60,6 +61,9 @@ inline void WriteTextureSampleIdentity(PipelineKeyWriter& writer, const TextureS
     WritePipelineScalar(writer, sample.wrapT);
     WritePipelineScalar(writer, sample.magFilter);
     WritePipelineScalar(writer, sample.minFilter);
+    writer.writeBool(sample.compare_enable);
+    WritePipelineScalar(writer, sample.compare_op);
+    WritePipelineScalar(writer, sample.border_color);
 }
 
 inline void WriteTextureKeyIdentity(PipelineKeyWriter& writer, const TextureKey& key) {
@@ -161,22 +165,26 @@ inline unsigned TextureSampleCountValue(VkSampleCountFlagBits sample_count) {
 }
 
 inline TextureDefinition RenderTargetTextureDefinition(owe::SceneRenderTarget rt) {
+    const bool depth_sampled = rt.kind == owe::SceneRenderTargetKind::DepthSampled;
     return TextureDefinition {
         .width      = i32(rt.PhysicalWidth()),
         .height     = i32(rt.PhysicalHeight()),
-        .usage      = TextureUsage::Color,
-        .format     = owe::TextureFormat::RGBA8,
+        .usage      = depth_sampled ? TextureUsage::DepthAttachment | TextureUsage::Sampled
+                                    : TextureUsage::Color,
+        .format     = depth_sampled ? owe::TextureFormat::D32F : owe::TextureFormat::RGBA8,
         .sample     = rt.sample,
         .mip_levels = u32(rt.mipmap_level),
     };
 }
 
 inline TextureDefinition RenderTargetTextureDefinitionNoMip(owe::SceneRenderTarget rt) {
+    const bool depth_sampled = rt.kind == owe::SceneRenderTargetKind::DepthSampled;
     return TextureDefinition {
         .width  = i32(rt.PhysicalWidth()),
         .height = i32(rt.PhysicalHeight()),
-        .usage  = TextureUsage::Color,
-        .format = owe::TextureFormat::RGBA8,
+        .usage  = depth_sampled ? TextureUsage::DepthAttachment | TextureUsage::Sampled
+                                : TextureUsage::Color,
+        .format = depth_sampled ? owe::TextureFormat::D32F : owe::TextureFormat::RGBA8,
         .sample = rt.sample,
     };
 }

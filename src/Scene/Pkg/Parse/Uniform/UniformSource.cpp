@@ -6,6 +6,7 @@ import rstd;
 import rstd.cppstd;
 import wescene.scene;
 import wescene.spec_names;
+import wescene.utils;
 
 using namespace Eigen;
 using namespace rstd::prelude;
@@ -438,10 +439,14 @@ auto TransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
         if (req_m) writer.Write(Output::Model, ShaderValue::fromMatrix(model));
         if (req_normal_model) {
             Matrix3d normal_model = model.block<3, 3>(0, 0);
-            if (std::abs(normal_model.determinant()) > 1e-12)
+            if (std::abs(normal_model.determinant()) > 1e-12) {
                 normal_model = normal_model.inverse().transpose();
-            else
+                for (Eigen::Index row {}; row < normal_model.rows(); ++row) {
+                    normal_model.row(row).normalize();
+                }
+            } else {
                 normal_model.setIdentity();
+            }
             writer.Write(Output::NormalModel, ShaderValue::fromMatrix(normal_model));
         }
         if (req_am) writer.Write(Output::AlternateModel, ShaderValue::fromMatrix(model));
@@ -716,6 +721,92 @@ auto LightUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
     return writer.Finish();
 }
 
+auto ShadowUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
+    -> Result<empty, UniformError> {
+    return BindGlobalProducer(sink, GlobalUniformProducer::Shadow);
+}
+
+auto ShadowUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
+    return context->Frame()->revision;
+}
+
+auto ShadowUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
+                                   mut_ref<dyn<UniformValueSink>> sink) const
+    -> Result<empty, UniformError> {
+    using Output = ShadowUniformOutput;
+    UniformWriter writer(sink);
+
+    const auto      camera_transform = m_camera->Transforms();
+    Eigen::Vector3d forward          = camera_transform.center - camera_transform.eye;
+    if (! forward.allFinite() || forward.squaredNorm() <= 1e-12) {
+        return writer.Finish();
+    }
+    forward.normalize();
+
+    auto* light_node = m_light->node();
+    if (light_node == nullptr) return writer.Finish();
+    light_node->UpdateTrans();
+    const auto      light_frame = light_node->ModelTrans().block<3, 3>(0, 0);
+    Eigen::Vector3d view_x      = light_frame.col(2);
+    Eigen::Vector3d view_y      = light_frame.col(1);
+    Eigen::Vector3d view_z      = light_frame.col(0);
+    if (! view_x.allFinite() || ! view_y.allFinite() || ! view_z.allFinite() ||
+        view_x.squaredNorm() <= 1e-12 || view_y.squaredNorm() <= 1e-12 ||
+        view_z.squaredNorm() <= 1e-12) {
+        return writer.Finish();
+    }
+    view_x.normalize();
+    view_y.normalize();
+    view_z.normalize();
+
+    rstd::array<float, 96> matrix_values {};
+    const double           camera_far = rstd::cmp::max(0.001, std::abs(m_camera->FarClip()));
+    for (usize cascade {}; cascade < usize(3); ++cascade) {
+        const float     authored = m_light->desc().cascade_distances[cascade.to_primitive()];
+        const double    distance = authored > 0.0f ? static_cast<double>(authored) : camera_far;
+        const auto      center   = camera_transform.eye + forward * (distance * 0.5);
+        Eigen::Matrix4d view     = Eigen::Matrix4d::Identity();
+        view.block<1, 3>(0, 0)   = view_x.transpose();
+        view.block<1, 3>(1, 0)   = view_y.transpose();
+        view.block<1, 3>(2, 0)   = view_z.transpose();
+        view(0, 3)               = -view_x.dot(center);
+        view(1, 3)               = -view_y.dot(center);
+        view(2, 3)               = -view_z.dot(center);
+
+        const double          half_extent = distance * 0.5;
+        const double          depth_span  = rstd::cmp::max(80.0, distance * 1.5);
+        const Eigen::Matrix4f matrix      = (Eigen::Ortho(-half_extent,
+                                                          half_extent,
+                                                          -half_extent,
+                                                          half_extent,
+                                                          -depth_span * 0.5,
+                                                          depth_span * 0.5) *
+                                             view)
+                                                .cast<float>();
+        for (usize value {}; value < usize(16); ++value) {
+            matrix_values[cascade * usize(16) + value] = matrix.data()[value.to_primitive()];
+        }
+    }
+
+    auto matrices = UniformValue::fromMatrixArray(
+        matrix_values.data(), u32(4), u32(4), usize(6), UniformMatrixStorage::ColumnMajor);
+    writer.Write(ToUniformOutput(Output::ViewProjectionMatrices), matrices);
+    writer.Write(Output::AtlasTransforms,
+                 rstd::array<float, 12> { 0.0f,
+                                          0.0f,
+                                          1.0f / 3.0f,
+                                          1.0f,
+                                          1.0f / 3.0f,
+                                          0.0f,
+                                          1.0f / 3.0f,
+                                          1.0f,
+                                          2.0f / 3.0f,
+                                          0.0f,
+                                          1.0f / 3.0f,
+                                          1.0f });
+    return writer.Finish();
+}
+
 auto TextureUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     for (usize index {}; index < WE_GLTEX_NAMES.len(); ++index) {
@@ -739,6 +830,11 @@ auto TextureUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
                                 rstd::cppstd::as_str(WE_GLTEX_TRANSLATION_NAMES[index]).unwrap(),
                                 UniformValueShape::Float(u32(2)));
         if (translation.is_err()) return translation;
+        auto texel = Bind(sink,
+                          TextureTexelOutput(index.to_primitive()),
+                          rstd::cppstd::as_str(WE_GLTEX_TEXEL_NAMES[index]).unwrap(),
+                          UniformValueShape::Float(u32(4)));
+        if (texel.is_err()) return texel;
     }
     return Ok(empty {});
 }
@@ -761,6 +857,13 @@ auto TextureUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
                                                  texture->source_extent[usize(1)],
                                                  texture->sample_extent[usize(0)],
                                                  texture->sample_extent[usize(1)] });
+            const auto width  = texture->sample_extent[usize(0)];
+            const auto height = texture->sample_extent[usize(1)];
+            writer.Write(TextureTexelOutput(index.to_primitive()),
+                         rstd::array<float, 4> { width > 0.0f ? 1.0f / width : 0.0f,
+                                                 height > 0.0f ? 1.0f / height : 0.0f,
+                                                 width,
+                                                 height });
         }
         if (texture->has_mipmap) {
             writer.Write(TextureMipmapOutput(index.to_primitive()), texture->mipmap_level);

@@ -37,6 +37,20 @@ export namespace owe
 namespace vulkan
 {
 
+inline VkCompareOp ToVkType(CompareOp op) {
+    switch (op) {
+    case CompareOp::Never: return VK_COMPARE_OP_NEVER;
+    case CompareOp::Less: return VK_COMPARE_OP_LESS;
+    case CompareOp::LessEqual: return VK_COMPARE_OP_LESS_OR_EQUAL;
+    case CompareOp::Greater: return VK_COMPARE_OP_GREATER;
+    case CompareOp::GreaterEqual: return VK_COMPARE_OP_GREATER_OR_EQUAL;
+    case CompareOp::Equal: return VK_COMPARE_OP_EQUAL;
+    case CompareOp::NotEqual: return VK_COMPARE_OP_NOT_EQUAL;
+    case CompareOp::Always: return VK_COMPARE_OP_ALWAYS;
+    }
+    return VK_COMPARE_OP_NEVER;
+}
+
 struct ImageParameters {
     VkImage        handle {};
     VkImageView    view {};
@@ -589,18 +603,12 @@ VkFormat             ToVkType(TextureFormat);
 VkSamplerAddressMode ToVkType(TextureWrap);
 VkFilter             ToVkType(TextureFilter);
 
-enum class TexUsage
-{
-    COLOR,
-    DEPTH
-};
-
 using TexHash = usize;
 
 struct TextureKey {
     i32                   width;
     i32                   height;
-    TexUsage              usage;
+    VkImageUsageFlags     usage;
     TextureFormat         format;
     TextureSample         sample;
     unsigned              mipmap_level { 1 };
@@ -797,6 +805,10 @@ struct DeviceCapabilities {
     bool           synchronization2 { false };
     bool           push_descriptor { false };
     rstd::uint32_t max_push_descriptors { 0 };
+    bool           multi_viewport { false };
+    bool           shader_output_viewport_index { false };
+    bool           sampled_depth_d32 { false };
+    bool           depth_clamp { false };
     bool           memory_budget { false };
     bool           external_memory_fd { false };
     bool           external_memory_dma_buf { false };
@@ -804,6 +816,14 @@ struct DeviceCapabilities {
     bool           foreign_queue { false };
     rstd::uint32_t graphics_queue_family { VK_QUEUE_FAMILY_IGNORED };
     rstd::uint32_t present_queue_family { VK_QUEUE_FAMILY_IGNORED };
+
+    bool shadow_multi_viewport() const noexcept {
+        return multi_viewport && shader_output_viewport_index;
+    }
+
+    bool directional_shadow() const noexcept {
+        return shadow_multi_viewport() && sampled_depth_d32;
+    }
 };
 
 struct MemoryBudgetSnapshot {

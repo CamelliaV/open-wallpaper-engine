@@ -1525,6 +1525,22 @@ void DumpRenderTargets(FILE* out, const owe::Scene& scene) {
     }
 }
 
+void DumpShadowTopology(FILE* out, owe::Scene& scene) {
+    auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
+    auto shadows  = snapshot.ShadowDefinitions();
+    auto casters  = snapshot.ShadowCasters();
+    std::fprintf(out,
+                 "\nShadow atlases (%zu, %zu casters):\n",
+                 shadows.len().to_primitive(),
+                 casters.len().to_primitive());
+    for (usize index {}; index < shadows.len(); ++index) {
+        std::fprintf(out,
+                     "  %s views=%zu depth-only sampled\n",
+                     to_string(shadows[index].target).c_str(),
+                     shadows[index].viewports.len().to_primitive());
+    }
+}
+
 void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
     std::fprintf(out, "\nScene-graph passes (TraverseNode pre-order):\n");
     std::function<void(owe::SceneNode*, int)> walk = [&](owe::SceneNode* n, int depth) {
@@ -1676,10 +1692,13 @@ int CmdRendergraph(const Matches& matches, const RendergraphArgs& args) {
 
     wavsen::audio::SoundManager sm;
     owe::SceneParser            parser;
+    owe::SceneParseOptions      parse_options;
+    parse_options.capabilities.directional_shadow = true;
     auto parsed = parser.Parse(rstd::cppstd::as_str(pkg_path).unwrap(),
                                rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(&*document),
                                rstd::mut_ref<owe::fs::VFS>::from_raw_parts(&vfs),
-                               rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(&sm));
+                               rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(&sm),
+                               rstd::move(parse_options));
     if (parsed.is_err()) {
         std::fprintf(stderr, "wescene-test rendergraph: SceneParser::Parse returned an error\n");
         return 1;
@@ -1708,6 +1727,7 @@ int CmdRendergraph(const Matches& matches, const RendergraphArgs& args) {
     std::fprintf(out, "\n");
 
     DumpRenderTargets(out, *scene);
+    DumpShadowTopology(out, *scene);
     DumpSceneGraphPasses(out, *scene);
     DumpPostProcesses(out, *scene);
 

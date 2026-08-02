@@ -344,7 +344,7 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
 
             for (auto pinput : inputs) {
                 auto& input = *pinput;
-                if (owe::sstart_with(input.name, "gl_")) continue;
+                if ((input.decoration_flags & SPV_REFLECT_DECORATION_BUILT_IN) != 0) continue;
 
                 if (input.location == std::numeric_limits<decltype(input.location)>::max()) {
                     rstd_error("shader input {} no location", input.name);

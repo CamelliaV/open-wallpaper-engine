@@ -34,6 +34,11 @@ public:
         SceneDrawItemId                        draw_item;
         RenderItemId                           render_item;
         SceneRenderViewKind                    render_view { SceneRenderViewKind::Primary };
+        std::shared_ptr<SceneMaterial>         material_override;
+        bool                                   depth_only { false };
+        u32                                    instance_count { 1 };
+        Vec<VkViewport>                        viewports;
+        Vec<VkRect2D>                          scissors;
         rstd::usize                            graph_pass_index { 0 };
         // Which submesh of node->Mesh() this pass renders. SceneToRenderGraph
         // emits one pass per (node, submesh).
@@ -74,6 +79,7 @@ public:
         bool                               clear_output { false };
         bool                               transparent_clear { false };
         bool                               clear_depth { false };
+        float                              depth_clear_value { 1.0f };
         bool                               preserve_output { false };
         VkAttachmentLoadOp                 color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
         VkAttachmentLoadOp                 depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };

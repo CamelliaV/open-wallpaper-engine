@@ -46,6 +46,7 @@ struct ShaderInfo {
     Vec<wpscene::Combo>      combo_defs;
     Vec<wpscene::UniformTex> texture_uniforms;
     Vec<wpscene::UniformVar> scalar_uniforms;
+    String                   shadow_pass;
 
     // Filled by BuildMaterial for the direct-binding u_* route. The
     // scene-instance-level user-binding route (effect-key → wallpaper-key)

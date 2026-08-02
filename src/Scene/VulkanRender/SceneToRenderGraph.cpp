@@ -175,6 +175,79 @@ static void StoreMipFramebufferHistory(ExtraInfo& extra) {
         extra, MakeTextureDesc(extra, as_string_view(SpecTex_Default)), rstd::move(history_desc));
 }
 
+static void AddMaterialTextureReads(SceneMaterial& material, std::string_view pass_output,
+                                    ExtraInfo& extra, rg::RenderGraphBuilder& builder,
+                                    vulkan::CustomShaderPass::Desc& pdesc) {
+    for (std::size_t index = 0; index < material.textures.size(); ++index) {
+        rstd_assert(index < material.texture_sources.len().to_primitive());
+        if (index >= material.texture_sources.len().to_primitive()) {
+            pdesc.texture_bindings.emplace_back();
+            continue;
+        }
+        const auto&                source = material.texture_sources[usize(index)];
+        Option<rg::TextureNodeRef> input;
+        std::string                binding_key;
+        if (source.kind == SceneMaterialTextureSourceKind::Empty) {
+            pdesc.texture_bindings.emplace_back();
+            continue;
+        }
+        if (source.kind == SceneMaterialTextureSourceKind::UnsupportedSpecial) {
+            rstd_error("material '{}' references unsupported scene texture '{}'",
+                       material.name,
+                       source.key);
+            pdesc.texture_bindings.emplace_back();
+            continue;
+        }
+        if (source.kind == SceneMaterialTextureSourceKind::LayerOutput) {
+            auto* link = extra.render_scene != nullptr && source.wallpaper_layer >= i32()
+                             ? extra.render_scene->linkSource(WallpaperLayerId {
+                                   .value = source.wallpaper_layer,
+                               })
+                             : nullptr;
+            if (link == nullptr || source.layer.is_none() || link->scene_node != *source.layer ||
+                extra.render_scene->renderTargetDesc(link->render_target) == nullptr) {
+                rstd_error("material '{}' has unresolved linked layer {}",
+                           material.name,
+                           source.wallpaper_layer);
+                pdesc.texture_bindings.emplace_back();
+                continue;
+            }
+            binding_key = StdString(link->render_target_key);
+            input       = Some(builder.createTexture(MakeTextureDesc(extra, binding_key)));
+            builder.markVirtualWrite(*input);
+        } else {
+            binding_key = StdString(source.key);
+            auto name   = as_str(binding_key).unwrap();
+            if (source.kind == SceneMaterialTextureSourceKind::MipMappedFramebuffer) {
+                input = Some(AddMipFramebufferHistory(extra, builder));
+            } else {
+                input = Some(builder.createTexture(MakeTextureDesc(extra, binding_key)));
+            }
+            if (IsSpecTex(name) && ! name.starts_with(WE_MIP_MAPPED_FRAME_BUFFER)) {
+                builder.markVirtualWrite(*input);
+            }
+        }
+
+        if (binding_key == pass_output) {
+            builder.markSelfWrite(*input);
+            input = Some(AddCopyPass(extra, *input));
+        }
+        builder.read(*input);
+        auto sampled_state = builder.textureState(*input);
+        rstd_assert(sampled_state.is_some());
+        if (sampled_state.is_none()) {
+            pdesc.texture_bindings.emplace_back();
+            continue;
+        }
+        auto sampled_key = StdString(sampled_state->desc.key);
+        pdesc.texture_bindings.emplace_back(vulkan::TextureBindingRequest {
+            .name    = String::make(as_str(sampled_key).unwrap()),
+            .use     = Some(sampled_state->use),
+            .request = BuildGraphTextureRequest(extra, sampled_key),
+        });
+    }
+}
+
 static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, ExtraInfo& extra,
                                    bool                defer_effect = false,
                                    SceneRenderViewKind render_view  = SceneRenderViewKind::Primary);
@@ -270,97 +343,7 @@ static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, Ext
                     }
                 }
                 pdesc.output = std::string(pass_output);
-                for (std::size_t i = 0; i < material->textures.size(); i++) {
-                    rstd_assert(i < material->texture_sources.len().to_primitive());
-                    if (i >= material->texture_sources.len().to_primitive()) {
-                        pdesc.texture_bindings.emplace_back();
-                        continue;
-                    }
-                    const auto&                source = material->texture_sources[usize(i)];
-                    Option<rg::TextureNodeRef> input;
-                    std::string                binding_key;
-                    if (source.kind == SceneMaterialTextureSourceKind::Empty) {
-                        pdesc.texture_bindings.emplace_back();
-                        continue;
-                    }
-                    if (source.kind == SceneMaterialTextureSourceKind::UnsupportedSpecial) {
-                        rstd_error("material '{}' references unsupported scene texture '{}'",
-                                   material->name,
-                                   source.key);
-                        pdesc.texture_bindings.emplace_back();
-                        continue;
-                    }
-                    if (source.kind == SceneMaterialTextureSourceKind::LayerOutput) {
-                        auto* link =
-                            extra.render_scene != nullptr && source.wallpaper_layer >= i32()
-                                ? extra.render_scene->linkSource(WallpaperLayerId {
-                                      .value = source.wallpaper_layer,
-                                  })
-                                : nullptr;
-                        if (link == nullptr) {
-                            rstd_error("material '{}' has no linked layer {} snapshot record",
-                                       material->name,
-                                       source.wallpaper_layer);
-                            pdesc.texture_bindings.emplace_back();
-                            continue;
-                        }
-                        if (source.layer.is_none()) {
-                            rstd_error("material '{}' has no linked layer {} scene owner",
-                                       material->name,
-                                       source.wallpaper_layer);
-                            pdesc.texture_bindings.emplace_back();
-                            continue;
-                        }
-                        if (link->scene_node != *source.layer) {
-                            rstd_error("material '{}' linked layer {} owner changed",
-                                       material->name,
-                                       source.wallpaper_layer);
-                            pdesc.texture_bindings.emplace_back();
-                            continue;
-                        }
-                        if (extra.render_scene->renderTargetDesc(link->render_target) == nullptr) {
-                            rstd_error("material '{}' linked layer {} target is stale",
-                                       material->name,
-                                       source.wallpaper_layer);
-                            pdesc.texture_bindings.emplace_back();
-                            continue;
-                        }
-                        binding_key = StdString(link->render_target_key);
-                        auto desc   = MakeTextureDesc(extra, binding_key);
-                        input       = Some(builder.createTexture(desc));
-                        builder.markVirtualWrite(*input);
-                    } else {
-                        binding_key = StdString(source.key);
-                        auto name   = as_str(binding_key).unwrap();
-                        auto desc   = MakeTextureDesc(extra, binding_key);
-                        if (source.kind == SceneMaterialTextureSourceKind::MipMappedFramebuffer) {
-                            input = Some(AddMipFramebufferHistory(extra, builder));
-                        } else {
-                            input = Some(builder.createTexture(desc));
-                        }
-                        if (IsSpecTex(name) && ! name.starts_with(WE_MIP_MAPPED_FRAME_BUFFER)) {
-                            builder.markVirtualWrite(*input);
-                        }
-                    }
-
-                    if (binding_key == pass_output) {
-                        builder.markSelfWrite(*input);
-                        input = Some(AddCopyPass(extra, *input));
-                    }
-                    builder.read(*input);
-                    auto sampled_state = builder.textureState(*input);
-                    rstd_assert(sampled_state.is_some());
-                    if (sampled_state.is_none()) {
-                        pdesc.texture_bindings.emplace_back();
-                        continue;
-                    }
-                    auto sampled_key = StdString(sampled_state->desc.key);
-                    pdesc.texture_bindings.emplace_back(vulkan::TextureBindingRequest {
-                        .name    = String::make(rstd::cppstd::as_str(sampled_key).unwrap()),
-                        .use     = Some(sampled_state->use),
-                        .request = BuildGraphTextureRequest(extra, sampled_key),
-                    });
-                }
+                AddMaterialTextureReads(*material, pass_output, extra, builder, pdesc);
 
                 std::string pass_output_s(pass_output);
                 auto        output_node =
@@ -595,6 +578,74 @@ static void EmitPlanarReflectionNode(SceneNode* node, ExtraInfo& extra,
     }
 }
 
+static void EmitShadowPasses(ExtraInfo& extra) {
+    if (extra.render_scene == nullptr) return;
+    auto definitions = extra.render_scene->ShadowDefinitions();
+    if (definitions.is_empty()) return;
+    const auto& definition = definitions[usize()];
+    const auto  target     = StdString(definition.target);
+    bool        first      = true;
+
+    for (const auto& caster : extra.render_scene->ShadowCasters()) {
+        const auto* item = extra.render_scene->renderItem(caster.render_item);
+        if (item == nullptr || ! caster.material) continue;
+        auto draw = extra.scene->ResourceIndex().resolve(item->scene_draw_item);
+        if (draw.is_none() || draw->node == nullptr || draw->mesh == nullptr) continue;
+        extra.scene->ResolveMaterialTextureSources(*caster.material);
+
+        extra.rgraph->addPass<vulkan::CustomShaderPass>(
+            caster.material->name.empty() ? "shadow"_str : as_str(caster.material->name).unwrap(),
+            rg::PassNode::Type::CustomShader,
+            [&,
+             item,
+             draw,
+             material       = caster.material,
+             instance_count = caster.instance_count,
+             clear_depth    = first,
+             target](rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
+                const auto& pass        = builder.workPassNode();
+                pdesc.node              = Some(mut_ref<SceneNode>::from_raw_parts(draw->node));
+                pdesc.draw_item         = item->scene_draw_item;
+                pdesc.render_item       = item->id;
+                pdesc.submesh_index     = item->submesh_index;
+                pdesc.graph_pass_index  = pass.pass.index;
+                pdesc.material_override = material;
+                pdesc.depth_only        = true;
+                pdesc.instance_count    = instance_count;
+                pdesc.output            = target;
+                pdesc.clear_depth       = clear_depth;
+
+                pdesc.viewports.reserve(definition.viewports.len());
+                pdesc.scissors.reserve(definition.viewports.len());
+                for (const auto& viewport : definition.viewports) {
+                    pdesc.viewports.push(VkViewport {
+                        .x        = viewport.x.to_primitive(),
+                        .y        = viewport.y.to_primitive(),
+                        .width    = viewport.width.to_primitive(),
+                        .height   = viewport.height.to_primitive(),
+                        .minDepth = 0.0f,
+                        .maxDepth = 1.0f,
+                    });
+                    pdesc.scissors.push(VkRect2D {
+                        .offset = { viewport.scissor_x.to_primitive(),
+                                    viewport.scissor_y.to_primitive() },
+                        .extent = { viewport.scissor_width.to_primitive(),
+                                    viewport.scissor_height.to_primitive() },
+                    });
+                }
+
+                AddMaterialTextureReads(*material, target, extra, builder, pdesc);
+                auto atlas = builder.createTexture(MakeTextureDesc(extra, target), true);
+                auto state = builder.textureState(atlas);
+                if (state.is_none()) return;
+                pdesc.depth_use     = Some(state->use);
+                pdesc.depth_request = BuildGraphTextureRequest(extra, target);
+                builder.write(atlas);
+            });
+        first = false;
+    }
+}
+
 Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
                                              const RenderSceneSnapshot& render_scene) {
     auto      rgraph = Box<rg::RenderGraph>::make();
@@ -610,6 +661,8 @@ Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
     // the skip set lets the emit walk short-circuit without mutating the tree.
     Set<const SceneNode*> emit_skip_subtrees;
     CollectEmitSkipSubtrees(scene.RootMut().as_raw_ptr(), scene, linked_ids, emit_skip_subtrees);
+
+    EmitShadowPasses(extra);
 
     if (scene.PlanarReflectionEnabled()) {
         EmitPlanarReflectionNode(scene.RootMut().as_raw_ptr(), extra, emit_skip_subtrees);

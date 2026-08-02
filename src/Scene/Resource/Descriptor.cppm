@@ -220,6 +220,7 @@ private:
 struct DescriptorImageBinding {
     rstd::uint32_t          binding { 0 };
     vulkan::ImageParameters image;
+    VkImageLayout           layout { VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
 };
 
 struct DescriptorBufferBinding {
@@ -387,6 +388,7 @@ struct PreparedDescriptorBinding {
             cloned_images.push(DescriptorImageBinding {
                 .binding = image.binding,
                 .image   = image.image,
+                .layout  = image.layout,
             });
         }
         return PreparedDescriptorBinding {
@@ -414,7 +416,8 @@ struct PreparedDescriptorBinding {
             const auto& current = images[index];
             changed |= current.binding != next[index].binding ||
                        current.image.view != next[index].image.view ||
-                       current.image.sampler != next[index].image.sampler;
+                       current.image.sampler != next[index].image.sampler ||
+                       current.layout != next[index].layout;
         }
         if (! changed) return Ok(empty {});
 
@@ -423,6 +426,7 @@ struct PreparedDescriptorBinding {
             updated.push(DescriptorImageBinding {
                 .binding = next[index].binding,
                 .image   = next[index].image,
+                .layout  = next[index].layout,
             });
         }
 
@@ -438,7 +442,7 @@ struct PreparedDescriptorBinding {
                 VkDescriptorImageInfo image {
                     .sampler     = binding.image.sampler,
                     .imageView   = binding.image.view,
-                    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    .imageLayout = binding.layout,
                 };
                 if (! updates.WriteImage(
                         set->clone(),
@@ -482,7 +486,7 @@ struct PreparedDescriptorBinding {
             VkDescriptorImageInfo image {
                 .sampler     = binding.image.sampler,
                 .imageView   = binding.image.view,
-                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .imageLayout = binding.layout,
             };
             VkWriteDescriptorSet write {
                 .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -526,6 +530,7 @@ public:
             prepared_images.push(DescriptorImageBinding {
                 .binding = images[index].binding,
                 .image   = images[index].image,
+                .layout  = images[index].layout,
             });
         }
         return PreparedDescriptorBinding {
@@ -590,7 +595,7 @@ public:
             VkDescriptorImageInfo image {
                 .sampler     = binding.image.sampler,
                 .imageView   = binding.image.view,
-                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .imageLayout = binding.layout,
             };
             if (! updates.WriteImage(
                     prepared.set->clone(),

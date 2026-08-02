@@ -11,6 +11,7 @@ enum class TextureStateKind
 {
     Undefined,
     Sampled,
+    DepthSampled,
     TransferSource,
     TransferDestination,
     ColorAttachment,

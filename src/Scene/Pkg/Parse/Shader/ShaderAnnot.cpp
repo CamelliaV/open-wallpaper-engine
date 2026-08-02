@@ -117,6 +117,18 @@ void HandleComboLine(ShaderInfo* info, std::string_view line) {
     info->combo_defs.push(rstd::move(combo));
 }
 
+void HandlePassLine(ShaderInfo* info, std::string_view line) {
+    constexpr std::string_view prefix { "// [PASS] shadow" };
+    auto                       offset = line.find(prefix);
+    if (offset == std::string_view::npos) return;
+    auto value = line.substr(offset + prefix.size());
+    while (! value.empty() && (value.front() == ' ' || value.front() == '\t'))
+        value.remove_prefix(1);
+    while (! value.empty() && (value.back() == ' ' || value.back() == '\t' || value.back() == '\r'))
+        value.remove_suffix(1);
+    if (! value.empty()) info->shadow_pass = String::make(rstd::cppstd::as_str(value).unwrap());
+}
+
 void HandleUniformLine(ShaderInfo* info, std::span<const ShaderTexInfo> texinfos,
                        std::string_view line) {
     Cursor c(rstd::cppstd::as_str(line).unwrap());
@@ -217,6 +229,10 @@ void ParseShader(const std::string& src, ShaderInfo* info,
 
         if (line.find("// [COMBO]") != std::string_view::npos) {
             HandleComboLine(info, line);
+            continue;
+        }
+        if (line.find("// [PASS] shadow") != std::string_view::npos) {
+            HandlePassLine(info, line);
             continue;
         }
         // Cheap pre-check: only attempt the full keyword match if the trimmed

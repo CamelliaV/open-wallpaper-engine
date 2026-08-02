@@ -42,6 +42,7 @@ VkSamplerAddressMode ToVkType(owe::TextureWrap sam) {
     using namespace owe;
     switch (sam) {
     case TextureWrap::CLAMP_TO_EDGE: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    case TextureWrap::CLAMP_TO_BORDER: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
     case TextureWrap::REPEAT:
     default: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
     }
@@ -59,6 +60,15 @@ VkFilter ToVkType(owe::TextureFilter sam) {
 
 namespace
 {
+VkBorderColor ToVkBorderColor(TextureBorderColor color) {
+    switch (color) {
+    case TextureBorderColor::TransparentBlack: return VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    case TextureBorderColor::OpaqueBlack: return VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    case TextureBorderColor::OpaqueWhite: return VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    }
+    return VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+}
+
 VkSamplerCreateInfo GenSamplerInfo(TextureKey key) {
     auto& sam = key.sample;
 
@@ -68,15 +78,15 @@ VkSamplerCreateInfo GenSamplerInfo(TextureKey key) {
                                        .minFilter        = (ToVkType(sam.minFilter)),
                                        .mipmapMode       = VK_SAMPLER_MIPMAP_MODE_LINEAR,
                                        .addressModeU     = (ToVkType(sam.wrapS)),
-                                       .addressModeV     = (ToVkType(sam.wrapS)),
+                                       .addressModeV     = (ToVkType(sam.wrapT)),
                                        .addressModeW     = (ToVkType(sam.wrapT)),
                                        .anisotropyEnable = (false),
                                        .maxAnisotropy    = (1.0f),
-                                       .compareEnable    = (false),
-                                       .compareOp        = VK_COMPARE_OP_NEVER,
+                                       .compareEnable    = sam.compare_enable,
+                                       .compareOp        = ToVkType(sam.compare_op),
                                        .minLod           = (0.0f),
                                        .maxLod           = (1.0f),
-                                       .borderColor      = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+                                       .borderColor      = ToVkBorderColor(sam.border_color),
                                        .unnormalizedCoordinates = (false) };
     return sampler_info;
 }
@@ -354,6 +364,10 @@ usize TextureKey::HashValue(const TextureKey& k) {
     utils::hash_combine(seed, (int)k.sample.wrapS);
     utils::hash_combine(seed, (int)k.sample.wrapT);
     utils::hash_combine(seed, (int)k.sample.magFilter);
+    utils::hash_combine(seed, (int)k.sample.minFilter);
+    utils::hash_combine(seed, k.sample.compare_enable);
+    utils::hash_combine(seed, (int)k.sample.compare_op);
+    utils::hash_combine(seed, (int)k.sample.border_color);
     utils::hash_combine(seed, (int)k.samples);
     return usize(seed);
 }
@@ -475,18 +489,27 @@ Option<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
         VkExtent3D          ext { static_cast<rstd::uint32_t>(tex_key.width.to_primitive()),
                                   static_cast<rstd::uint32_t>(tex_key.height.to_primitive()),
                                   1 };
-        const bool          depth_usage = tex_key.usage == TexUsage::DEPTH;
-        VkImageUsageFlags   usage =
-            depth_usage ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-                        : VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                              VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        const bool depth_usage = (tex_key.usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
+        const auto properties  = m_device.gpu().GetFormatProperties(format);
+        VkFormatFeatureFlags required_features {};
+        if ((tex_key.usage & VK_IMAGE_USAGE_SAMPLED_BIT) != 0)
+            required_features |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+        if ((tex_key.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0)
+            required_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+        if (depth_usage) required_features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        if ((properties.optimalTilingFeatures & required_features) != required_features) {
+            rstd_error("texture format {} does not support requested usage {:#x}",
+                       static_cast<int>(format),
+                       tex_key.usage);
+            break;
+        }
 
         if (auto opt = CreateImage(m_device,
                                    ext,
                                    tex_key.mipmap_level,
                                    format,
                                    sam_info,
-                                   usage,
+                                   tex_key.usage,
                                    VMA_MEMORY_USAGE_GPU_ONLY,
                                    tex_key.samples);
             opt.is_some()) {

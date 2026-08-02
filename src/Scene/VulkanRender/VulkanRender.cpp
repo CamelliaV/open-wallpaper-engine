@@ -64,9 +64,10 @@ constexpr rstd::array<Extension, 4> base_inst_exts {
     Extension { false, VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME },
     Extension { false, VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME },
 };
-constexpr rstd::array<Extension, 7> base_device_exts {
+constexpr rstd::array<Extension, 8> base_device_exts {
     Extension { false, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME },
     Extension { false, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME },
+    Extension { false, VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME },
     Extension { true, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME },
@@ -203,6 +204,11 @@ bool VulkanRender::getDrmRenderNode(std::uint32_t& out_major, std::uint32_t& out
     out_major = static_cast<std::uint32_t>(drm.renderMajor);
     out_minor = static_cast<std::uint32_t>(drm.renderMinor);
     return true;
+}
+
+DeviceCapabilities VulkanRender::deviceCapabilities() const {
+    if (! pImpl->m_inited) return {};
+    return pImpl->m_device->capabilities();
 }
 
 VkInstance VulkanRender::vkInstance() const {

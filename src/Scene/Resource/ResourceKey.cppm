@@ -39,7 +39,10 @@ struct PipelineResourceRequest {
     VkImageLayout               color_final_layout { VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
     VkAttachmentLoadOp          color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
     VkAttachmentLoadOp          depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
-    bool                        has_depth_attachment { false };
+    VkAttachmentStoreOp         depth_store_op { VK_ATTACHMENT_STORE_OP_STORE };
+    VkImageLayout depth_final_layout { VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+    bool          has_color_attachment { true };
+    bool          has_depth_attachment { false };
 };
 
 struct PipelineCacheKey {
@@ -100,6 +103,7 @@ struct RenderPassResourceDesc {
     VkAttachmentLoadOp    depth_stencil_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
     VkAttachmentStoreOp   depth_stencil_store_op { VK_ATTACHMENT_STORE_OP_DONT_CARE };
     VkImageLayout depth_attachment_layout { VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+    bool          has_color_attachment { true };
     bool          has_resolve_attachment { false };
     bool          has_depth_attachment { false };
 };
@@ -459,8 +463,12 @@ inline RenderPassResourceDesc MakeRenderPassResourceDesc(const PipelineResourceR
         .color_final_layout     = request.color_final_layout,
         .color_load_op          = request.color_load_op,
         .resolve_final_layout   = request.color_final_layout,
+        .depth_final_layout     = request.depth_final_layout,
         .depth_load_op          = request.depth_load_op,
-        .has_resolve_attachment = request.multisample.rasterizationSamples != VK_SAMPLE_COUNT_1_BIT,
+        .depth_store_op         = request.depth_store_op,
+        .has_color_attachment   = request.has_color_attachment,
+        .has_resolve_attachment = request.has_color_attachment &&
+                                  request.multisample.rasterizationSamples != VK_SAMPLE_COUNT_1_BIT,
         .has_depth_attachment   = request.has_depth_attachment,
     };
     if (request.color_load_op == VK_ATTACHMENT_LOAD_OP_LOAD) {
@@ -519,34 +527,39 @@ MakeFramebufferResourceDesc(const FramebufferResourceRequest& request) {
 
 inline void WriteRenderPassDesc(PipelineKeyWriter& writer, const RenderPassResourceDesc& desc) {
     const bool has_resolve = desc.has_resolve_attachment;
-    WritePipelineScalar(writer, desc.color_format);
+    writer.writeBool(desc.has_color_attachment);
     WritePipelineScalar(writer, desc.depth_format);
     WritePipelineScalar(writer, desc.samples);
-    WritePipelineScalar(writer, desc.color_initial_layout);
-    WritePipelineScalar(writer, desc.color_final_layout);
-    WritePipelineScalar(writer, desc.color_load_op);
-    WritePipelineScalar(writer, desc.color_store_op);
-    WritePipelineScalar(writer, desc.color_stencil_load_op);
-    WritePipelineScalar(writer, desc.color_stencil_store_op);
-    WritePipelineScalar(writer, desc.color_attachment_layout);
-    writer.writeBool(has_resolve);
-    if (has_resolve) {
-        WritePipelineScalar(writer, desc.resolve_initial_layout);
-        WritePipelineScalar(writer, desc.resolve_final_layout);
-        WritePipelineScalar(writer, desc.resolve_load_op);
-        WritePipelineScalar(writer, desc.resolve_store_op);
-        WritePipelineScalar(writer, desc.resolve_stencil_load_op);
-        WritePipelineScalar(writer, desc.resolve_stencil_store_op);
-        WritePipelineScalar(writer, desc.resolve_attachment_layout);
+    if (desc.has_color_attachment) {
+        WritePipelineScalar(writer, desc.color_format);
+        WritePipelineScalar(writer, desc.color_initial_layout);
+        WritePipelineScalar(writer, desc.color_final_layout);
+        WritePipelineScalar(writer, desc.color_load_op);
+        WritePipelineScalar(writer, desc.color_store_op);
+        WritePipelineScalar(writer, desc.color_stencil_load_op);
+        WritePipelineScalar(writer, desc.color_stencil_store_op);
+        WritePipelineScalar(writer, desc.color_attachment_layout);
+        writer.writeBool(has_resolve);
+        if (has_resolve) {
+            WritePipelineScalar(writer, desc.resolve_initial_layout);
+            WritePipelineScalar(writer, desc.resolve_final_layout);
+            WritePipelineScalar(writer, desc.resolve_load_op);
+            WritePipelineScalar(writer, desc.resolve_store_op);
+            WritePipelineScalar(writer, desc.resolve_stencil_load_op);
+            WritePipelineScalar(writer, desc.resolve_stencil_store_op);
+            WritePipelineScalar(writer, desc.resolve_attachment_layout);
+        }
     }
-    WritePipelineScalar(writer, desc.depth_initial_layout);
-    WritePipelineScalar(writer, desc.depth_final_layout);
-    WritePipelineScalar(writer, desc.depth_load_op);
-    WritePipelineScalar(writer, desc.depth_store_op);
-    WritePipelineScalar(writer, desc.depth_stencil_load_op);
-    WritePipelineScalar(writer, desc.depth_stencil_store_op);
-    WritePipelineScalar(writer, desc.depth_attachment_layout);
     writer.writeBool(desc.has_depth_attachment);
+    if (desc.has_depth_attachment) {
+        WritePipelineScalar(writer, desc.depth_initial_layout);
+        WritePipelineScalar(writer, desc.depth_final_layout);
+        WritePipelineScalar(writer, desc.depth_load_op);
+        WritePipelineScalar(writer, desc.depth_store_op);
+        WritePipelineScalar(writer, desc.depth_stencil_load_op);
+        WritePipelineScalar(writer, desc.depth_stencil_store_op);
+        WritePipelineScalar(writer, desc.depth_attachment_layout);
+    }
 }
 
 inline PipelineCacheKey ToPipelineCacheKey(CanonicalCacheKeyData data) {

@@ -52,9 +52,10 @@ class RenderMsg final {
 };
 
 class MainMsg final {
-    RSTD_ENUM(MainMsg, (LoadScene), (Configure, (SceneWallpaperConfig config;)),
-              (SetFps, (u32 fps;)), (SetVolume, (f32 volume;)),
-              (SetVolumeScale, (f32 scale; u32 fade_ms { 0 };)), (SetMuted, (bool muted;)),
+    RSTD_ENUM(MainMsg, (LoadScene, (vulkan::DeviceCapabilities capabilities;)),
+              (Configure, (SceneWallpaperConfig config;)), (SetFps, (u32 fps;)),
+              (SetVolume, (f32 volume;)), (SetVolumeScale, (f32 scale; u32 fade_ms { 0 };)),
+              (SetMuted, (bool muted;)),
               (SetAudioClientIdentity, (SceneAudioClientIdentity identity;)),
               (AudioDeviceEvent, (wavsen::audio::AudioDeviceEvent event;)),
               (SetFillMode, (FillMode mode;)), (SetSpeed, (f32 speed;)),
@@ -238,6 +239,7 @@ public:
     void post(RenderMsg);
 
     void onLoadScene();
+    void on(MainMsg::LoadScene_payload&&);
     void on(MainMsg::Configure_payload&&);
     void on(MainMsg::SetFps_payload&&);
     void on(MainMsg::SetVolume_payload&&);
@@ -275,8 +277,9 @@ private:
 
     bool m_inited { false };
 
-    SceneWallpaperConfig m_config;
-    rstd::json::Map      m_user_properties;
+    SceneWallpaperConfig               m_config;
+    rstd::json::Map                    m_user_properties;
+    Option<vulkan::DeviceCapabilities> m_render_capabilities;
 
     Box<wavsen::audio::SoundManager> m_sound_manager;
     FirstFrameCallback               m_first_frame_callback;
@@ -875,7 +878,9 @@ void SceneRenderController::on(RenderMsg::Init_payload&& m) {
     }
 
     // inited, callback to load scene
-    if (m_main_tx) (void)m_main_tx->send(MainMsg::LoadScene());
+    if (m_main_tx) {
+        (void)m_main_tx->send(MainMsg::LoadScene(m_render->deviceCapabilities()));
+    }
 }
 
 void SceneRenderController::on(RenderMsg::SwapchainReady_payload&& m) {
@@ -1007,7 +1012,7 @@ void SceneRuntimeController::startMainLoop() {
             auto message  = rstd::move(received).unwrap();
             bool shutdown = false;
             RSTD_MATCH(rstd::move(message)) {
-                RSTD_CASE(LoadScene) { onLoadScene(); }
+                RSTD_CASE_PAYLOAD(LoadScene, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(Configure, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(SetFps, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(SetVolume, value) { on(rstd::move(value)); }
@@ -1061,7 +1066,7 @@ void SceneRuntimeController::stopMainLoop() {
 // ---- SceneRuntimeController message handlers --------------------------------
 
 void SceneRuntimeController::onLoadScene() {
-    if (m_render_controller->renderInited()) {
+    if (m_render_capabilities.is_some() && m_render_controller->renderInited()) {
         if (! m_audio_activated) {
             auto tx = sender();
             m_sound_manager->activate(
@@ -1072,6 +1077,11 @@ void SceneRuntimeController::onLoadScene() {
         }
         loadScene();
     }
+}
+
+void SceneRuntimeController::on(MainMsg::LoadScene_payload&& m) {
+    m_render_capabilities = Some(m.capabilities);
+    onLoadScene();
 }
 
 void SceneRuntimeController::on(MainMsg::Configure_payload&& m) {
@@ -1323,6 +1333,10 @@ void SceneRuntimeController::loadScene() {
                 .user_properties = Some(
                     rstd::ref<rstd::json::Map>::from_raw_parts(rstd::addressof(m_user_properties))),
                 .shader_cache_dir = rstd::move(shader_cache_dir),
+                .capabilities =
+                    SceneParseCapabilities {
+                        .directional_shadow = m_render_capabilities->directional_shadow(),
+                    },
             });
         if (parsed.is_err()) {
             rstd_error("scene parse failed: {}", parsed.unwrap_err().message.as_str());

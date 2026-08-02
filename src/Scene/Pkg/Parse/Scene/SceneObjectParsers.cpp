@@ -376,6 +376,7 @@ void ParseModelObjImpl(SceneParseContext& context, wpscene::ModelObject& model_o
     node->ID() = i32(model_obj.id);
     node->SetPerspective(model_obj.perspective);
     node->SetReflected(model_obj.reflected);
+    node->shadow.cast = context.shader_environment.directional_shadow && model_obj.castshadow;
     if (! model_obj.visible) {
         node->SetVisible(false);
         context.scene->MarkLayerVisibilityElidable(
@@ -447,6 +448,55 @@ void ParseModelObjImpl(SceneParseContext& context, wpscene::ModelObject& model_o
         scene_mat           = rstd::move(material_build.material);
         shader_info         = rstd::move(material_build.shader_info);
         LoadConstvalue(scene_mat, *wpmat, shader_info);
+
+        if (node->shadow.cast) {
+            wpscene::Material shadow_material;
+            shadow_material.shader =
+                shader_info.shadow_pass.is_empty()
+                    ? "shadowcaster"
+                    : rstd::cppstd::to_string(shader_info.shadow_pass.as_str());
+            shadow_material.blending =
+                wpmat->blending == "alphatocoverage" ? "alphatocoverage" : "disabled";
+            shadow_material.depthtest  = "enabled";
+            shadow_material.depthwrite = "enabled";
+            shadow_material.cullmode   = "nocull";
+            shadow_material.textures.resize(std::min<std::size_t>(2, wpmat->textures.size()));
+            for (std::size_t index = 0; index < shadow_material.textures.size(); ++index) {
+                shadow_material.textures[index] = wpmat->textures[index];
+            }
+            constexpr array<ref<str>, 4> inherited_combos {
+                "SKINNING"_str, "MORPHING"_str, "MORPHING_NORMALS"_str, "BONECOUNT"_str
+            };
+            for (auto combo : inherited_combos) {
+                auto value = wpmat->combos.find(rstd::cppstd::to_string(combo));
+                if (value != wpmat->combos.end())
+                    shadow_material.combos[value->first] = value->second;
+            }
+
+            ShaderInfo shadow_info;
+            shadow_info.baseConstSvs = context.global_base_uniforms;
+            auto shadow_result       = BuildMaterial(vfs,
+                                                     *context.shader_cache,
+                                                     context.shader_environment,
+                                                     shadow_material,
+                                                     *context.scene,
+                                                     rstd::move(shadow_info));
+            if (shadow_result.is_ok()) {
+                auto shadow_build                   = rstd::move(shadow_result).unwrap_unchecked();
+                shadow_build.material.depth_clamp   = true;
+                shadow_build.material.depth_compare = CompareOp::Greater;
+                shadow_build.material.depth_bias    = true;
+                shadow_build.material.depth_bias_slope = -4.0f;
+                LoadConstvalue(shadow_build.material, shadow_material, shadow_build.shader_info);
+                context.scene->ResolveMaterialTextureSources(shadow_build.material);
+                scene_mat.shadow_variant =
+                    std::make_shared<SceneMaterial>(rstd::move(shadow_build.material));
+            } else {
+                rstd_warn("load shadow material '{}' failed for '{}'",
+                          shadow_material.shader,
+                          model_obj.name);
+            }
+        }
 
         const uint32_t material_slot  = static_cast<uint32_t>(mesh->MaterialSlots().size());
         const auto     texcoord_scale = Texture0UvScale(scene_mat);
@@ -520,13 +570,16 @@ void IndexSceneDocument(SceneParseContext& context, ref<wpscene::SceneDocument> 
 SceneParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::SceneMetadata& sc,
                                array<std::int32_t, 2>       ortho_extent,
                                Option<ref<rstd::json::Map>> user_properties,
-                               Option<rstd::path::PathBuf>  shader_cache_dir) {
+                               Option<rstd::path::PathBuf>  shader_cache_dir,
+                               bool                         directional_shadow) {
     SceneParseContext context;
     InitContext(context, vfs, sc, ortho_extent);
     ParseCamera(context, sc);
     context.pkg_version     = sc.pkg_version;
     context.user_properties = user_properties;
     context.shader_cache    = Arc<ShaderCache>::make(rstd::move(shader_cache_dir));
+    context.shader_environment.directional_shadow =
+        directional_shadow && sc.general.lightconfig.directionalshadow > 0;
 
     context.scene->RegisterRenderTarget(String::make(SpecTex_Default),
                                         SceneRenderTarget {
@@ -544,6 +597,44 @@ SceneParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::S
             .has_mipmap = true,
             .bind       = { .enable = true, .name = rstd::cppstd::to_string(SpecTex_Default) },
         });
+
+    if (context.shader_environment.directional_shadow) {
+        context.scene->RegisterRenderTarget(
+            String::make(WE_SHADOW_ATLAS_PREFIX),
+            SceneRenderTarget {
+                .width             = 768,
+                .height            = 256,
+                .kind              = SceneRenderTargetKind::DepthSampled,
+                .depth_clear_value = 0.0f,
+                .sample =
+                    TextureSample {
+                        .wrapS          = TextureWrap::CLAMP_TO_BORDER,
+                        .wrapT          = TextureWrap::CLAMP_TO_BORDER,
+                        .magFilter      = TextureFilter::LINEAR,
+                        .minFilter      = TextureFilter::LINEAR,
+                        .compare_enable = true,
+                        .compare_op     = CompareOp::Greater,
+                        .border_color   = TextureBorderColor::TransparentBlack,
+                    },
+            });
+        auto viewports = Vec<SceneShadowViewport>::make();
+        for (u32 index {}; index < u32(3); ++index) {
+            viewports.push(SceneShadowViewport {
+                .x              = f32(256.0f * static_cast<float>(index.to_primitive())),
+                .y              = f32(256.0f),
+                .width          = f32(256.0f),
+                .height         = f32(-256.0f),
+                .scissor_x      = i32(256 * static_cast<std::int32_t>(index.to_primitive())),
+                .scissor_y      = i32(),
+                .scissor_width  = u32(256),
+                .scissor_height = u32(256),
+            });
+        }
+        context.scene->RegisterShadowDefinition(SceneShadowDefinition {
+            .target    = String::make(WE_SHADOW_ATLAS_PREFIX),
+            .viewports = rstd::move(viewports),
+        });
+    }
 
     context.scene->SetSceneId(String::make(scene_id));
     return context;

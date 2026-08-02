@@ -28,10 +28,15 @@ struct SceneParseError {
     String              message;
 };
 
+struct SceneParseCapabilities {
+    bool directional_shadow { false };
+};
+
 struct SceneParseOptions {
     SceneLoadBenchRecorderView   load_bench;
     Option<ref<rstd::json::Map>> user_properties;
     Option<rstd::path::PathBuf>  shader_cache_dir;
+    SceneParseCapabilities       capabilities;
 };
 
 struct ParsedScene {

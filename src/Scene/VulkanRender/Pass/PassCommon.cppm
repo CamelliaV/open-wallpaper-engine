@@ -76,7 +76,7 @@ inline void SetDepthState(const SceneMaterial&                   material,
                           VkPipelineDepthStencilStateCreateInfo& state) {
     state.depthTestEnable  = material.depth_test;
     state.depthWriteEnable = EffectiveDepthWrite(material);
-    state.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;
+    state.depthCompareOp   = ToVkType(material.depth_compare);
 }
 
 inline void SetCullMode(CullMode mode, VkPipelineRasterizationStateCreateInfo& state) {
@@ -85,6 +85,16 @@ inline void SetCullMode(CullMode mode, VkPipelineRasterizationStateCreateInfo& s
     case CullMode::Back: state.cullMode = VK_CULL_MODE_BACK_BIT; break;
     case CullMode::None: state.cullMode = VK_CULL_MODE_NONE; break;
     }
+}
+
+inline void SetRasterState(const SceneMaterial& material, bool depth_clamp_supported,
+                           VkPipelineRasterizationStateCreateInfo& state) {
+    SetCullMode(material.cull_mode, state);
+    state.depthClampEnable        = material.depth_clamp && depth_clamp_supported;
+    state.depthBiasEnable         = material.depth_bias;
+    state.depthBiasConstantFactor = material.depth_bias_constant;
+    state.depthBiasClamp          = material.depth_bias_clamp;
+    state.depthBiasSlopeFactor    = material.depth_bias_slope;
 }
 
 inline std::string MsaaTwinName(std::string_view tex_name, VkSampleCountFlagBits samples) {

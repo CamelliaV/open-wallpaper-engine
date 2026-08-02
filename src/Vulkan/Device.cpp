@@ -166,10 +166,22 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         rstd_error("required vulkan feature geometryShader is not supported");
         return false;
     }
+    const bool enable_shader_output_viewport_index =
+        exists(tested_exts, VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME);
+    const bool enable_multi_viewport =
+        enable_shader_output_viewport_index && supported2.features.multiViewport;
+    const auto d32_features =
+        device.m_gpu.GetFormatProperties(VK_FORMAT_D32_SFLOAT).optimalTilingFeatures;
+    const bool sampled_depth_d32 =
+        (d32_features &
+         (VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)) ==
+        (VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
     VkPhysicalDeviceFeatures enabled {};
     enabled.geometryShader    = VK_TRUE;
     enabled.sampleRateShading = supported2.features.sampleRateShading;
     enabled.samplerAnisotropy = supported2.features.samplerAnisotropy;
+    enabled.multiViewport     = enable_multi_viewport ? VK_TRUE : VK_FALSE;
+    enabled.depthClamp        = supported2.features.depthClamp;
     VkPhysicalDeviceTimelineSemaphoreFeaturesKHR enabled_timeline {
         .sType             = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR,
         .pNext             = nullptr,
@@ -210,12 +222,16 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         max_push_descriptors = push_properties.maxPushDescriptors;
     }
     device.m_capabilities = DeviceCapabilities {
-        .timeline_semaphore   = true,
-        .synchronization2     = enable_sync2,
-        .push_descriptor      = exists(tested_exts, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
-        .max_push_descriptors = max_push_descriptors,
-        .memory_budget        = exists(tested_exts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME),
-        .external_memory_fd   = exists(tested_exts, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
+        .timeline_semaphore           = true,
+        .synchronization2             = enable_sync2,
+        .push_descriptor              = exists(tested_exts, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
+        .max_push_descriptors         = max_push_descriptors,
+        .multi_viewport               = enable_multi_viewport,
+        .shader_output_viewport_index = enable_shader_output_viewport_index,
+        .sampled_depth_d32            = sampled_depth_d32,
+        .depth_clamp                  = supported2.features.depthClamp != VK_FALSE,
+        .memory_budget                = exists(tested_exts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME),
+        .external_memory_fd = exists(tested_exts, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
         .external_memory_dma_buf =
             exists(tested_exts, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME),
         .drm_format_modifier = exists(tested_exts, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME),

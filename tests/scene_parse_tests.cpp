@@ -498,6 +498,71 @@ TEST(SceneLightParsing, RecognizesPrefixedKindsAndFullConeAngles) {
     EXPECT_NEAR(lights[rstd::usize()]->desc().outer_cone_cos, std::cos(77.94f * deg_to_rad), 1e-5f);
 }
 
+TEST(SceneShadowParsing, RequiresRendererCapabilityBeforeRegisteringDerivedResources) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({
+            "camera": {},
+            "general": {
+                "lightconfig": {"directionalshadow": 1},
+                "orthogonalprojection": {"width": 1920, "height": 1080}
+            },
+            "objects": [{
+                "id": 1,
+                "name": "Directional",
+                "light": "ldirectional",
+                "castshadow": true,
+                "origin": [0.0, 0.0, 0.0],
+                "angles": [0.0, 0.0, 0.0],
+                "scale": [1.0, 1.0, 1.0]
+            }, {
+                "id": 2,
+                "name": "Caster",
+                "model": "models/editor/camera/camera.mdl",
+                "castshadow": true,
+                "origin": [0.0, 0.0, 0.0],
+                "angles": [0.0, 0.0, 0.0],
+                "scale": [1.0, 1.0, 1.0]
+            }]
+        })JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+
+    auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
+    ASSERT_TRUE(assets.is_ok());
+    owe::fs::VFS vfs;
+    ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets).unwrap_unchecked()).is_ok());
+
+    wavsen::audio::SoundManager sound_manager;
+    owe::SceneParser            parser;
+    auto                        unsupported = parser.Parse(
+        "shadow-capability-disabled"_str,
+        rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        rstd::mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)),
+        rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(rstd::addressof(sound_manager)));
+    ASSERT_TRUE(unsupported.is_ok());
+    auto unsupported_scene = rstd::move(unsupported).unwrap();
+    EXPECT_TRUE(unsupported_scene.scene->ShadowDefinitions().is_empty());
+    EXPECT_TRUE(unsupported_scene.scene->RenderTarget("_rt_shadowAtlas"_str).is_none());
+
+    auto supported = parser.Parse(
+        "shadow-capability-enabled"_str,
+        rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        rstd::mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)),
+        rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(rstd::addressof(sound_manager)),
+        owe::SceneParseOptions {
+            .capabilities = { .directional_shadow = true },
+        });
+    ASSERT_TRUE(supported.is_ok());
+    auto supported_scene = rstd::move(supported).unwrap();
+    ASSERT_EQ(supported_scene.scene->ShadowDefinitions().len(), rstd::usize(1));
+    auto atlas = supported_scene.scene->RenderTarget("_rt_shadowAtlas"_str);
+    ASSERT_TRUE(atlas.is_some());
+    EXPECT_EQ((**atlas).kind, owe::SceneRenderTargetKind::DepthSampled);
+    EXPECT_FLOAT_EQ((**atlas).depth_clear_value, 0.0f);
+    EXPECT_TRUE((**atlas).sample.compare_enable);
+    EXPECT_EQ((**atlas).sample.compare_op, owe::CompareOp::Greater);
+}
+
 TEST(ModelObjectJson, ReadsMaterialSkin) {
     auto parsed = owe::ParseJson(R"({"model":"models/prism.mdl","skin":2,"perspective":true})");
     ASSERT_TRUE(parsed.is_ok());

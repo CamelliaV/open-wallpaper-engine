@@ -74,11 +74,27 @@ struct TextureResourceIntent {
     friend bool operator==(const TextureResourceIntent&, const TextureResourceIntent&) = default;
 };
 
-enum class TextureUsage
+enum class TextureUsage : rstd::uint32_t
 {
-    Color,
-    Depth,
+    None                = 0,
+    Sampled             = 1u << 0,
+    ColorAttachment     = 1u << 1,
+    DepthAttachment     = 1u << 2,
+    TransferSource      = 1u << 3,
+    TransferDestination = 1u << 4,
+    Color               = (1u << 0) | (1u << 1) | (1u << 3) | (1u << 4),
+    Depth               = 1u << 2,
 };
+
+constexpr auto operator|(TextureUsage lhs, TextureUsage rhs) noexcept -> TextureUsage {
+    return static_cast<TextureUsage>(static_cast<rstd::uint32_t>(lhs) |
+                                     static_cast<rstd::uint32_t>(rhs));
+}
+
+constexpr bool HasTextureUsage(TextureUsage usages, TextureUsage usage) noexcept {
+    return (static_cast<rstd::uint32_t>(usages) & static_cast<rstd::uint32_t>(usage)) ==
+           static_cast<rstd::uint32_t>(usage);
+}
 
 struct TextureDefinition {
     i32           width {};
@@ -94,8 +110,11 @@ struct TextureDefinition {
                lhs.format == rhs.format && lhs.sample.wrapS == rhs.sample.wrapS &&
                lhs.sample.wrapT == rhs.sample.wrapT &&
                lhs.sample.magFilter == rhs.sample.magFilter &&
-               lhs.sample.minFilter == rhs.sample.minFilter && lhs.mip_levels == rhs.mip_levels &&
-               lhs.samples == rhs.samples;
+               lhs.sample.minFilter == rhs.sample.minFilter &&
+               lhs.sample.compare_enable == rhs.sample.compare_enable &&
+               lhs.sample.compare_op == rhs.sample.compare_op &&
+               lhs.sample.border_color == rhs.sample.border_color &&
+               lhs.mip_levels == rhs.mip_levels && lhs.samples == rhs.samples;
     }
 };
 

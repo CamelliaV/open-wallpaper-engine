@@ -1664,7 +1664,17 @@ TEST(RenderPassCacheKey, TracksRenderPassCompatibilityInputs) {
         make_request(VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_4_BIT, true));
     auto key_depth = owe::vulkan::MakeRenderPassCacheKey(
         make_request(VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, false));
-    auto desc_store = owe::vulkan::MakeRenderPassResourceDesc(
+    auto depth_only = make_request(VK_FORMAT_UNDEFINED, VK_SAMPLE_COUNT_1_BIT, true);
+    depth_only.has_color_attachment = false;
+    depth_only.depth_load_op        = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_only.depth_final_layout   = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    auto key_depth_only             = owe::vulkan::MakeRenderPassCacheKey(depth_only);
+    auto depth_attachment_layout = make_request(VK_FORMAT_UNDEFINED, VK_SAMPLE_COUNT_1_BIT, true);
+    depth_attachment_layout.has_color_attachment = false;
+    depth_attachment_layout.depth_load_op        = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_attachment_layout.depth_final_layout   = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    auto key_depth_attachment_layout = owe::vulkan::MakeRenderPassCacheKey(depth_attachment_layout);
+    auto desc_store                  = owe::vulkan::MakeRenderPassResourceDesc(
         make_request(VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, true));
     desc_store.color_store_op = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     auto key_store            = owe::vulkan::MakeRenderPassCacheKey(desc_store);
@@ -1678,6 +1688,8 @@ TEST(RenderPassCacheKey, TracksRenderPassCompatibilityInputs) {
     EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_format));
     EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_samples));
     EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_depth));
+    EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_depth_only));
+    EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_depth_only, key_depth_attachment_layout));
     EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_store));
     EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_layout));
 

@@ -108,7 +108,7 @@ void ParseSpecTexName(std::string& name, const wpscene::Material& wpmat, const S
             name = GenLinkTex(wpid->to_primitive());
         } else if (text.starts_with(WE_MIP_MAPPED_FRAME_BUFFER)) {
         } else if (text.starts_with(WE_SHADOW_ATLAS_PREFIX)) {
-            name.clear();
+            if (scene.RenderTarget(WE_SHADOW_ATLAS_PREFIX).is_none()) name.clear();
         } else if (text.starts_with(OWE_BLOOM_MIP_PREFIX)) {
         } else if (text.starts_with(WE_REFLECTION_PREFIX)) {
             name = rstd::cppstd::to_string(WE_REFLECTION_PREFIX);
@@ -465,6 +465,11 @@ auto BuildMaterial(fs::VFS& vfs, ShaderCache& shader_cache,
         }
     }
     if (exists(shader_info_ref.combos, rstd::cppstd::to_string(WE_CB_LIGHTING))) {
+        if (environment.directional_shadow &&
+            shader_info_ref.combos[rstd::cppstd::to_string(WE_CB_LIGHTING)] != "0") {
+            shader_info_ref.combos["LIGHTS_SHADOW_MAPPING"]         = "1";
+            shader_info_ref.combos["LIGHTS_SHADOW_MAPPING_QUALITY"] = "2";
+        }
     }
 
     auto scene_id              = as_string_view(scene.SceneId());
