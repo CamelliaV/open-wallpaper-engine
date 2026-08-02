@@ -2662,10 +2662,12 @@ private:
 
     // User-hidden layers and static identity layers share the same graph-elision
     // result while retaining their independent reasons.
-    HashSet<i32> m_elidable_layer_ids;
-    HashSet<i32> m_render_graph_elidable_layer_ids;
-    HashSet<i32> m_static_elidable_layer_ids;
-    HashSet<i32> m_visibility_elidable_layer_ids;
+    HashSet<i32>            m_elidable_layer_ids;
+    HashSet<i32>            m_render_graph_elidable_layer_ids;
+    HashSet<i32>            m_static_elidable_layer_ids;
+    HashSet<i32>            m_visibility_elidable_layer_ids;
+    HashSet<rstd::uint64_t> m_hidden_scene_node_ids;
+    HashSet<rstd::uint64_t> m_render_graph_hidden_scene_node_ids;
 };
 
 } // namespace owe

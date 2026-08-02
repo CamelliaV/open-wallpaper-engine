@@ -115,7 +115,8 @@ u64 next_render_scene_version() {
     return u64(next.fetch_add(1, std::memory_order_relaxed));
 }
 
-bool same_layer_ids(const HashSet<i32>& lhs, const HashSet<i32>& rhs) {
+template<typename T>
+bool same_ids(const HashSet<T>& lhs, const HashSet<T>& rhs) {
     if (lhs.len() != rhs.len()) return false;
     auto ids = lhs.iter();
     for (auto id = ids.next(); id.is_some(); id = ids.next()) {
@@ -1050,6 +1051,11 @@ SceneNodeId Scene::RegisterNode(SceneNode& node, Option<WallpaperLayerId> wallpa
         node.m_id                 = wallpaper->value;
         (void)m_wallpaper_node_ids.insert(wallpaper->value, node.m_identity);
     }
+    const auto key = scene_id_key(node.m_identity);
+    if (node.m_wallpaper_identity.is_none() && ! node.Visible())
+        (void)m_hidden_scene_node_ids.insert(key);
+    else
+        (void)m_hidden_scene_node_ids.remove(key);
     return node.m_identity;
 }
 
@@ -1494,6 +1500,7 @@ void Scene::RebuildResourceIndex() {
 }
 
 void Scene::AttachRuntimeNode(SceneNode& parent, Arc<SceneNode> node) {
+    (void)RegisterNode(*node);
     parent.AppendChild(rstd::move(node));
     RebuildResourceIndex();
     m_render_graph_dirty = true;
@@ -1759,10 +1766,14 @@ void Scene::MarkLayerVisibilityElidable(WallpaperLayerId id) {
 
 bool Scene::ConsumeRenderGraphDirty() {
     const bool elision_changed =
-        ! same_layer_ids(m_elidable_layer_ids, m_render_graph_elidable_layer_ids);
-    const bool dirty     = m_render_graph_dirty || elision_changed;
+        ! same_ids(m_elidable_layer_ids, m_render_graph_elidable_layer_ids);
+    const bool scene_node_visibility_changed =
+        ! same_ids(m_hidden_scene_node_ids, m_render_graph_hidden_scene_node_ids);
+    const bool dirty     = m_render_graph_dirty || elision_changed || scene_node_visibility_changed;
     m_render_graph_dirty = false;
     if (elision_changed) m_render_graph_elidable_layer_ids = m_elidable_layer_ids.clone();
+    if (scene_node_visibility_changed)
+        m_render_graph_hidden_scene_node_ids = m_hidden_scene_node_ids.clone();
     return dirty;
 }
 
@@ -1807,7 +1818,7 @@ bool Scene::SetNodeVisible(SceneNode& node, bool visible) {
         node.Layer()->SetVisibleOutputEnabled(visible);
     }
     if (id < i32()) {
-        if (visibility_changed) m_render_graph_dirty = true;
+        (void)RegisterNode(node);
         return visibility_changed;
     }
 

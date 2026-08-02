@@ -462,6 +462,13 @@ TEST(SceneParserScript, DynamicObjectsUseSceneIdentity) {
     EXPECT_EQ(dynamic->ID(), i32(-1));
     EXPECT_FALSE(dynamic->Visible());
     EXPECT_TRUE(scene.scene->ConsumeRenderGraphDirty());
+
+    EXPECT_TRUE(scene.scene->SetNodeVisible(*dynamic, true));
+    EXPECT_TRUE(scene.scene->SetNodeVisible(*dynamic, false));
+    EXPECT_FALSE(scene.scene->ConsumeRenderGraphDirty());
+
+    EXPECT_TRUE(scene.scene->SetNodeVisible(*dynamic, true));
+    EXPECT_TRUE(scene.scene->ConsumeRenderGraphDirty());
 }
 
 TEST(SceneParserText, EmptyStaticTextPreservesLayerHierarchy) {
