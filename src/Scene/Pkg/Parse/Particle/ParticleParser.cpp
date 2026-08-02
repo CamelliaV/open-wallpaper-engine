@@ -370,6 +370,7 @@ struct OverrideSpawnProgram {
         columns.sizes[index] *= override->size;
         columns.initial_sizes[index] = columns.sizes[index];
         columns.velocities[index] *= override->speed;
+        columns.angular_velocities[index] *= override->speed;
         if (override->overColor || override->overColorn) {
             Eigen::Vector3f value;
             if (override->overColor) {
