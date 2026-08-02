@@ -55,6 +55,62 @@ struct ParticleTrailUniformState {
     rstd::array<float, 4> render_var {};
 };
 
+class ParticleInstanceModifiers {
+public:
+    ParticleInstanceModifiers(Arc<wpscene::ParticleInstanceoverride> state,
+                              wpscene::Particle::EFlags flags, bool controlpoints)
+        : m_state(rstd::move(state)), m_flags(flags), m_controlpoints(controlpoints) {}
+
+    auto Clone() const -> ParticleInstanceModifiers {
+        return ParticleInstanceModifiers(m_state.clone(), m_flags, m_controlpoints);
+    }
+
+    bool  Enabled() const noexcept { return m_state->enabled; }
+    float Alpha() const noexcept { return m_state->alpha; }
+    float Count() const noexcept {
+        return Disabled(wpscene::Particle::FlagEnum::disable_count_override) ? 1.0f
+                                                                             : m_state->count;
+    }
+    float Lifetime() const noexcept {
+        return Disabled(wpscene::Particle::FlagEnum::disable_lifetime_override) ? 1.0f
+                                                                                : m_state->lifetime;
+    }
+    float Rate() const noexcept { return m_state->rate; }
+    float Size() const noexcept {
+        return Disabled(wpscene::Particle::FlagEnum::disable_size_override) ? 1.0f : m_state->size;
+    }
+    float Speed() const noexcept {
+        return Disabled(wpscene::Particle::FlagEnum::disable_speed_override) ? 1.0f
+                                                                             : m_state->speed;
+    }
+    bool HasColorOverride() const noexcept {
+        return ! Disabled(wpscene::Particle::FlagEnum::disable_color_override) &&
+               (m_state->overColor || m_state->overColorn);
+    }
+    bool UsesLegacyColor() const noexcept { return m_state->overColor; }
+    auto Color() const noexcept -> const std::array<float, 3>& {
+        return m_state->overColor ? m_state->color : m_state->colorn;
+    }
+    bool ControlpointsEnabled() const noexcept { return m_controlpoints; }
+    auto Controlpoint(usize index) const noexcept -> const std::optional<std::array<float, 3>>& {
+        return m_state->controlpoint[index.to_primitive()];
+    }
+    auto ControlpointAngle(usize index) const noexcept -> const std::array<float, 3>& {
+        return m_state->controlpointangle[index.to_primitive()];
+    }
+    auto ControlpointFieldBindings() const noexcept
+        -> const std::shared_ptr<const wpscene::FieldBindings>& {
+        return m_state->field_bindings;
+    }
+
+private:
+    bool Disabled(wpscene::Particle::FlagEnum flag) const noexcept { return m_flags[flag]; }
+
+    Arc<wpscene::ParticleInstanceoverride> m_state;
+    wpscene::Particle::EFlags              m_flags;
+    bool                                   m_controlpoints { false };
+};
+
 struct ParticleAttributes {
     particle::ParticleAttributeKey<particle::PositionAttribute>            position;
     particle::ParticleAttributeKey<particle::VelocityAttribute>            velocity;
@@ -427,8 +483,8 @@ public:
         return m_controlpoints.as_mut_slice();
     }
     auto SimulationControlpoint(usize index) const -> ParticleSimulationControlpoint;
-    void SetInstanceOverride(Arc<wpscene::ParticleInstanceoverride> value) {
-        m_instance_override = Some(rstd::move(value));
+    void SetInstanceModifiers(ParticleInstanceModifiers value) {
+        m_instance_modifiers = Some(rstd::move(value));
     }
     void SetControlpointAngleCurve(usize index, SceneAnimationCurve curve) {
         m_controlpoints[index].angle_curve = Some(rstd::move(curve));
@@ -499,7 +555,7 @@ private:
     rstd::vec::Vec<Box<ParticleSubSystem>>                        m_children;
     rstd::array<ParticleControlpoint, 8>                          m_controlpoints;
     Option<i32>                                                   m_parent_controlpoint_start_index;
-    Option<Arc<wpscene::ParticleInstanceoverride>>                m_instance_override;
+    Option<ParticleInstanceModifiers>                             m_instance_modifiers;
     ParticleFrame                                                 m_frame;
     ParticleAnimationSpec                                         m_animation_spec;
     ParticleFollowAnchor                                          m_follow_anchor;

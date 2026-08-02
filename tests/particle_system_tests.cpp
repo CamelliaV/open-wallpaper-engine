@@ -492,6 +492,36 @@ TEST(ParticleInstanceOverride, TracksProvidedControlpoints) {
     EXPECT_FALSE(override.controlpoint[2].has_value());
 }
 
+TEST(ParticleInstanceModifiers, SharesStateAndFiltersDisabledOverrides) {
+    auto state        = rstd::sync::Arc<owe::wpscene::ParticleInstanceoverride>::make();
+    state->enabled    = true;
+    state->overColorn = true;
+    state->colorn     = { 0.25f, 0.5f, 0.75f };
+    state->count      = 2.0f;
+    state->lifetime   = 3.0f;
+    state->rate       = 4.0f;
+    state->size       = 5.0f;
+    state->speed      = 6.0f;
+
+    owe::ParticleInstanceModifiers filtered(
+        state.clone(), owe::wpscene::Particle::EFlags { 248 }, false);
+    EXPECT_TRUE(filtered.Enabled());
+    EXPECT_FLOAT_EQ(filtered.Count(), 1.0f);
+    EXPECT_FLOAT_EQ(filtered.Lifetime(), 1.0f);
+    EXPECT_FLOAT_EQ(filtered.Rate(), 4.0f);
+    EXPECT_FLOAT_EQ(filtered.Size(), 1.0f);
+    EXPECT_FLOAT_EQ(filtered.Speed(), 1.0f);
+    EXPECT_FALSE(filtered.HasColorOverride());
+    EXPECT_FALSE(filtered.ControlpointsEnabled());
+
+    owe::ParticleInstanceModifiers unfiltered(
+        state.clone(), owe::wpscene::Particle::EFlags { 0 }, true);
+    state->size = 7.0f;
+    EXPECT_FLOAT_EQ(unfiltered.Size(), 7.0f);
+    EXPECT_TRUE(unfiltered.HasColorOverride());
+    EXPECT_TRUE(unfiltered.ControlpointsEnabled());
+}
+
 TEST(ParticleSubSystem, ResolvesWorldControlpointOverridesThroughOwnerTransform) {
     owe::Scene             scene;
     auto                   mesh = std::make_shared<owe::SceneMesh>();
@@ -519,7 +549,8 @@ TEST(ParticleSubSystem, ResolvesWorldControlpointOverridesThroughOwnerTransform)
     override->controlpoint[1] = std::array<float, 3> { 120.0f, 240.0f, 0.0f };
     override->controlpoint[3] = std::array<float, 3> { 3.0f, 4.0f, 0.0f };
     subsystem.SetOwnerNode(owner.as_ptr());
-    subsystem.SetInstanceOverride(override.clone());
+    subsystem.SetInstanceModifiers(owe::ParticleInstanceModifiers(
+        override.clone(), owe::wpscene::Particle::EFlags { 0 }, true));
     subsystem.Finalize();
     subsystem.Tick(f64(), false);
 
@@ -582,7 +613,9 @@ TEST(ParticleSubSystem, AppliesVortexAroundWorldSpaceOwner) {
     override->enabled              = true;
     override->controlpointangle[1] = std::array<float, 3> { 1.57079632679f, 0.0f, 0.0f };
     subsystem.SetOwnerNode(owner.as_ptr());
-    subsystem.SetInstanceOverride(override.clone());
+    auto modifiers = owe::ParticleInstanceModifiers(
+        override.clone(), owe::wpscene::Particle::EFlags { 0 }, true);
+    subsystem.SetInstanceModifiers(modifiers.Clone());
     subsystem.AddInitializer(owe::ParticleParser::GenInitializer(
         owe::ParseJson(R"({"name":"lifetimerandom","min":10,"max":10})").unwrap(), u32(1)));
     subsystem.AddEmitter(Box<dyn<particle::ParticleEmitterProgram>>::make(
@@ -593,12 +626,12 @@ TEST(ParticleSubSystem, AppliesVortexAroundWorldSpaceOwner) {
                                },
                                usize())));
     subsystem.AddOperator(owe::ParticleParser::GenOperator(
-        owe::ParseJson(R"({"name":"movement"})").unwrap(), override.clone(), subsystem, usize()));
+        owe::ParseJson(R"({"name":"movement"})").unwrap(), modifiers.Clone(), subsystem, usize()));
     subsystem.AddOperator(owe::ParticleParser::GenOperator(
         owe::ParseJson(
             R"({"name":"vortex_v2","controlpoint":1,"flags":2,"ringpulldistance":250,"ringradius":256,"ringwidth":5,"speedinner":0,"speedouter":2500})")
             .unwrap(),
-        override.clone(),
+        modifiers.Clone(),
         subsystem,
         usize(1)));
     subsystem.Finalize();

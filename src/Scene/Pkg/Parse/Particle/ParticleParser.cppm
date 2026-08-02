@@ -11,8 +11,6 @@ import :particle_runtime;
 
 export import wescene.pkg.scene_obj;
 
-using rstd::sync::Arc;
-
 export namespace owe
 
 {
@@ -20,10 +18,9 @@ class ParticleParser {
 public:
     static ParticleSpawnInstruction GenInitializer(const Json&, u32 implicit_sequence_count);
     static Box<dyn<particle::ParticleUpdateProgram>>
-    GenOperator(const Json&, Arc<wpscene::ParticleInstanceoverride>, ParticleSubSystem&,
-                usize operator_index);
+    GenOperator(const Json&, ParticleInstanceModifiers, ParticleSubSystem&, usize operator_index);
     static Box<dyn<particle::ParticleEmitterProgram>> GenEmitter(const wpscene::Emitter&,
                                                                  ParticleSubSystem&, usize);
-    static ParticleSpawnInstruction GenOverride(Arc<wpscene::ParticleInstanceoverride>);
+    static ParticleSpawnInstruction                   GenOverride(ParticleInstanceModifiers);
 };
 } // namespace owe

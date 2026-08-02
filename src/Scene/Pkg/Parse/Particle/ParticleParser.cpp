@@ -16,7 +16,6 @@ using namespace owe;
 using namespace Eigen;
 using namespace rstd::literals;
 using rstd::mtp::same;
-using rstd::sync::Arc;
 
 namespace
 {
@@ -358,30 +357,26 @@ struct TurbulentVelocityRandomProgram {
 };
 
 struct OverrideSpawnProgram {
-    Arc<wpscene::ParticleInstanceoverride> override;
+    ParticleInstanceModifiers modifiers;
 
     void Initialize(ParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
                     ref<dyn<rstd::any::Any>>) {
         auto index = request.slot.index;
-        columns.lifetimes[index] *= override->lifetime;
+        columns.lifetimes[index] *= modifiers.Lifetime();
         columns.initial_lifetimes[index] = columns.lifetimes[index];
-        columns.alphas[index] *= UiScalarToLinear(override->alpha);
+        columns.alphas[index] *= UiScalarToLinear(modifiers.Alpha());
         columns.initial_alphas[index] = columns.alphas[index];
-        columns.sizes[index] *= override->size;
+        columns.sizes[index] *= modifiers.Size();
         columns.initial_sizes[index] = columns.sizes[index];
-        columns.velocities[index] *= override->speed;
-        columns.angular_velocities[index] *= override->speed;
-        if (override->overColor || override->overColorn) {
-            Eigen::Vector3f value;
-            if (override->overColor) {
-                value = { UiColorToLinear(override->color[0] / 255.0f),
-                          UiColorToLinear(override->color[1] / 255.0f),
-                          UiColorToLinear(override->color[2] / 255.0f) };
-            } else {
-                value = { UiColorToLinear(override->colorn[0]),
-                          UiColorToLinear(override->colorn[1]),
-                          UiColorToLinear(override->colorn[2]) };
-            }
+        columns.velocities[index] *= modifiers.Speed();
+        columns.angular_velocities[index] *= modifiers.Speed();
+        if (modifiers.HasColorOverride()) {
+            auto            color = modifiers.Color();
+            Eigen::Vector3f value { color[0], color[1], color[2] };
+            if (modifiers.UsesLegacyColor()) value /= 255.0f;
+            value                         = { UiColorToLinear(value[0]),
+                                              UiColorToLinear(value[1]),
+                                              UiColorToLinear(value[2]) };
             columns.colors[index]         = value;
             columns.initial_colors[index] = value;
         }
@@ -577,8 +572,9 @@ ParticleSpawnInstruction ParticleParser::GenInitializer(const Json& wpj,
     return ParticleSpawnInstruction::Make(NoopSpawnProgram {});
 }
 
-ParticleSpawnInstruction ParticleParser::GenOverride(Arc<wpscene::ParticleInstanceoverride> over) {
-    return ParticleSpawnInstruction::Make(OverrideSpawnProgram { .override = rstd::move(over) });
+ParticleSpawnInstruction ParticleParser::GenOverride(ParticleInstanceModifiers modifiers) {
+    return ParticleSpawnInstruction::Make(
+        OverrideSpawnProgram { .modifiers = rstd::move(modifiers) });
 }
 double FadeValueChange(float life, float start, float end, float startValue,
                        float endValue) noexcept {
@@ -913,7 +909,7 @@ struct MovementOperator {
     ParticleAttributes                                        attributes;
     float                                                     drag {};
     Eigen::Vector3d                                           gravity;
-    Arc<wpscene::ParticleInstanceoverride>                    override;
+    ParticleInstanceModifiers                                 modifiers;
     particle::ParticleWriteIndex<particle::VelocityAttribute> velocity;
 
     void Compile(particle::ParticleViewCompiler& compiler) {
@@ -926,7 +922,7 @@ struct MovementOperator {
         auto positions  = context.view.PositionsMut();
         auto velocities = context.view.Write(velocity);
         auto delta      = context.delta.to_primitive();
-        auto speed      = override->speed;
+        auto speed      = modifiers.Speed();
         for (auto slot : context.slots) {
             auto world_velocity =
                 frame->world_from_local_dir * velocities[slot.index].cast<double>();
@@ -981,7 +977,7 @@ struct ScalarChangeOperator {
     ParticleAttributes                                              attributes;
     ValueChange                                                     change;
     Target                                                          target { Target::Alpha };
-    Arc<wpscene::ParticleInstanceoverride>                          override;
+    ParticleInstanceModifiers                                       modifiers;
     particle::ParticleWriteIndex<particle::SizeAttribute>           size;
     particle::ParticleWriteIndex<particle::AlphaAttribute>          alpha;
     particle::ParticleReadIndex<particle::LifetimeAttribute>        lifetime;
@@ -1001,7 +997,7 @@ struct ScalarChangeOperator {
         auto initial   = context.view.Read(initial_lifetime);
         if (target == Target::Size) {
             auto values = context.view.Write(size);
-            auto scale  = override->size;
+            auto scale  = modifiers.Size();
             for (auto slot : context.slots) {
                 values[slot.index] *=
                     scale *
@@ -1196,7 +1192,7 @@ struct OscillatePositionOperator {
 struct TurbulenceOperator {
     ParticleAttributes                                        attributes;
     Turbulence                                                config;
-    Arc<wpscene::ParticleInstanceoverride>                    override;
+    ParticleInstanceModifiers                                 modifiers;
     double                                                    phase {};
     double                                                    speed {};
     particle::ParticleWriteIndex<particle::VelocityAttribute> velocity;
@@ -1214,7 +1210,7 @@ struct TurbulenceOperator {
         for (auto slot : context.slots) {
             Eigen::Vector3d position = positions[slot.index].cast<double>();
             position.x() += phase + config.timescale * frame->time.to_primitive();
-            Eigen::Vector3d result = speed * override->speed *
+            Eigen::Vector3d result = speed * modifiers.Speed() *
                                      algorism::CurlNoise(position * config.scale * 2).normalized();
             for (usize component {}; component < usize(3); ++component) {
                 if (config.mask[component.to_primitive()] == 0) {
@@ -1396,7 +1392,7 @@ struct NoopUpdateOperator {
 };
 
 Box<dyn<particle::ParticleUpdateProgram>>
-ParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceoverride> over_state,
+ParticleParser::GenOperator(const Json& wpj, ParticleInstanceModifiers modifiers,
                             ParticleSubSystem& subsystem, usize operator_index) {
     auto attributes = subsystem.Attributes();
     do {
@@ -1412,7 +1408,7 @@ ParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceoverri
                 .attributes = attributes,
                 .drag       = drag,
                 .gravity    = Vector3f(gravity.data()).cast<double>(),
-                .override   = over_state.clone(),
+                .modifiers  = modifiers.Clone(),
             });
         } else if (name == "angularmovement") {
             float                drag { 0.0f };
@@ -1429,7 +1425,7 @@ ParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceoverri
                 .attributes = attributes,
                 .change     = ValueChange::ReadFromJson(wpj),
                 .target     = ScalarChangeOperator::Target::Size,
-                .override   = over_state.clone(),
+                .modifiers  = modifiers.Clone(),
             });
         } else if (name == "alphafade") {
             float fadeintime { 0.5f }, fadeouttime { 0.5f };
@@ -1445,7 +1441,7 @@ ParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceoverri
                 .attributes = attributes,
                 .change     = ValueChange::ReadFromJson(wpj),
                 .target     = ScalarChangeOperator::Target::Alpha,
-                .override   = over_state.clone(),
+                .modifiers  = modifiers.Clone(),
             });
         } else if (name == "colorchange") {
             return Box<dyn<particle::ParticleUpdateProgram>>::make(ColorChangeOperator {
@@ -1485,7 +1481,7 @@ ParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceoverri
             return Box<dyn<particle::ParticleUpdateProgram>>::make(TurbulenceOperator {
                 .attributes = attributes,
                 .config     = config,
-                .override   = over_state.clone(),
+                .modifiers  = modifiers.Clone(),
                 .phase      = Random::get(config.phasemin, config.phasemax),
                 .speed      = Random::get(config.speedmin, config.speedmax),
             });

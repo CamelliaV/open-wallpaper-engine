@@ -605,9 +605,8 @@ void ParticleSubSystem::UpdateControlpoints(ParticleInstanceRef current) {
         auto&           controlpoint = m_controlpoints[index];
         Eigen::Vector3f angles { Eigen::Vector3f::Zero() };
         controlpoint.offset = controlpoint.base_offset;
-        if (m_instance_override.is_some()) {
-            auto        source_index      = index.to_primitive();
-            const auto& position_override = (*m_instance_override)->controlpoint[source_index];
+        if (m_instance_modifiers.is_some() && (*m_instance_modifiers).ControlpointsEnabled()) {
+            const auto& position_override = (*m_instance_modifiers).Controlpoint(index);
             if (position_override.has_value()) {
                 Eigen::Vector3d position =
                     Eigen::Vector3f { position_override->data() }.cast<double>();
@@ -620,8 +619,7 @@ void ParticleSubSystem::UpdateControlpoints(ParticleInstanceRef current) {
                     controlpoint.offset += position;
                 }
             }
-            angles =
-                Eigen::Vector3f { (*m_instance_override)->controlpointangle[source_index].data() };
+            angles = Eigen::Vector3f { (*m_instance_modifiers).ControlpointAngle(index).data() };
         }
         if (controlpoint.link_mouse) controlpoint.offset += m_frame.mouse_local;
         if (controlpoint.angle_curve)
@@ -799,7 +797,7 @@ void ParticleSubSystem::Tick(f64 frame_time, bool update_mesh) {
         return;
     }
     auto rate =
-        m_instance_override.is_some() ? (*m_instance_override)->rate : m_rate.to_primitive();
+        m_instance_modifiers.is_some() ? (*m_instance_modifiers).Rate() : m_rate.to_primitive();
     Advance(frame_time * f64(std::max(rate, 0.0)), frame_time, update_mesh);
 }
 

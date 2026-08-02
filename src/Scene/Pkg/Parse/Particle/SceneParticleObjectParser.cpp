@@ -163,7 +163,7 @@ struct ParticleNodeControl {
 };
 
 void LoadControlPoint(ParticleSubSystem& system, const wpscene::Particle& particle,
-                      Arc<wpscene::ParticleInstanceoverride> instance_override) {
+                      ParticleInstanceModifiers modifiers) {
     auto points = system.ControlpointsMut();
     auto count  = rstd::cmp::min(points.len(), usize(particle.controlpoints.size()));
     for (usize index {}; index < count; ++index) {
@@ -177,17 +177,19 @@ void LoadControlPoint(ParticleSubSystem& system, const wpscene::Particle& partic
         points[index].worldspace = particle.controlpoints[source_index]
                                        .flags[wpscene::ParticleControlpoint::FlagEnum::worldspace];
     }
-    system.SetInstanceOverride(instance_override.clone());
-    if (! instance_override->field_bindings) return;
+    system.SetInstanceModifiers(modifiers.Clone());
+    if (! modifiers.ControlpointsEnabled()) return;
+    const auto& field_bindings = modifiers.ControlpointFieldBindings();
+    if (! field_bindings) return;
     for (usize index {}; index < points.len(); ++index) {
         auto field = std::string("controlpointangle") + std::to_string(index.to_primitive());
-        auto curve = instance_override->field_bindings->animations.find(field);
-        if (curve != instance_override->field_bindings->animations.end())
+        auto curve = field_bindings->animations.find(field);
+        if (curve != field_bindings->animations.end())
             system.SetControlpointAngleCurve(index, ToSceneAnimationCurve(curve->second));
     }
 }
 void LoadInitializer(ParticleSubSystem& system, const wpscene::Particle& particle,
-                     Arc<wpscene::ParticleInstanceoverride> over_state) {
+                     ParticleInstanceModifiers modifiers) {
     u32 implicit_sequence_count { 2 };
     for (const auto& emitter : particle.emitters) {
         if (emitter.max_emit_per_period > u32()) {
@@ -201,23 +203,24 @@ void LoadInitializer(ParticleSubSystem& system, const wpscene::Particle& particl
         if (count.is_some()) system.SetRopeSequenceCount(*count);
         system.AddInitializer(rstd::move(instruction));
     }
-    if (over_state->enabled) {
-        system.AddInitializer(ParticleParser::GenOverride(rstd::move(over_state)));
+    if (modifiers.Enabled()) {
+        system.AddInitializer(ParticleParser::GenOverride(rstd::move(modifiers)));
     }
 }
 void LoadOperator(ParticleSubSystem& system, const wpscene::Particle& particle,
-                  Arc<wpscene::ParticleInstanceoverride> over_state) {
+                  ParticleInstanceModifiers modifiers) {
     usize index {};
     for (const auto& operation : particle.operators) {
         system.AddOperator(
-            ParticleParser::GenOperator(operation, over_state.clone(), system, index++));
+            ParticleParser::GenOperator(operation, modifiers.Clone(), system, index++));
     }
 }
-void LoadEmitter(ParticleSubSystem& system, const wpscene::Particle& particle, float count) {
+void LoadEmitter(ParticleSubSystem& system, const wpscene::Particle& particle,
+                 const ParticleInstanceModifiers& modifiers) {
     usize emitter_index {};
     for (const auto& em : particle.emitters) {
         auto newEm = em;
-        newEm.rate *= count;
+        newEm.rate *= modifiers.Count();
         system.AddEmitter(ParticleParser::GenEmitter(newEm, system, emitter_index++));
     }
 }
@@ -236,39 +239,17 @@ ParticleSubSystem::SpawnType ParseSpawnType(std::string_view str) {
 };
 
 struct ParticleChildPtr {
-    wpscene::ParticleChild*            child { nullptr };
-    SceneNode*                         node_parent { nullptr };
-    ParticleSubSystem*                 particle_parent { nullptr };
-    Option<Arc<ParticlePlaybackState>> playback;
-    bool                               inherit_instance_override { false };
+    wpscene::ParticleChild*                        child { nullptr };
+    SceneNode*                                     node_parent { nullptr };
+    ParticleSubSystem*                             particle_parent { nullptr };
+    Option<Arc<ParticlePlaybackState>>             playback;
+    Option<Arc<wpscene::ParticleInstanceoverride>> instance_override;
 
     // Effective world scale at node_parent. Particle child origins are
     // pre-divided by this so the shader's MVP scale recovers the authored
     // parent-relative world-pixel offset.
     Eigen::Vector3f world_scale { 1.f, 1.f, 1.f };
 };
-
-wpscene::ParticleInstanceoverride ParticleOverrideForNode(const wpscene::ParticleObject& obj,
-                                                          bool                           is_child,
-                                                          bool inherit_instance_override) {
-    if (! is_child) return obj.instanceoverride;
-
-    wpscene::ParticleInstanceoverride out;
-    if (! inherit_instance_override) return out;
-    const auto& parent = obj.instanceoverride;
-    out.enabled        = parent.enabled;
-    out.alpha          = parent.alpha;
-    out.overColor      = parent.overColor;
-    out.overColorn     = parent.overColorn;
-    out.color          = parent.color;
-    out.colorn         = parent.colorn;
-    for (std::string_view field : { "alpha", "color", "colorn" }) {
-        if (auto it = parent.bindings.find(std::string(field)); it != parent.bindings.end()) {
-            out.bindings.emplace(it->first, it->second);
-        }
-    }
-    return out;
-}
 
 void SetParticleUniformConfig(ParticleObjectParseOutput& output, const Arc<SceneNode>& node,
                               UniformNodeConfigDraft config) {
@@ -345,17 +326,22 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
     // this node's local scale. Propagated to child particle nodes.
     Eigen::Vector3f node_world_scale = child_ptr.world_scale.cwiseProduct(spNode->Scale());
 
-    // The placed object's opacity/tint enters its direct child presets only. A preset's own
-    // children keep their authored values instead of inheriting the scene override transitively.
-    auto override_state = Arc<wpscene::ParticleInstanceoverride>::make(
-        ParticleOverrideForNode(wppartobj, is_child, child_ptr.inherit_instance_override));
-    auto& override       = *override_state;
-    auto  playback_state = is_child && child_ptr.playback.is_some()
-                               ? (*child_ptr.playback).clone()
-                               : Arc<ParticlePlaybackState>::make();
+    auto playback_state = is_child && child_ptr.playback.is_some()
+                              ? (*child_ptr.playback).clone()
+                              : Arc<ParticlePlaybackState>::make();
 
     auto& particle_obj = *p_particle_obj;
     auto& vfs          = *services.vfs;
+    if (is_child && child_ptr.instance_override.is_none()) {
+        rstd_error("particle child '{}' has no instance override state", child_ptr.child->name);
+        return;
+    }
+    auto override_state =
+        is_child ? (*child_ptr.instance_override).clone()
+                 : Arc<wpscene::ParticleInstanceoverride>::make(wppartobj.instanceoverride);
+    auto modifiers =
+        ParticleInstanceModifiers(override_state.clone(), particle_obj.flags, ! is_child);
+    const auto& override = *override_state;
 
     auto wppartRenderer    = particle_obj.renderers.at(0);
     auto render_desc       = DescribeParticleRender(wppartRenderer);
@@ -488,7 +474,7 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
         *services.scene,
         spMesh,
         u32(maxcount),
-        f64(override.rate),
+        f64(modifiers.Rate()),
         max_instance_count,
         f64(child_data.probability),
         spawn_type,
@@ -529,21 +515,23 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
     particleSub->SetPlaybackState(playback_state.clone());
     if (child_data.controlpointstartindex.is_some())
         particleSub->SetParentControlpointStartIndex(*child_data.controlpointstartindex);
-    LoadEmitter(*particleSub, particle_obj, override.count);
-    LoadInitializer(*particleSub, particle_obj, override_state.clone());
-    LoadOperator(*particleSub, particle_obj, override_state.clone());
-    LoadControlPoint(*particleSub, particle_obj, override_state.clone());
+    LoadEmitter(*particleSub, particle_obj, modifiers);
+    LoadInitializer(*particleSub, particle_obj, modifiers.Clone());
+    LoadOperator(*particleSub, particle_obj, modifiers.Clone());
+    LoadControlPoint(*particleSub, particle_obj, modifiers.Clone());
     particleSub->Finalize();
 
     // Register every {user:"<key>", value:...} binding on instanceoverride
     // so RenderSetUserProperty can mutate the shared state at runtime.
-    for (const auto& [field, key] : override.bindings) {
-        services.scene->RegisterParticleOverrideBinding(
-            String::make(as_str(key).unwrap()),
-            Arc<dyn<SceneParticleOverrideControl>>::make(ParticleOverrideControl {
-                .state = override_state.clone(),
-                .field = String::make(as_str(field).unwrap()),
-            }));
+    if (! is_child) {
+        for (const auto& [field, key] : override.bindings) {
+            services.scene->RegisterParticleOverrideBinding(
+                String::make(as_str(key).unwrap()),
+                Arc<dyn<SceneParticleOverrideControl>>::make(ParticleOverrideControl {
+                    .state = override_state.clone(),
+                    .field = String::make(as_str(field).unwrap()),
+                }));
+        }
     }
 
     mesh.AddMaterial(std::move(material));
@@ -569,12 +557,12 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
                                 output,
                                 wppartobj,
                                 {
-                                    .child                     = &child,
-                                    .node_parent               = spNode.as_ptr(),
-                                    .particle_parent           = particleSub.get(),
-                                    .playback                  = Some(playback_state.clone()),
-                                    .inherit_instance_override = ! is_child,
-                                    .world_scale               = node_world_scale,
+                                    .child             = &child,
+                                    .node_parent       = spNode.as_ptr(),
+                                    .particle_parent   = particleSub.get(),
+                                    .playback          = Some(playback_state.clone()),
+                                    .instance_override = Some(override_state.clone()),
+                                    .world_scale       = node_world_scale,
                                 });
     }
 
