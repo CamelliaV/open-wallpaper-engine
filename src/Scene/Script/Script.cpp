@@ -434,14 +434,21 @@ struct DeferredCb {
     bool     dead;
 };
 
+struct AudioBufferSlot {
+    uint32_t resolution;
+    JSValue  object { JS_UNDEFINED };
+};
+
 struct EngineHostState {
-    FrameInputs                           inputs;
-    MediaStatus                           media;
-    bool                                  media_initialized { false };
-    owe::Scene*                           scene { nullptr };
-    JSValue                               audio_buffer { JS_UNDEFINED };
-    uint32_t                              audio_buffer_resolution { 64 };
-    bool                                  audio_buffer_built { false };
+    FrameInputs                     inputs;
+    MediaStatus                     media;
+    bool                            media_initialized { false };
+    owe::Scene*                     scene { nullptr };
+    rstd::array<AudioBufferSlot, 3> audio_buffers {
+        AudioBufferSlot { .resolution = 16 },
+        AudioBufferSlot { .resolution = 32 },
+        AudioBufferSlot { .resolution = 64 },
+    };
     Option<Arc<AudioResponseDemand>>      audio_response_demand;
     Option<Box<dyn<UniformBindingLease>>> audio_response_lease;
     // Cached `globalThis.Vec3` ctor, populated lazily on first node access.
@@ -515,6 +522,20 @@ float AudioBufferValue(std::span<const float, 64> bins, uint32_t resolution, uin
         sum += std::max(0.0f, bins[begin + k]);
     }
     return sum / static_cast<float>(ratio);
+}
+
+AudioBufferSlot& AudioBufferForResolution(EngineHostState& host, uint32_t resolution) {
+    for (auto& slot : host.audio_buffers) {
+        if (slot.resolution == resolution) return slot;
+    }
+    rstd::unreachable();
+}
+
+bool HasAudioBuffers(const EngineHostState& host) {
+    for (const auto& slot : host.audio_buffers) {
+        if (! JS_IsUndefined(slot.object)) return true;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -667,75 +688,68 @@ void SetAudioArrayValue(JSContext* ctx, JSValueConst arr, uint32_t index, float 
     JS_DefinePropertyValueUint32(ctx, arr, index, JS_NewFloat64(ctx, value), JS_PROP_C_W_E);
 }
 
-// engine.registerAudioBuffers(resolution) → { left, right, average, buffer }
-//
-// Returns a stable per-context object rebuilt from FrameInputs every frame.
-// The requested 16/32/64 resolution controls both array length and the
-// frequency mapping scripts index into.
-JSValue EngineRegisterAudioBuffers(JSContext* ctx, JSValueConst /*this_val*/, int argc,
-                                   JSValueConst* argv) {
-    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    if (! host->audio_buffer_built) {
-        if (host->audio_response_demand.is_some() && host->audio_response_lease.is_none()) {
-            host->audio_response_lease = Some((*host->audio_response_demand)->Acquire());
-        }
-        int32_t requested = 64;
-        if (argc > 0) (void)JS_ToInt32(ctx, &requested, argv[0]);
-        host->audio_buffer_resolution = NormalizeAudioResolution(requested);
-
-        JSValue obj   = JS_NewObject(ctx);
-        JSValue left  = JS_NewArray(ctx);
-        JSValue right = JS_NewArray(ctx);
-        JSValue avg   = JS_NewArray(ctx);
-        JSValue buf   = JS_NewArray(ctx);
-        for (uint32_t i = 0; i < host->audio_buffer_resolution; ++i) {
-            const float l =
-                AudioBufferValue(host->inputs.audio_left, host->audio_buffer_resolution, i);
-            const float r =
-                AudioBufferValue(host->inputs.audio_right, host->audio_buffer_resolution, i);
-            const float a =
-                AudioBufferValue(host->inputs.audio_average, host->audio_buffer_resolution, i);
-            SetAudioArrayValue(ctx, left, i, l);
-            SetAudioArrayValue(ctx, right, i, r);
-            SetAudioArrayValue(ctx, avg, i, a);
-            SetAudioArrayValue(ctx, buf, i, a);
-        }
-        JS_DefinePropertyValueStr(ctx, obj, "left", left, JS_PROP_C_W_E);
-        JS_DefinePropertyValueStr(ctx, obj, "right", right, JS_PROP_C_W_E);
-        JS_DefinePropertyValueStr(ctx, obj, "average", avg, JS_PROP_C_W_E);
-        JS_DefinePropertyValueStr(ctx, obj, "buffer", buf, JS_PROP_C_W_E);
-        host->audio_buffer       = obj;
-        host->audio_buffer_built = true;
+JSValue MakeAudioBuffer(JSContext* ctx, const FrameInputs& inputs, uint32_t resolution) {
+    JSValue object  = JS_NewObject(ctx);
+    JSValue left    = JS_NewArray(ctx);
+    JSValue right   = JS_NewArray(ctx);
+    JSValue average = JS_NewArray(ctx);
+    JSValue buffer  = JS_NewArray(ctx);
+    for (uint32_t index = 0; index < resolution; ++index) {
+        const float l = AudioBufferValue(inputs.audio_left, resolution, index);
+        const float r = AudioBufferValue(inputs.audio_right, resolution, index);
+        const float a = AudioBufferValue(inputs.audio_average, resolution, index);
+        SetAudioArrayValue(ctx, left, index, l);
+        SetAudioArrayValue(ctx, right, index, r);
+        SetAudioArrayValue(ctx, average, index, a);
+        SetAudioArrayValue(ctx, buffer, index, a);
     }
-    return JS_DupValue(ctx, host->audio_buffer);
+    JS_DefinePropertyValueStr(ctx, object, "left", left, JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, object, "right", right, JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, object, "average", average, JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, object, "buffer", buffer, JS_PROP_C_W_E);
+    return object;
 }
 
-// Refresh audio array elements from the host's current FrameInputs.
-// Called by JsRuntime::SetFrameInputs every frame after host->inputs is
-// updated, so the JS side sees the latest values without needing to call
-// registerAudioBuffers again.
-void RefreshAudioBuffer(JSContext* ctx) {
-    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    if (! host->audio_buffer_built) return;
-    JSValue left  = JS_GetPropertyStr(ctx, host->audio_buffer, "left");
-    JSValue right = JS_GetPropertyStr(ctx, host->audio_buffer, "right");
-    JSValue avg   = JS_GetPropertyStr(ctx, host->audio_buffer, "average");
-    JSValue buf   = JS_GetPropertyStr(ctx, host->audio_buffer, "buffer");
-    for (uint32_t i = 0; i < host->audio_buffer_resolution; ++i) {
-        const float l = AudioBufferValue(host->inputs.audio_left, host->audio_buffer_resolution, i);
-        const float r =
-            AudioBufferValue(host->inputs.audio_right, host->audio_buffer_resolution, i);
-        const float a =
-            AudioBufferValue(host->inputs.audio_average, host->audio_buffer_resolution, i);
-        SetAudioArrayValue(ctx, left, i, l);
-        SetAudioArrayValue(ctx, right, i, r);
-        SetAudioArrayValue(ctx, avg, i, a);
-        SetAudioArrayValue(ctx, buf, i, a);
+void RefreshAudioBuffer(JSContext* ctx, const FrameInputs& inputs, const AudioBufferSlot& slot) {
+    JSValue left    = JS_GetPropertyStr(ctx, slot.object, "left");
+    JSValue right   = JS_GetPropertyStr(ctx, slot.object, "right");
+    JSValue average = JS_GetPropertyStr(ctx, slot.object, "average");
+    JSValue buffer  = JS_GetPropertyStr(ctx, slot.object, "buffer");
+    for (uint32_t index = 0; index < slot.resolution; ++index) {
+        const float l = AudioBufferValue(inputs.audio_left, slot.resolution, index);
+        const float r = AudioBufferValue(inputs.audio_right, slot.resolution, index);
+        const float a = AudioBufferValue(inputs.audio_average, slot.resolution, index);
+        SetAudioArrayValue(ctx, left, index, l);
+        SetAudioArrayValue(ctx, right, index, r);
+        SetAudioArrayValue(ctx, average, index, a);
+        SetAudioArrayValue(ctx, buffer, index, a);
     }
     JS_FreeValue(ctx, left);
     JS_FreeValue(ctx, right);
-    JS_FreeValue(ctx, avg);
-    JS_FreeValue(ctx, buf);
+    JS_FreeValue(ctx, average);
+    JS_FreeValue(ctx, buffer);
+}
+
+// engine.registerAudioBuffers(resolution) → { left, right, average, buffer }
+JSValue EngineRegisterAudioBuffers(JSContext* ctx, JSValueConst /*this_val*/, int argc,
+                                   JSValueConst* argv) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (host->audio_response_demand.is_some() && host->audio_response_lease.is_none()) {
+        host->audio_response_lease = Some((*host->audio_response_demand)->Acquire());
+    }
+    int32_t requested = 64;
+    if (argc > 0) (void)JS_ToInt32(ctx, &requested, argv[0]);
+    auto& slot = AudioBufferForResolution(*host, NormalizeAudioResolution(requested));
+    if (JS_IsUndefined(slot.object)) {
+        slot.object = MakeAudioBuffer(ctx, host->inputs, slot.resolution);
+    }
+    return JS_DupValue(ctx, slot.object);
+}
+
+void RefreshAudioBuffers(JSContext* ctx, EngineHostState& host) {
+    for (const auto& slot : host.audio_buffers) {
+        if (! JS_IsUndefined(slot.object)) RefreshAudioBuffer(ctx, host.inputs, slot);
+    }
 }
 
 // Cancel CFunction returned by setTimeout / setInterval. data[0] holds the
@@ -3182,9 +3196,11 @@ JsRuntime::~JsRuntime() {
         JS_FreeValue(m_impl->ctx, m_impl->host.default_layer);
     if (! JS_IsUndefined(m_impl->host.default_scene))
         JS_FreeValue(m_impl->ctx, m_impl->host.default_scene);
-    if (m_impl->host.audio_buffer_built) {
-        JS_FreeValue(m_impl->ctx, m_impl->host.audio_buffer);
-        m_impl->host.audio_buffer_built = false;
+    for (auto& slot : m_impl->host.audio_buffers) {
+        if (! JS_IsUndefined(slot.object)) {
+            JS_FreeValue(m_impl->ctx, slot.object);
+            slot.object = JS_UNDEFINED;
+        }
     }
     for (auto& d : m_impl->host.deferred) {
         if (! JS_IsUndefined(d.fn)) JS_FreeValue(m_impl->ctx, d.fn);
@@ -3197,13 +3213,13 @@ JsRuntime::~JsRuntime() {
 void JsRuntime::SetFrameInputs(const FrameInputs& fi) {
     m_impl->host.inputs = fi;
     UpdateInputObject(m_impl->ctx);
-    if (m_impl->host.audio_buffer_built) RefreshAudioBuffer(m_impl->ctx);
+    RefreshAudioBuffers(m_impl->ctx, m_impl->host);
 }
 
 void JsRuntime::SetAudioResponseDemand(Option<Arc<AudioResponseDemand>> demand) {
     m_impl->host.audio_response_lease  = None();
     m_impl->host.audio_response_demand = rstd::move(demand);
-    if (m_impl->host.audio_buffer_built && m_impl->host.audio_response_demand.is_some()) {
+    if (HasAudioBuffers(m_impl->host) && m_impl->host.audio_response_demand.is_some()) {
         m_impl->host.audio_response_lease = Some((*m_impl->host.audio_response_demand)->Acquire());
     }
 }

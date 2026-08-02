@@ -309,6 +309,67 @@ TEST(ScriptAudio, RegisterAudioBuffersAcceptsResolution64Constant) {
     EXPECT_DOUBLE_EQ(LastScalar(fs), 64.0);
 }
 
+TEST(ScriptAudio, RegisterAudioBuffersKeepsMixedResolutionsIndependent) {
+    FrameInputs fi {};
+    for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
+        fi.audio_average[i] = static_cast<float>(100 + i);
+    }
+
+    {
+        JsRuntime rt;
+        rt.SetFrameInputs(fi);
+        auto* low  = MakeProbe(rt,
+                               "test/audio_buffers_mixed_low_first",
+                               R"JS(
+            const audio = engine.registerAudioBuffers(16);
+            export function update() { return audio.average.length * 1000 + audio.average[15]; }
+        )JS");
+        auto* full = MakeProbe(rt,
+                               "test/audio_buffers_mixed_full_second",
+                               R"JS(
+            const audio = engine.registerAudioBuffers(64);
+            export function update() { return audio.average.length * 1000 + audio.average[63]; }
+        )JS");
+        ASSERT_NE(low, nullptr);
+        ASSERT_NE(full, nullptr);
+
+        rt.TickAll();
+        EXPECT_DOUBLE_EQ(LastScalar(low), 16161.5);
+        EXPECT_DOUBLE_EQ(LastScalar(full), 64163.0);
+
+        for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
+            fi.audio_average[i] = static_cast<float>(200 + i);
+        }
+        rt.SetFrameInputs(fi);
+        rt.TickAll();
+        EXPECT_DOUBLE_EQ(LastScalar(low), 16261.5);
+        EXPECT_DOUBLE_EQ(LastScalar(full), 64263.0);
+    }
+
+    {
+        JsRuntime rt;
+        rt.SetFrameInputs(fi);
+        auto* full = MakeProbe(rt,
+                               "test/audio_buffers_mixed_full_first",
+                               R"JS(
+            const audio = engine.registerAudioBuffers(64);
+            export function update() { return audio.average.length; }
+        )JS");
+        auto* low  = MakeProbe(rt,
+                               "test/audio_buffers_mixed_low_second",
+                               R"JS(
+            const audio = engine.registerAudioBuffers(16);
+            export function update() { return audio.average.length; }
+        )JS");
+        ASSERT_NE(full, nullptr);
+        ASSERT_NE(low, nullptr);
+
+        rt.TickAll();
+        EXPECT_DOUBLE_EQ(LastScalar(full), 64.0);
+        EXPECT_DOUBLE_EQ(LastScalar(low), 16.0);
+    }
+}
+
 TEST(ScriptAudio, RegisterAudioBuffersHoldsOneRuntimeDemandLease) {
     auto              demand = rstd::sync::Arc<owe::AudioResponseDemand>::make();
     std::vector<bool> changes;
