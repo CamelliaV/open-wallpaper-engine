@@ -348,7 +348,8 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                 wpscene::Material    puppet_mat = image_wpmat.clone();
                 puppet_mat.textures[0]          = "";
                 MdlParser::AddPuppetMatInfo(puppet_mat, **puppet);
-                if (color_blend_uses_layer_material) ApplyImageColorBlend(puppet_mat, wpimgobj);
+                if (color_blend_uses_layer_material)
+                    color_blend_attachment_override = ApplyImageColorBlend(puppet_mat, wpimgobj);
                 puppet_effect.materials.push_back(std::move(puppet_mat));
                 wpimgobj.effects.push_back(std::move(puppet_effect));
             }
