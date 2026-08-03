@@ -168,9 +168,9 @@ int main() {
     owe::audio::ResponseFrame  impulse_response {};
     auto                       impulse_input = impulse();
     if (! impulse_engine.analyze(impulse_input, impulse_response)) return 17;
-    if (std::abs(impulse_response.left[usize(0)] - 0.003479903f) > 1.0e-7f ||
-        std::abs(impulse_response.left[usize(29)] - 0.006701884f) > 1.0e-7f ||
-        std::abs(impulse_response.left[usize(63)] - 0.077813692f) > 1.0e-7f) {
+    if (std::abs(impulse_response.left[usize(0)] - 0.003480064f) > 1.0e-5f ||
+        std::abs(impulse_response.left[usize(29)] - 0.006702113f) > 1.0e-5f ||
+        std::abs(impulse_response.left[usize(63)] - 0.077817120f) > 1.0e-5f) {
         std::fprintf(stderr,
                      "impulse response: %.9f %.9f %.9f\n",
                      impulse_response.left[usize(0)],

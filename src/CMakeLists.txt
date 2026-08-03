@@ -1,5 +1,6 @@
 include_directories(.)
 
+add_subdirectory(Core)
 add_subdirectory(Audio)
 
 if(BUILD_WESCENE)
@@ -25,7 +26,6 @@ if(ENDIAN)
   add_compile_definitions(WP_BIG_ENDIAN)
 endif()
 
-add_subdirectory(Core)
 add_subdirectory(Vulkan)
 add_subdirectory(Scene)
 

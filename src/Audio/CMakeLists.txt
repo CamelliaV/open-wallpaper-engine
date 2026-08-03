@@ -1,7 +1,7 @@
 add_library(owe-audio-response STATIC AudioResponse.cpp)
 target_sources(owe-audio-response
     PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES AudioResponse.cppm)
-target_link_libraries(owe-audio-response PUBLIC rstd::rstd)
+target_link_libraries(owe-audio-response PUBLIC owe-fft rstd::rstd)
 target_compile_features(owe-audio-response PUBLIC cxx_std_20)
 set_property(TARGET owe-audio-response PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-audio-response PROPERTY CXX_SCAN_FOR_MODULES ON)

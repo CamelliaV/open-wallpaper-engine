@@ -8,6 +8,22 @@
 add_subdirectory(IO)
 add_subdirectory(Fs)
 
+add_library(owe-fft STATIC Fft.cpp)
+target_sources(owe-fft
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Fft.cppm)
+target_link_libraries(owe-fft PUBLIC rstd::rstd)
+target_compile_features(owe-fft PUBLIC cxx_std_20)
+set_property(TARGET owe-fft PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET owe-fft PROPERTY CXX_SCAN_FOR_MODULES ON)
+
+if(BUILD_TESTS)
+  add_executable(owe-fft-tests ../../tests/FftTests.cpp)
+  target_link_libraries(owe-fft-tests PRIVATE owe-fft)
+  target_compile_features(owe-fft-tests PRIVATE cxx_std_20)
+  set_property(TARGET owe-fft-tests PROPERTY CXX_SCAN_FOR_MODULES ON)
+  add_test(NAME owe-fft-tests COMMAND owe-fft-tests)
+endif()
+
 add_library(owe-core STATIC)
 target_sources(owe-core PRIVATE Json.cpp UserProperty.cpp)
 target_sources(owe-core

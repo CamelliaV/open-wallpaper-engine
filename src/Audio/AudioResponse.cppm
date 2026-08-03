@@ -1,5 +1,6 @@
 export module owe.audio_response;
 
+import owe.fft;
 import rstd;
 
 export namespace owe::audio
@@ -39,9 +40,10 @@ public:
     void end();
 
 private:
-    rstd::uint64_t generation_ = 0;
-    rstd::uint64_t sequence_   = 0;
-    bool           primed_     = false;
+    fft::DftWorkspace32 dft_workspace_;
+    rstd::uint64_t      generation_ = 0;
+    rstd::uint64_t      sequence_   = 0;
+    bool                primed_     = false;
 };
 
 } // namespace owe::audio
