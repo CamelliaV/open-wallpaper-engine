@@ -2105,7 +2105,7 @@ bool PublishShaderCacheArtifact(ref<rstd::path::Path> path, std::string_view cac
             auto file = rstd::move(opened).unwrap_unchecked();
             auto data = rstd::slice<u8>::from_raw_parts(reinterpret_cast<const byte*>(bytes.data()),
                                                         rstd::usize(bytes.size()));
-            auto written = rstd::io::write_all(file, data);
+            auto written = file.write_all(data);
             if (written.is_err()) {
                 rstd_warn("cannot write shader cache temporary file '{}': {}",
                           temporary_path.as_path(),
