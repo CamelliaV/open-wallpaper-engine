@@ -24,21 +24,21 @@ inline constexpr array<std::string_view, 13> WE_GLTEX_MIPMAPINFO_NAMES { BASE_GL
     MipMapInfo) };
 inline constexpr array<std::string_view, 13> WE_GLTEX_TEXEL_NAMES { BASE_GLTEX_NAMES(Texel) };
 
-inline constexpr ref<str> WE_FULL_COMPO_BUFFER_PREFIX     = "_rt_FullCompoBuffer"_str;
-inline constexpr ref<str> WE_HALF_COMPO_BUFFER_PREFIX     = "_rt_HalfCompoBuffer"_str;
-inline constexpr ref<str> WE_QUARTER_COMPO_BUFFER_PREFIX  = "_rt_QuarterCompoBuffer"_str;
-inline constexpr ref<str> WE_EIGHT_COMPO_BUFFER_PREFIX    = "_rt_EightBuffer"_str;
-inline constexpr ref<str> WE_FULL_FRAME_BUFFER            = "_rt_FullFrameBuffer"_str;
-inline constexpr ref<str> WE_SHADOW_ATLAS_PREFIX          = "_rt_shadowAtlas"_str;
-inline constexpr ref<str> WE_VOLUMETRICS_PREFIX           = "_rt_volumetrics"_str;
-inline constexpr ref<str> WE_QUARTER_FORCE_RG_PREFIX      = "_rt_QuarterForceRG"_str;
-inline constexpr ref<str> WE_BLOOM_PREFIX                 = "_rt_Bloom"_str;
-inline constexpr ref<str> WE_QUARTER_FRAME_BUFFER_PREFIX  = "_rt_QuarterFrameBuffer"_str;
-inline constexpr ref<str> WE_EIGHTH_FRAME_BUFFER_PREFIX   = "_rt_EighthFrameBuffer"_str;
-inline constexpr ref<str> OWE_EFFECT_PPONG_PREFIX         = "_rt_effect_pingpong_"_str;
-inline constexpr ref<str> OWE_EFFECT_PPONG_PREFIX_A       = "_rt_effect_pingpong_a_"_str;
-inline constexpr ref<str> OWE_EFFECT_PPONG_PREFIX_B       = "_rt_effect_pingpong_b_"_str;
-inline constexpr ref<str> OWE_BLOOM_MIP_PREFIX            = "_rt_bloom_mip"_str;
+inline constexpr ref<str> WE_FULL_COMPO_BUFFER_PREFIX    = "_rt_FullCompoBuffer"_str;
+inline constexpr ref<str> WE_HALF_COMPO_BUFFER_PREFIX    = "_rt_HalfCompoBuffer"_str;
+inline constexpr ref<str> WE_QUARTER_COMPO_BUFFER_PREFIX = "_rt_QuarterCompoBuffer"_str;
+inline constexpr ref<str> WE_EIGHT_COMPO_BUFFER_PREFIX   = "_rt_EightBuffer"_str;
+inline constexpr ref<str> WE_FULL_FRAME_BUFFER           = "_rt_FullFrameBuffer"_str;
+inline constexpr ref<str> WE_SHADOW_ATLAS_PREFIX         = "_rt_shadowAtlas"_str;
+inline constexpr ref<str> WE_VOLUMETRICS_PREFIX          = "_rt_volumetrics"_str;
+inline constexpr ref<str> WE_QUARTER_FORCE_RG_PREFIX     = "_rt_QuarterForceRG"_str;
+inline constexpr ref<str> WE_BLOOM_PREFIX                = "_rt_Bloom"_str;
+inline constexpr ref<str> WE_QUARTER_FRAME_BUFFER_PREFIX = "_rt_QuarterFrameBuffer"_str;
+inline constexpr ref<str> WE_EIGHTH_FRAME_BUFFER_PREFIX  = "_rt_EighthFrameBuffer"_str;
+inline constexpr ref<str> OWE_EFFECT_PPONG_PREFIX        = "_rt_effect_pingpong_"_str;
+inline constexpr ref<str> OWE_EFFECT_PPONG_PREFIX_A      = "_rt_effect_pingpong_a_"_str;
+inline constexpr ref<str> OWE_EFFECT_PPONG_PREFIX_B      = "_rt_effect_pingpong_b_"_str;
+inline constexpr ref<str> OWE_BLOOM_MIP_PREFIX           = "_rt_bloom_mip"_str;
 
 inline constexpr ref<str> WE_CB_BLENDMODE            = "BLENDMODE"_str;
 inline constexpr ref<str> WE_CB_BONECOUNT            = "BONECOUNT"_str;
