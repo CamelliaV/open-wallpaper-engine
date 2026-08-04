@@ -54,10 +54,9 @@ int BridgeSession::abortAcquiredSlot(const ww_pool_slot_identity_t& identity) {
     return ww_bridge_pool_abort_acquired_slot(m_pool, &identity);
 }
 
-int BridgeSession::sendBindFailed(uint32_t fourcc, uint64_t modifier, uint32_t reason,
-                                  const char* message) {
+int BridgeSession::sendBindFailed(const waywallen_bind_failure_t& failure) {
     std::scoped_lock lock(m_send_mutex);
-    return ww_bridge_send_bind_failed(m_send_socket, fourcc, modifier, reason, message);
+    return ww_bridge_send_bind_failed(m_send_socket, &failure);
 }
 
 int BridgeSession::sendClearColor(float r, float g, float b, float a) {
@@ -66,14 +65,18 @@ int BridgeSession::sendClearColor(float r, float g, float b, float a) {
 }
 
 int BridgeSession::setEventSubscriptions(uint64_t revision, const std::vector<std::string>& kinds) {
-    std::vector<const char*> raw;
+    std::vector<char*> raw;
     raw.reserve(kinds.size());
-    for (const auto& kind : kinds) raw.push_back(kind.c_str());
+    for (const auto& kind : kinds) raw.push_back(const_cast<char*>(kind.c_str()));
+    const waywallen_event_subscription_t subscription {
+        .revision = revision,
+        .kinds = {
+            .count = static_cast<uint32_t>(raw.size()),
+            .data  = raw.empty() ? nullptr : raw.data(),
+        },
+    };
     std::scoped_lock lock(m_send_mutex);
-    return ww_bridge_set_event_subscriptions(m_send_socket,
-                                             revision,
-                                             raw.empty() ? nullptr : raw.data(),
-                                             static_cast<uint32_t>(raw.size()));
+    return ww_bridge_set_event_subscriptions(m_send_socket, &subscription);
 }
 
 bool BridgeSubscriptionController::replace(std::vector<std::string> kinds) {
@@ -114,10 +117,10 @@ bool BridgeSubscriptionController::sendLocked() {
     return true;
 }
 
-void BridgeSubscriptionController::applied(const ww_bridge_event_subscriptions_applied_t& event) {
+void BridgeSubscriptionController::applied(const waywallen_event_subscription_result_t& event) {
     std::scoped_lock lock(m_mutex);
-    if (event.status != WW_BRIDGE_SUBSCRIPTION_APPLIED || event.revision < m_applied_revision ||
-        event.revision > m_sent_revision)
+    if (event.status != WAYWALLEN_EVENT_SUBSCRIPTION_STATUS_APPLIED ||
+        event.revision < m_applied_revision || event.revision > m_sent_revision)
         return;
     m_applied_revision = event.revision;
     m_applied.clear();

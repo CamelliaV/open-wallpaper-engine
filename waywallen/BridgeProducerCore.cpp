@@ -126,15 +126,17 @@ void BridgeProducerCore::drainPendingDirective() {
 int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
     if (m_have_pending) return -EBUSY;
 
-    VkFormat picked = fourcc_to_vk_format(directive.fourcc);
+    VkFormat picked = fourcc_to_vk_format(directive.format.fourcc);
     if (picked == VK_FORMAT_UNDEFINED) {
         std::fprintf(stderr,
                      "BridgeProducerCore: fourcc 0x%08x has no VkFormat mapping\n",
-                     directive.fourcc);
-        m_session->sendBindFailed(directive.fourcc,
-                                  directive.modifier,
-                                  /*reason*/ 1,
-                                  "fourcc unsupported by producer");
+                     directive.format.fourcc);
+        waywallen_bind_failure_t failure {
+            .format  = directive.format,
+            .kind    = WAYWALLEN_BUFFER_ALLOCATION_FAILURE_KIND_UNSUPPORTED,
+            .message = const_cast<char*>("fourcc unsupported by producer"),
+        };
+        m_session->sendBindFailed(failure);
         return -EINVAL;
     }
     if (directive.count == 0 || directive.count > kMaxSlots) {
@@ -179,7 +181,7 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
     // Publish atomically only after apply_directive succeeded.
     m_width         = width;
     m_height        = height;
-    m_fourcc        = directive.fourcc;
+    m_fourcc        = directive.format.fourcc;
     m_export_format = picked;
     m_slot_count    = directive.count;
     return 0;

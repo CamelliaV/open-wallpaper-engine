@@ -554,8 +554,6 @@ void set_property_enable_audio(HostState& s, const char* value) {
     apply_audio_enabled(s, was_enabled);
 }
 
-// Apply a single fps change through the same path WW_EVT_IN_SET_FPS would
-// have used. Centralised so ApplySettings can route through it.
 void set_fps(HostState& s, uint32_t fps) {
     if (! s.wp || fps == 0) return;
     s.wp->setFps(fps);
@@ -572,15 +570,10 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         rstd_warn("waywallen-wescene-renderer: unexpected late Init; ignoring");
         break;
     case WW_EVT_IN_SETTING_CHANGED: {
-        // v5 hot-reload. Peel the typed view, dispatch known keys
-        // through the SceneWallpaper looper; route fps through the same
-        // path WW_EVT_IN_SET_FPS used to. Unknown keys are scene user
-        // properties.
-        ww_bridge_setting_changed_t as {};
-        if (ww_bridge_setting_changed_from_control(&msg, &as) != 0) break;
-        for (uint32_t i = 0; i < as.settings.count; ++i) {
-            const char* key = as.settings.data[i].key;
-            const char* val = as.settings.data[i].value;
+        const auto& settings = msg.u.setting_changed.settings;
+        for (uint32_t i = 0; i < settings.count; ++i) {
+            const char* key = settings.data[i].key;
+            const char* val = settings.data[i].value;
             if (! key || ! val) continue;
             if (std::strcmp(key, "volume") == 0) {
                 // Wire format is u32 0..100; engine takes 0..1 ratio.
@@ -601,17 +594,15 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                 if (s.wp) s.wp->setUserPropertyRaw(key, val);
             }
         }
-        ww_bridge_setting_changed_free(&as);
         break;
     }
-    case WW_EVT_IN_PLAY: set_runtime_pause(s, false, msg.u.play.fade_ms); break;
-    case WW_EVT_IN_PAUSE: set_runtime_pause(s, true, msg.u.pause.fade_ms); break;
-    case WW_EVT_IN_MUTE: set_runtime_mute(s, true, msg.u.mute.fade_ms); break;
-    case WW_EVT_IN_UNMUTE: set_runtime_mute(s, false, msg.u.unmute.fade_ms); break;
+    case WW_EVT_IN_PLAY: set_runtime_pause(s, false, msg.u.play.transition.fade_ms); break;
+    case WW_EVT_IN_PAUSE: set_runtime_pause(s, true, msg.u.pause.transition.fade_ms); break;
+    case WW_EVT_IN_MUTE: set_runtime_mute(s, true, msg.u.mute.transition.fade_ms); break;
+    case WW_EVT_IN_UNMUTE: set_runtime_mute(s, false, msg.u.unmute.transition.fade_ms); break;
     case WW_EVT_IN_POINTER_MOTION: {
-        ww_bridge_pointer_motion_t pm {};
-        if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0 && s.wp && s.width > u32() &&
-            s.height > u32()) {
+        const auto& pm = msg.u.pointer_motion.event;
+        if (s.wp && s.width > u32() && s.height > u32()) {
             s.wp->mouseInput(static_cast<double>(pm.x) / s.width.to_primitive(),
                              static_cast<double>(pm.y) / s.height.to_primitive());
             // The bridge has no explicit enter/leave; treat every motion
@@ -621,8 +612,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     }
     case WW_EVT_IN_POINTER_BUTTON: {
-        ww_bridge_pointer_button_t pb {};
-        if (ww_bridge_pointer_button_from_control(&msg, &pb) == 0 && s.wp) {
+        const auto& pb = msg.u.pointer_button.event;
+        if (s.wp) {
             // Linux BTN_* → SceneWallpaper button index (0=L, 1=R, 2=M),
             // matching the GLFW numbering scripts expect.
             int idx = -1;
@@ -638,8 +629,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
     }
     case WW_EVT_IN_POINTER_AXIS: break;
     case WW_EVT_IN_MPRIS: {
-        ww_bridge_mpris_t mpris {};
-        if (ww_bridge_mpris_from_control(&msg, &mpris) == 0 && s.wp) {
+        const auto& mpris = msg.u.mpris.snapshot;
+        if (s.wp) {
             s.wp->setMediaStatus(owe::MediaStatus {
                 .state            = mpris.state,
                 .title            = bridge_string(mpris.title),
@@ -650,16 +641,11 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                 .previous_art_url = bridge_string(mpris.previous_art_url),
             });
         }
-        ww_bridge_mpris_free(&mpris);
         break;
     }
     case WW_EVT_IN_EVENT_SUBSCRIPTIONS_APPLIED: {
-        ww_bridge_event_subscriptions_applied_t applied {};
-        if (ww_bridge_event_subscriptions_applied_from_control(&msg, &applied) == 0) {
-            auto subscriptions = *s.subscriptions.lock().unwrap();
-            if (subscriptions) subscriptions->applied(applied);
-        }
-        ww_bridge_event_subscriptions_applied_free(&applied);
+        auto subscriptions = *s.subscriptions.lock().unwrap();
+        if (subscriptions) subscriptions->applied(msg.u.event_subscriptions_applied.result);
         break;
     }
     case WW_EVT_IN_AUDIO_WINDOW: {
@@ -668,7 +654,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         if (! ww_wescene::DecodeAudioWindow(msg, audio, ended)) break;
         if (! s.audio_response_demand.load(rstd::sync::atomic::Ordering::Acquire)) break;
         auto        subscriptions = *s.subscriptions.lock().unwrap();
-        const auto& wire          = msg.u.audio_window;
+        const auto& wire          = msg.u.audio_window.window;
         const bool  fresh         = u64(wire.generation) > s.last_audio_generation ||
                                     (u64(wire.generation) == s.last_audio_generation &&
                                      u64(wire.sequence) > s.last_audio_sequence);
@@ -683,20 +669,9 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         }
         break;
     }
-    case WW_EVT_IN_SET_FPS: set_fps(s, msg.u.set_fps.fps); break;
     case WW_EVT_IN_SHUTDOWN: signal_shutdown(s); break;
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
-        const auto&         nb = msg.u.negotiate_buffers;
-        ww_pool_directive_t d {};
-        d.category    = nb.path;
-        d.mem_source  = nb.mem_source;
-        d.fourcc      = nb.fourcc;
-        d.modifier    = nb.modifier;
-        d.plane_count = nb.plane_count;
-        d.sync_mode   = nb.sync_mode;
-        d.color       = nb.color;
-        d.mem_hint    = nb.mem_hint;
-        d.count       = nb.count;
+        const auto& d = msg.u.negotiate_buffers.directive;
         // Hand off to the swapchain directly. The render thread drains
         // the pending directive at the head of its next acquireRenderTarget,
         // so this thread does no Vk / bridge slot work.
@@ -768,14 +743,20 @@ int run(int argc, char** argv) {
     if (host.sock < 0) die("ww_bridge_connect: " + std::string(::strerror(-host.sock)));
 
     {
-        ww_bridge_init_t init {};
+        waywallen_renderer_init_t init {};
         if (int rc = ww_bridge_recv_init(host.sock, &init); rc != 0) {
             const char* reason = (rc == -EPROTO)
                                      ? "init: protocol error or unsupported spawn_version"
                                      : "init: recv failed";
-            ww_bridge_send_init_nack(
-                host.sock, init.spawn_version, WW_BRIDGE_SUPPORTED_SPAWN_VERSION, reason);
-            ww_bridge_init_free(&init);
+            waywallen_init_rejection_t rejection {
+                .received_protocol_version  = init.protocol_version,
+                .supported_protocol_version = WW_BRIDGE_SUPPORTED_PROTOCOL_VERSION,
+                .received_spawn_version     = init.spawn_version,
+                .supported_spawn_version    = WW_BRIDGE_SUPPORTED_SPAWN_VERSION,
+                .reason                     = const_cast<char*>(reason),
+            };
+            ww_bridge_send_init_nack(host.sock, &rejection);
+            waywallen_renderer_init_free(&init);
             die(std::string(reason) + " rc=" + std::to_string(rc));
         }
 
@@ -902,7 +883,7 @@ int run(int argc, char** argv) {
             }
         }
 
-        ww_bridge_init_free(&init);
+        waywallen_renderer_init_free(&init);
     }
 
     owe::SceneWallpaper wp;

@@ -388,15 +388,13 @@ void apply_control(HostState& s, ReaderState& reader, ww_bridge_control_t& msg) 
         rstd_warn("waywallen-weweb-renderer: unexpected late Init; ignoring");
         break;
     case WW_EVT_IN_SETTING_CHANGED: {
-        ww_bridge_setting_changed_t as {};
-        if (ww_bridge_setting_changed_from_control(&msg, &as) != 0) break;
-        for (uint32_t i = 0; i < as.settings.count; ++i) {
-            const char* key = as.settings.data[i].key;
-            const char* val = as.settings.data[i].value;
+        const auto& settings = msg.u.setting_changed.settings;
+        for (uint32_t i = 0; i < settings.count; ++i) {
+            const char* key = settings.data[i].key;
+            const char* val = settings.data[i].value;
             if (! key || ! val) continue;
             enqueue_setting(s, key, val);
         }
-        ww_bridge_setting_changed_free(&as);
         break;
     }
     case WW_EVT_IN_PLAY:
@@ -413,48 +411,37 @@ void apply_control(HostState& s, ReaderState& reader, ww_bridge_control_t& msg) 
         // Daemon transforms display-local coords into renderer-tex
         // pixel space before sending; CEF view rect is opened at the
         // same pixel size, so the values map 1:1.
-        ww_bridge_pointer_motion_t pm {};
-        if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0) {
-            enqueue_host_message(s, HostMsg::PointerMove(i32(pm.x), i32(pm.y), reader.left_down));
-        }
+        const auto& pm = msg.u.pointer_motion.event;
+        enqueue_host_message(s, HostMsg::PointerMove(i32(pm.x), i32(pm.y), reader.left_down));
         break;
     }
     case WW_EVT_IN_POINTER_BUTTON: {
-        ww_bridge_pointer_button_t pb {};
-        if (ww_bridge_pointer_button_from_control(&msg, &pb) == 0) {
-            auto cef_btn = cef_button_from_linux(u32(pb.button));
-            if (cef_btn >= i32()) {
-                bool down = pb.state != 0;
-                if (cef_btn == i32()) reader.left_down = down;
-                enqueue_host_message(s,
-                                     HostMsg::PointerButton(i32(pb.x), i32(pb.y), cef_btn, down));
-            }
+        const auto& pb      = msg.u.pointer_button.event;
+        auto        cef_btn = cef_button_from_linux(u32(pb.button));
+        if (cef_btn >= i32()) {
+            bool down = pb.state != 0;
+            if (cef_btn == i32()) reader.left_down = down;
+            enqueue_host_message(s, HostMsg::PointerButton(i32(pb.x), i32(pb.y), cef_btn, down));
         }
         break;
     }
     case WW_EVT_IN_POINTER_AXIS: {
-        ww_bridge_pointer_axis_t pa {};
-        if (ww_bridge_pointer_axis_from_control(&msg, &pa) == 0) {
-            // delta_* arrives in "logical notches" (1.0 per wheel
-            // click). CEF wants pixel-ish deltas; 40 px/notch matches
-            // the GLFW WebViewer convention.
-            constexpr float kPxPerNotch = 40.0f;
-            enqueue_host_message(
-                s,
-                HostMsg::PointerAxis(i32(pa.x),
-                                     i32(pa.y),
-                                     i32(static_cast<int32_t>(pa.delta_x * kPxPerNotch)),
-                                     i32(static_cast<int32_t>(pa.delta_y * kPxPerNotch))));
-        }
+        const auto& pa = msg.u.pointer_axis.event;
+        // delta_* arrives in "logical notches" (1.0 per wheel
+        // click). CEF wants pixel-ish deltas; 40 px/notch matches
+        // the GLFW WebViewer convention.
+        constexpr float kPxPerNotch = 40.0f;
+        enqueue_host_message(
+            s,
+            HostMsg::PointerAxis(i32(pa.x),
+                                 i32(pa.y),
+                                 i32(static_cast<int32_t>(pa.delta_x * kPxPerNotch)),
+                                 i32(static_cast<int32_t>(pa.delta_y * kPxPerNotch))));
         break;
     }
     case WW_EVT_IN_EVENT_SUBSCRIPTIONS_APPLIED: {
-        ww_bridge_event_subscriptions_applied_t applied {};
-        if (ww_bridge_event_subscriptions_applied_from_control(&msg, &applied) == 0) {
-            auto subscriptions = *s.subscriptions.lock().unwrap();
-            if (subscriptions) subscriptions->applied(applied);
-        }
-        ww_bridge_event_subscriptions_applied_free(&applied);
+        auto subscriptions = *s.subscriptions.lock().unwrap();
+        if (subscriptions) subscriptions->applied(msg.u.event_subscriptions_applied.result);
         break;
     }
     case WW_EVT_IN_AUDIO_WINDOW: {
@@ -463,7 +450,7 @@ void apply_control(HostState& s, ReaderState& reader, ww_bridge_control_t& msg) 
         if (! ww_wescene::DecodeAudioWindow(msg, audio, ended)) break;
         if (! s.audio_response_demand.load(rstd::sync::atomic::Ordering::Acquire)) break;
         auto        subscriptions = *s.subscriptions.lock().unwrap();
-        const auto& wire          = msg.u.audio_window;
+        const auto& wire          = msg.u.audio_window.window;
         if (! subscriptions || ! subscriptions->acceptsAudio(wire.subscription_revision)) break;
         auto generation = u64(wire.generation);
         auto sequence   = u64(wire.sequence);
@@ -482,20 +469,9 @@ void apply_control(HostState& s, ReaderState& reader, ww_bridge_control_t& msg) 
         reader.last_audio_sequence   = sequence;
         break;
     }
-    case WW_EVT_IN_SET_FPS: enqueue_setting(s, "fps", std::to_string(msg.u.set_fps.fps)); break;
     case WW_EVT_IN_SHUTDOWN: s.shutdown.store(true, rstd::sync::atomic::Ordering::Release); break;
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
-        const auto&         nb = msg.u.negotiate_buffers;
-        ww_pool_directive_t d {};
-        d.category    = nb.path;
-        d.mem_source  = nb.mem_source;
-        d.fourcc      = nb.fourcc;
-        d.modifier    = nb.modifier;
-        d.plane_count = nb.plane_count;
-        d.sync_mode   = nb.sync_mode;
-        d.color       = nb.color;
-        d.mem_hint    = nb.mem_hint;
-        d.count       = nb.count;
+        const auto& d = msg.u.negotiate_buffers.directive;
         if (s.core) s.core->queueDirective(d);
         s.submitted_since_negotiate.store(false, rstd::sync::atomic::Ordering::Release);
         enqueue_host_message(s, HostMsg::SyncPauseVisibility());
@@ -572,14 +548,20 @@ int run(int argc, char** argv) {
     if (state.sock < 0) die("ww_bridge_connect: " + std::string(::strerror(-state.sock)));
 
     {
-        ww_bridge_init_t init {};
+        waywallen_renderer_init_t init {};
         if (int rc = ww_bridge_recv_init(state.sock, &init); rc != 0) {
             const char* reason = (rc == -EPROTO)
                                      ? "init: protocol error or unsupported spawn_version"
                                      : "init: recv failed";
-            ww_bridge_send_init_nack(
-                state.sock, init.spawn_version, WW_BRIDGE_SUPPORTED_SPAWN_VERSION, reason);
-            ww_bridge_init_free(&init);
+            waywallen_init_rejection_t rejection {
+                .received_protocol_version  = init.protocol_version,
+                .supported_protocol_version = WW_BRIDGE_SUPPORTED_PROTOCOL_VERSION,
+                .received_spawn_version     = init.spawn_version,
+                .supported_spawn_version    = WW_BRIDGE_SUPPORTED_SPAWN_VERSION,
+                .reason                     = const_cast<char*>(reason),
+            };
+            ww_bridge_send_init_nack(state.sock, &rejection);
+            waywallen_renderer_init_free(&init);
             die(std::string(reason) + " rc=" + std::to_string(rc));
         }
 
@@ -642,7 +624,7 @@ int run(int argc, char** argv) {
             }
         }
 
-        ww_bridge_init_free(&init);
+        waywallen_renderer_init_free(&init);
     }
 
     auto manifest_opt = weweb::LoadWebManifest(opts.workshop_dir);

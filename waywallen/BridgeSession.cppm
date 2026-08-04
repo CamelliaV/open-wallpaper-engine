@@ -24,7 +24,7 @@ public:
     int submitAcquiredSlot(const ww_pool_slot_identity_t& identity, int producer_sync_fd,
                            ww_pool_slot_submit_result_t& out_result);
     int abortAcquiredSlot(const ww_pool_slot_identity_t& identity);
-    int sendBindFailed(uint32_t fourcc, uint64_t modifier, uint32_t reason, const char* message);
+    int sendBindFailed(const waywallen_bind_failure_t& failure);
     int sendClearColor(float r, float g, float b, float a);
     int setEventSubscriptions(uint64_t revision, const std::vector<std::string>& kinds);
 
@@ -43,7 +43,7 @@ public:
 
     bool replace(std::vector<std::string> kinds);
     bool set(std::string_view kind, bool enabled);
-    void applied(const ww_bridge_event_subscriptions_applied_t& event);
+    void applied(const waywallen_event_subscription_result_t& event);
     bool acceptsAudio(uint64_t revision) const;
 
 private:
