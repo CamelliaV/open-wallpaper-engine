@@ -319,6 +319,41 @@ TEST(SceneResourceIndex, IncludesAllNodeLayerEffectDrawItems) {
     }
 }
 
+TEST(SceneNodeLayer, FinalResolveTargetsFinalOutputBeforePublish) {
+    owe::Scene scene;
+    auto       layer = std::make_shared<owe::SceneNodeLayer>(
+        scene.RootMut().as_raw_ptr(), 1920.0f, 1080.0f, "_rt_composite");
+    layer->SetFinalTarget("_rt_final");
+
+    auto final_node = Arc<owe::SceneNode>::make();
+    final_node->AddMesh(MakeSingleSubmesh("final"));
+    auto final_effect = std::make_shared<owe::SceneImageEffect>();
+    final_effect->nodes.push_back(owe::SceneImageEffectNode {
+        .output    = owe::SceneEffectTarget::LayerNext(),
+        .sceneNode = final_node.clone(),
+    });
+    layer->SetFinalResolveEffect(final_effect);
+
+    auto publish_node = Arc<owe::SceneNode>::make();
+    publish_node->AddMesh(MakeSingleSubmesh("publish"));
+    auto publish_effect = std::make_shared<owe::SceneImageEffect>();
+    publish_effect->nodes.push_back(owe::SceneImageEffectNode {
+        .output    = owe::SceneEffectTarget::Named("_rt_link"),
+        .sceneNode = publish_node.clone(),
+    });
+    layer->SetPublishedEffect(publish_effect);
+
+    layer->ResolveEffect(*scene.DefaultEffectMesh(), "effect");
+
+    auto final_target = layer->ResolvedTarget(final_effect->nodes.back());
+    EXPECT_EQ(final_target.kind, owe::SceneEffectTargetKind::Named);
+    EXPECT_EQ(final_target.key, "_rt_final");
+
+    auto publish_target = layer->ResolvedTarget(publish_effect->nodes.back());
+    EXPECT_EQ(publish_target.kind, owe::SceneEffectTargetKind::Named);
+    EXPECT_EQ(publish_target.key, "_rt_link");
+}
+
 TEST(SceneResourceIndex, PreservesTypedLayerPreviousSourceAcrossResolution) {
     owe::Scene         scene;
     owe::SceneMaterial material;

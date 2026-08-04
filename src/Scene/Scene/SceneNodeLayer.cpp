@@ -96,7 +96,8 @@ void SceneNodeLayer::ResolveEffect(const SceneMesh& default_mesh, std::string_vi
     for (auto& eff : m_effects) {
         if (eff && eff->runtime_visible) resolve_effect(*eff);
     }
-    if (m_final_resolve_effect) resolve_effect(*m_final_resolve_effect);
+    SceneImageEffectNode* final_resolve_output { nullptr };
+    if (m_final_resolve_effect) final_resolve_output = resolve_effect(*m_final_resolve_effect);
     SceneImageEffectNode* published_output { nullptr };
     if (m_published_effect) published_output = resolve_effect(*m_published_effect);
     SceneImageEffectNode* visible_output { nullptr };
@@ -105,7 +106,9 @@ void SceneNodeLayer::ResolveEffect(const SceneMesh& default_mesh, std::string_vi
 
     auto* final_output = visible_output != nullptr
                              ? visible_output
-                             : (published_output == nullptr ? last_output : nullptr);
+                             : (final_resolve_output != nullptr
+                                    ? final_resolve_output
+                                    : (published_output == nullptr ? last_output : nullptr));
     if (final_output != nullptr) {
         m_direct_final_output = final_output;
         auto& mesh            = *(final_output->sceneNode->Mesh());
