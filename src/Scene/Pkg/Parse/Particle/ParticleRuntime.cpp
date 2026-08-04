@@ -789,6 +789,10 @@ void ParticleSubSystem::ExtractCurrentMesh() {
 }
 
 void ParticleSubSystem::Tick(f64 frame_time, bool update_mesh) {
+    // Conditional particle layers stay parsed so user properties can reactivate them.
+    // Their simulation must remain paused while the render graph elides the owner node.
+    if (m_owner_node != nullptr && ! m_owner_node->Visible()) return;
+
     const bool reset = SyncPlayback();
     if (m_playback_state.is_some() &&
         ! (*m_playback_state)->playing.load(rstd::sync::atomic::Ordering::Acquire)) {
