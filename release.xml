@@ -1,3 +1,34 @@
+<release version="0.2.1" date="2026-08-04">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Steam Workshop subscription state from local Steam records. #84 by @wehrwolfmann</li>
+      <li>Steam-recorded Workshop item sizes. #86 by @wehrwolfmann</li>
+      <li>Workshop author names in source metadata. #87 by @wehrwolfmann</li>
+      <li>Directional shadow atlas rendering.</li>
+      <li>Script-created layers from configurations and imported Workshop assets.</li>
+    </ul>
+    <p>Fixes:</p>
+    <ul>
+      <li>Scene zoom, tabbed text, hidden text templates, scripted origins and direct text rendering.</li>
+      <li>Video textures, linked layer outputs and render-pass resources across render-graph rebuilds.</li>
+      <li>Layer composition, self-composites, linear-dodge effects, puppet color blending and final resolves.</li>
+      <li>Perspective model cameras, scene lighting, material instances and wrapped animation curves.</li>
+      <li>Script sound volume, WEVector vectorAngle2 and dynamic Workshop layer fanout.</li>
+      <li>Child particle overrides, particle speed scaling and hidden particle updates.</li>
+      <li>Mixed audio-buffer resolutions and short shader-vector defaults.</li>
+      <li>Unavailable image effects and transient visibility updates.</li>
+    </ul>
+    <p>Improved:</p>
+    <ul>
+      <li>Package parser ownership and source organization.</li>
+      <li>Render-target allocation planning and layer-composite resource reuse.</li>
+      <li>Global uniform and pipeline-layout ABI handling.</li>
+      <li>Audio response analysis with FFT history.</li>
+      <li>Shader cache publication through rstd filesystem operations.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.2.0" date="2026-07-25">
   <description>
     <p>Added:</p>
