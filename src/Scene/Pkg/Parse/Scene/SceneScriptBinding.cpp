@@ -52,76 +52,6 @@ struct CopyableArcHold {
     CopyableArcHold& operator=(const CopyableArcHold&)     = delete;
 };
 
-// Detect the WE audio-bar fanout pattern: scripts that bind a layer's
-// `visible` field, call engine.registerAudioBuffers(N), and create sibling
-// layers in init() via thisScene.createLayer(...). owe doesn't have a runtime
-// model parser, so we pre-spawn N-1 hidden SceneNode clones as the maximum
-// audio-driven capacity and hand them to FieldScript::clone_queue. init()
-// activates only the clones it consumes; the rest remain hidden.
-//
-// Returns N (capacity) when the source matches the pattern, otherwise 0.
-unsigned DetectAudioFanoutCapacity(std::string_view src) {
-    auto pos = src.find("registerAudioBuffers");
-    if (pos == std::string_view::npos) return 0;
-    if (src.find("createLayer") == std::string_view::npos) return 0;
-    pos += std::string_view("registerAudioBuffers").size();
-    while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t')) ++pos;
-    if (pos >= src.size() || src[pos] != '(') return 0;
-    ++pos;
-    while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t')) ++pos;
-
-    auto is_digit = [](char c) {
-        return c >= '0' && c <= '9';
-    };
-    auto is_ident = [](char c) {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-               c == '_' || c == '$';
-    };
-    auto read_num = [&](std::size_t p) -> unsigned {
-        unsigned n = 0;
-        while (p < src.size() && is_digit(src[p])) n = n * 10 + unsigned(src[p++] - '0');
-        return n;
-    };
-
-    // Numeric literal: registerAudioBuffers(64).
-    if (pos < src.size() && is_digit(src[pos])) return read_num(pos);
-
-    // Public WE constants: registerAudioBuffers(engine.AUDIO_RESOLUTION_64).
-    constexpr std::string_view resolution_prefix = "engine.AUDIO_RESOLUTION_";
-    if (src.substr(pos).starts_with(resolution_prefix)) {
-        const std::size_t value_pos = pos + resolution_prefix.size();
-        if (value_pos >= src.size() || ! is_digit(src[value_pos])) return 0;
-        const unsigned value = read_num(value_pos);
-        std::size_t    end   = value_pos;
-        while (end < src.size() && is_digit(src[end])) ++end;
-        if (end < src.size() && is_ident(src[end])) return 0;
-        if (value == 16 || value == 32 || value == 64) return value;
-        return 0;
-    }
-
-    // Variable: registerAudioBuffers(audioBuffer) with `var audioBuffer = 64`
-    // earlier (the common WE audio-bar template). Resolve the first
-    // `<ident> = <number>` assignment to that name. We don't run JS, so this
-    // only handles a literal-initialized count (always 16/32/64 in practice).
-    if (pos >= src.size() || ! is_ident(src[pos]) || is_digit(src[pos])) return 0;
-    std::size_t e = pos;
-    while (e < src.size() && is_ident(src[e])) ++e;
-    std::string_view name = src.substr(pos, e - pos);
-    for (std::size_t p = 0; (p = src.find(name, p)) != std::string_view::npos; p += name.size()) {
-        const bool        lb = (p == 0) || ! is_ident(src[p - 1]);
-        const std::size_t a  = p + name.size();
-        const bool        rb = (a >= src.size()) || ! is_ident(src[a]);
-        if (! lb || ! rb) continue;
-        std::size_t q = a;
-        while (q < src.size() && (src[q] == ' ' || src[q] == '\t')) ++q;
-        if (q >= src.size() || src[q] != '=') continue;
-        ++q;
-        while (q < src.size() && (src[q] == ' ' || src[q] == '\t')) ++q;
-        if (q < src.size() && is_digit(src[q])) return read_num(q);
-    }
-    return 0;
-}
-
 bool SourceWritesLayerText(std::string_view src) {
     const bool writes_text = src.find(".text") != std::string_view::npos ||
                              src.find("[\"text\"]") != std::string_view::npos ||
@@ -195,15 +125,6 @@ void RegisterPuppetLayer(SceneParseContext& context, SceneNode* node, Arc<Puppet
     (void)context.puppet_layers->by_node.insert(node, rstd::move(layer));
 }
 
-void AddLayerClone(SceneParseContext& context, std::int32_t id, Arc<SceneNode> node) {
-    auto clones = context.layer_clones.get_mut(id);
-    if (clones.is_none()) {
-        (void)context.layer_clones.insert(id, Vec<Arc<SceneNode>> {});
-        clones = context.layer_clones.get_mut(id);
-    }
-    (**clones).push(rstd::move(node));
-}
-
 Option<Arc<PuppetLayer>> LookupPuppetLayer(const Arc<PuppetLayerRegistry>& layers,
                                            SceneNode*                      node) {
     if (! node) return None();
@@ -268,15 +189,6 @@ void RegisterImageAlignmentBinding(SceneParseContext& context, SceneNode* node, 
     });
 }
 
-void CloneImageAlignmentBinding(SceneParseContext& context, SceneNode* source, SceneNode* clone) {
-    for (const auto& binding : context.image_alignment_bindings) {
-        if (binding.node != source) continue;
-        RegisterImageAlignmentBinding(
-            context, clone, binding.alignment.as_str(), binding.setter.clone());
-        return;
-    }
-}
-
 Option<Arc<PuppetLayer>> FindPuppetLayerWithBone(const Arc<PuppetLayerRegistry>& layers,
                                                  SceneNode* node, std::string_view name,
                                                  uint32_t& index) {
@@ -290,37 +202,6 @@ Option<Arc<PuppetLayer>> FindPuppetLayerWithBone(const Arc<PuppetLayerRegistry>&
         if (hit.is_some()) return hit;
     }
     return None();
-}
-
-std::vector<owe::SceneNode*> SpawnLayerClones(SceneParseContext& context, SceneNode* tmpl,
-                                              unsigned count) {
-    std::vector<owe::SceneNode*> out;
-    if (! tmpl || count == 0) return out;
-    out.reserve(count);
-    for (unsigned i = 0; i < count; ++i) {
-        auto clone =
-            Arc<SceneNode>::make(tmpl->Translate(), tmpl->Scale(), tmpl->Rotation(), tmpl->Name());
-        clone->SetLocalFrame(tmpl->LocalFrame());
-        clone->SetSize(tmpl->Size());
-        clone->SetGeometryTransform(tmpl->GeometryTransform());
-        clone->SetPerspective(tmpl->Perspective());
-        clone->SetReflected(tmpl->Reflected());
-        if (! tmpl->Camera().empty()) clone->SetCamera(tmpl->Camera());
-        clone->AddMesh(tmpl->MeshShared());
-        clone->SetVisible(false);
-        context.scene->RegisterNode(*clone);
-        if (auto config = FindUniformConfig(context, *tmpl); config != nullptr)
-            SetUniformConfig(context, clone, config->Clone());
-        if (auto layer = LookupPuppetLayer(context.puppet_layers, tmpl); layer.is_some()) {
-            RegisterPuppetLayer(context, clone.as_ptr(), rstd::move(*layer));
-        }
-        CloneImageAlignmentBinding(context, tmpl, clone.as_ptr());
-        out.push_back(clone.as_ptr());
-        // Defer attachment to FinalizeScene so the clones land at the
-        // template's z-position (right after it), not at the root front.
-        AddLayerClone(context, tmpl->ID().to_primitive(), rstd::move(clone));
-    }
-    return out;
 }
 
 script::ScriptScene& EnsureScriptScene(SceneParseContext& context) {
@@ -539,15 +420,10 @@ void WireFieldScripts(SceneParseContext& context, const Arc<SceneNode>& node_sp,
             // text/rate/intensity/... are wired elsewhere or not yet supported.
             continue;
         }
-        std::string                  sha = utils::genSha1(std::span<const char>(sb.source));
-        std::vector<owe::SceneNode*> clones;
-        if (unsigned n = DetectAudioFanoutCapacity(sb.source); n > 1) {
-            clones = SpawnLayerClones(context, node, n - 1);
-        }
-        auto  props         = ScriptPropertiesForField(context, field, sb);
-        auto  initial_value = ScriptInitialValueForField(field, sb.initial_value);
-        auto* fs =
-            rt.MakeFieldScript(sb.source, sha, kind, props, initial_value, node, std::move(clones));
+        std::string sha           = utils::genSha1(std::span<const char>(sb.source));
+        auto        props         = ScriptPropertiesForField(context, field, sb);
+        auto        initial_value = ScriptInitialValueForField(field, sb.initial_value);
+        auto*       fs = rt.MakeFieldScript(sb.source, sha, kind, props, initial_value, node);
         if (! fs) continue;
         SetScriptInitializationOrder(context, *fs, node);
         TrackRegisteredAssets(context, fs);

@@ -231,67 +231,79 @@ void FinalizeUniformSources(SceneParseContext& context) {
                  ortho_h              = context.ortho_h,
                  uniform_state        = context.uniform_state.clone(),
                  camera_resolver      = camera_resolver.clone()](
-                    SceneNode* owner, ref<str> asset) mutable -> Option<Arc<SceneNode>> {
+                    SceneNode*                  owner,
+                    script::LayerAssetReference request) mutable -> Option<Arc<SceneNode>> {
                     SceneNode* parent = owner && owner->Parent()
                                             ? owner->Parent()
                                             : scene_ptr->RootMut().as_raw_ptr();
 
-                    if (auto prototype = image_prototypes.get(asset); prototype.is_some()) {
-                        auto node =
-                            CloneRegisteredNode(*scene_ptr, (**prototype).node.deref(), asset);
-                        scene_ptr->AttachRuntimeNode(*parent, node.clone());
-                        if (! RegisterUniformNodeSources(*scene_ptr,
-                                                         uniform_state,
-                                                         camera_resolver,
-                                                         node,
-                                                         (**prototype).uniform_config)) {
-                            rstd_error("registered image asset '{}' has no runtime resource id",
-                                       asset);
+                    auto instantiate = [&](ref<str> asset) -> Option<Arc<SceneNode>> {
+                        if (auto prototype = image_prototypes.get(asset); prototype.is_some()) {
+                            auto node =
+                                CloneRegisteredNode(*scene_ptr, (**prototype).node.deref(), asset);
+                            scene_ptr->AttachRuntimeNode(*parent, node.clone());
+                            if (! RegisterUniformNodeSources(*scene_ptr,
+                                                             uniform_state,
+                                                             camera_resolver,
+                                                             node,
+                                                             (**prototype).uniform_config)) {
+                                rstd_error("registered image asset '{}' has no runtime resource id",
+                                           asset);
+                                return None();
+                            }
+                            return Some(rstd::move(node));
+                        }
+
+                        auto prototype = particle_prototypes.get(asset);
+                        if (prototype.is_none() || particle_runtime.is_none()) return None();
+                        auto vfs = scene_ptr->ExtensionMut<fs::VFS>();
+                        if (vfs.is_none()) {
+                            rstd_error("registered particle asset '{}' has no runtime VFS", asset);
                             return None();
                         }
+
+                        auto particle    = (**prototype).Clone();
+                        particle.id      = -1;
+                        particle.name    = rstd::cppstd::to_string(asset);
+                        particle.origin  = { 0.0f, 0.0f, 0.0f };
+                        particle.scale   = { 1.0f, 1.0f, 1.0f };
+                        particle.angles  = { 0.0f, 0.0f, 0.0f };
+                        particle.parent  = 0;
+                        particle.visible = true;
+                        ParticleObjectParseServices particle_services {
+                            .scene                = scene_ptr,
+                            .vfs                  = (*vfs).as_raw_ptr(),
+                            .shader_cache         = shader_cache.clone(),
+                            .shader_environment   = shader_environment,
+                            .global_base_uniforms = global_base_uniforms,
+                            .particle_runtime     = (*particle_runtime).clone(),
+                            .ortho_w              = ortho_w,
+                            .ortho_h              = ortho_h,
+                        };
+                        auto parsed = BuildParticleObject(particle_services, particle);
+                        if (parsed.root.is_none()) return None();
+                        auto node = rstd::move(*parsed.root);
+                        scene_ptr->RegisterNode(*node);
+                        scene_ptr->AttachRuntimeNode(*parent, node.clone());
+                        for (auto& entry : parsed.uniform_configs) {
+                            (void)RegisterUniformNodeSources(*scene_ptr,
+                                                             uniform_state,
+                                                             camera_resolver,
+                                                             entry.node,
+                                                             entry.config);
+                        }
+                        for (auto& draft : parsed.trail_uniform_configs) {
+                            (void)RegisterParticleTrailUniformSource(
+                                *scene_ptr, draft.node, draft.uniform_state);
+                        }
                         return Some(rstd::move(node));
-                    }
-
-                    auto prototype = particle_prototypes.get(asset);
-                    if (prototype.is_none() || particle_runtime.is_none()) return None();
-                    auto vfs = scene_ptr->ExtensionMut<fs::VFS>();
-                    if (vfs.is_none()) {
-                        rstd_error("registered particle asset '{}' has no runtime VFS", asset);
-                        return None();
-                    }
-
-                    auto particle    = (**prototype).Clone();
-                    particle.id      = -1;
-                    particle.name    = rstd::cppstd::to_string(asset);
-                    particle.origin  = { 0.0f, 0.0f, 0.0f };
-                    particle.scale   = { 1.0f, 1.0f, 1.0f };
-                    particle.angles  = { 0.0f, 0.0f, 0.0f };
-                    particle.parent  = 0;
-                    particle.visible = true;
-                    ParticleObjectParseServices particle_services {
-                        .scene                = scene_ptr,
-                        .vfs                  = (*vfs).as_raw_ptr(),
-                        .shader_cache         = shader_cache.clone(),
-                        .shader_environment   = shader_environment,
-                        .global_base_uniforms = global_base_uniforms,
-                        .particle_runtime     = (*particle_runtime).clone(),
-                        .ortho_w              = ortho_w,
-                        .ortho_h              = ortho_h,
                     };
-                    auto parsed = BuildParticleObject(particle_services, particle);
-                    if (parsed.root.is_none()) return None();
-                    auto node = rstd::move(*parsed.root);
-                    scene_ptr->RegisterNode(*node);
-                    scene_ptr->AttachRuntimeNode(*parent, node.clone());
-                    for (auto& entry : parsed.uniform_configs) {
-                        (void)RegisterUniformNodeSources(
-                            *scene_ptr, uniform_state, camera_resolver, entry.node, entry.config);
-                    }
-                    for (auto& draft : parsed.trail_uniform_configs) {
-                        (void)RegisterParticleTrailUniformSource(
-                            *scene_ptr, draft.node, draft.uniform_state);
-                    }
-                    return Some(rstd::move(node));
+
+                    auto node = instantiate(request.path);
+                    if (node.is_some()) return node;
+                    auto workshop_path = WorkshopAssetPath(request);
+                    if (workshop_path.is_none()) return None();
+                    return instantiate(workshop_path->as_str());
                 }));
         }
     }
@@ -361,15 +373,6 @@ Box<Scene> FinalizeScene(SceneParseContext& context) {
         }
         parent_node->AppendChild((*ref.node).clone());
         attached++;
-
-        // Attach this layer's fanout clones (audio bars) right after it, so
-        // all bars sit at the template's z-position in the parent child list.
-        if (auto clones = context.layer_clones.get_mut(id); clones.is_some()) {
-            for (auto& clone : **clones) {
-                parent_node->AppendChild(rstd::move(clone));
-                attached++;
-            }
-        }
     }
     rstd_info("attach: {}/{} nodes ({} missing parents)",
               attached,
@@ -393,10 +396,11 @@ Box<Scene> FinalizeScene(SceneParseContext& context) {
         }
         runtime.SetScene(context.scene.get());
         runtime.SetLayerFactory(script::JsRuntime::LayerFactory::make(
-            [&context](SceneNode* owner, ref<str> asset) -> Option<Arc<SceneNode>> {
-                auto node = InstantiateRegisteredAsset(context, owner, asset);
+            [&context](SceneNode*                  owner,
+                       script::LayerAssetReference request) -> Option<Arc<SceneNode>> {
+                auto node = InstantiateRegisteredAsset(context, owner, request);
                 if (node.is_none())
-                    rstd_error("registered layer asset '{}' is unsupported or unavailable", asset);
+                    rstd_error("layer asset '{}' is unsupported or unavailable", request.path);
                 return node;
             }));
         runtime.SetLayerConfigFactory(script::JsRuntime::LayerConfigFactory::make(

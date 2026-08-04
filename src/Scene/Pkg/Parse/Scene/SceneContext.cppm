@@ -160,10 +160,9 @@ struct SceneParseContext {
     HashMap<std::int32_t, std::uint64_t> script_initialization_orders;
     HashMap<std::int32_t, Json>          initial_layer_configs;
 
-    HashMap<std::int32_t, Vec<Arc<SceneNode>>> layer_clones;
-    i32                                        next_synthetic_object_id { -1 };
-    Vec<owe::script::FieldScript*>             registered_asset_scripts;
-    HashMap<String, Arc<SceneNode>>            dynamic_model_prototypes;
+    i32                             next_synthetic_object_id { -1 };
+    Vec<owe::script::FieldScript*>  registered_asset_scripts;
+    HashMap<String, Arc<SceneNode>> dynamic_model_prototypes;
     struct DynamicImagePrototype {
         Arc<SceneNode>         node;
         UniformNodeConfigDraft uniform_config;
@@ -198,7 +197,6 @@ auto Texture0UvScale(const SceneMaterial&, bool = false) -> array<float, 2>;
 auto ParticleTextureRatio(const SceneMaterial&) -> float;
 void RegisterImageAlignmentBinding(SceneParseContext&, SceneNode*, ref<str>,
                                    SceneParseContext::ImageAlignmentSetter);
-void CloneImageAlignmentBinding(SceneParseContext&, SceneNode*, SceneNode*);
 auto EnsureScriptScene(SceneParseContext&) -> script::ScriptScene&;
 void SetScriptInitializationOrder(SceneParseContext&, script::FieldScript&, const SceneNode*);
 void TrackRegisteredAssets(SceneParseContext&, script::FieldScript*);
@@ -243,7 +241,9 @@ struct ParticleObjectParseOutput {
 auto BuildParticleObject(ParticleObjectParseServices&, wpscene::ParticleObject&)
     -> ParticleObjectParseOutput;
 auto CloneRegisteredNode(Scene&, ref<SceneNode>, ref<str>) -> Arc<SceneNode>;
-auto InstantiateRegisteredAsset(SceneParseContext&, SceneNode*, ref<str>) -> Option<Arc<SceneNode>>;
+auto WorkshopAssetPath(const script::LayerAssetReference&) -> Option<String>;
+auto InstantiateRegisteredAsset(SceneParseContext&, SceneNode*, const script::LayerAssetReference&)
+    -> Option<Arc<SceneNode>>;
 auto InstantiateLayerConfiguration(SceneParseContext&, SceneNode*, const Json&)
     -> Option<Arc<SceneNode>>;
 void ResolveRegisteredAssets(SceneParseContext&);

@@ -128,6 +128,11 @@ struct PropDescriptor {
 
 class FieldScript;
 
+struct LayerAssetReference {
+    ref<str>         path;
+    Option<ref<str>> workshop_id;
+};
+
 // One JsRuntime per Scene. Owns one JSRuntime and one JSContext. Compiled
 // modules are deduped by sha so duplicated sources across many bound fields
 // only allocate once. The runtime is not thread-safe; the renderer's frame
@@ -141,11 +146,9 @@ public:
     // `node` (nullable) is the SceneNode the script will see as `thisLayer`
     // inside init/update. When null, `thisLayer` falls back to a generic
     // stub (the JS-side default created at bootstrap).
-    FieldScript* MakeFieldScript(
-        std::string_view source, std::string_view script_sha, FieldKind field_kind,
-        const Json& properties_config, const Json& initial_value, owe::SceneNode* node = nullptr,
-        std::vector<owe::SceneNode*>                                  clones       = {},
-        std::unordered_map<std::string, std::vector<owe::SceneNode*>> asset_clones = {});
+    FieldScript* MakeFieldScript(std::string_view source, std::string_view script_sha,
+                                 FieldKind field_kind, const Json& properties_config,
+                                 const Json& initial_value, owe::SceneNode* node = nullptr);
 
     // Pending scripts initialize in ascending owner order when SetSceneRoot
     // completes scene assembly. Equal orders retain creation order.
@@ -216,7 +219,8 @@ public:
     void RegisterImageAlignmentSetter(owe::SceneNode* node, ref<str> alignment,
                                       ImageAlignmentSetter setter);
 
-    using LayerFactory = Arc<dyn<FnMut<Option<Arc<owe::SceneNode>>(owe::SceneNode*, ref<str>)>>>;
+    using LayerFactory =
+        Arc<dyn<FnMut<Option<Arc<owe::SceneNode>>(owe::SceneNode*, LayerAssetReference)>>>;
     void SetLayerFactory(LayerFactory factory);
     using LayerConfigFactory = Arc<dyn<FnMut<Option<Arc<owe::SceneNode>>(owe::SceneNode*, Json)>>>;
     void SetLayerConfigFactory(LayerConfigFactory factory);
@@ -239,7 +243,7 @@ public:
     bool               alive() const noexcept;
     std::string_view   script_sha() const noexcept;
     slice<String>      RegisteredAssets() const noexcept;
-    void               AddAssetCloneQueue(std::string asset, std::vector<owe::SceneNode*> nodes);
+    Option<ref<str>>   WorkshopId() const noexcept;
 
     // Impl is intentionally exposed inside the wescene.script module so
     // JsRuntime::Impl (in the same module) can mutate it directly. Treated

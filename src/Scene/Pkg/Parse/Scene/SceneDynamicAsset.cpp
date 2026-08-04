@@ -28,6 +28,40 @@ namespace owe
 
 bool AssetEndsWith(ref<str> asset, ref<str> suffix) { return asset.ends_with(suffix); }
 
+Option<String> WorkshopAssetPath(const script::LayerAssetReference& reference) {
+    if (reference.workshop_id.is_none() || reference.path.starts_with("/"_str)) return None();
+    auto path  = as_string_view(reference.path);
+    auto slash = path.find('/');
+    if (slash == std::string_view::npos || slash + 1 >= path.size()) return None();
+    auto relative = path.substr(slash + 1);
+    if (relative.starts_with("workshop/")) return None();
+    return Some(rstd::format(
+        "{}/workshop/{}/{}", path.substr(0, slash), **reference.workshop_id, relative));
+}
+
+bool HasDynamicAsset(const SceneParseContext& context, ref<str> asset) {
+    return context.dynamic_image_prototypes.contains_key(asset) ||
+           context.dynamic_model_prototypes.contains_key(asset) ||
+           context.dynamic_particle_prototypes.contains_key(asset);
+}
+
+bool AssetPathExists(const SceneParseContext& context, ref<str> asset) {
+    auto resolved = fs::ResolveAssetPath(as_string_view(asset));
+    return resolved.is_ok() && context.vfs->metadata(resolved->as_path()).is_ok();
+}
+
+Option<String> ResolveLayerAssetPath(const SceneParseContext&           context,
+                                     const script::LayerAssetReference& reference) {
+    if (HasDynamicAsset(context, reference.path) || AssetPathExists(context, reference.path))
+        return Some(String::make(reference.path));
+    auto workshop_path = WorkshopAssetPath(reference);
+    if (workshop_path.is_none()) return None();
+    if (HasDynamicAsset(context, workshop_path->as_str()) ||
+        AssetPathExists(context, workshop_path->as_str()))
+        return workshop_path;
+    return None();
+}
+
 Option<array<float, 2>> ResolveImageAssetSize(SceneParseContext& context, ref<str> asset) {
     auto info = wpscene::LoadImageAssetInfo(*context.vfs, rstd::cppstd::as_string_view(asset));
     if (! info) return None();
@@ -113,16 +147,19 @@ void ResolveRegisteredAsset(SceneParseContext& context, ref<str> asset) {
 }
 
 void ResolveRegisteredAssets(SceneParseContext& context) {
-    for (auto* script : context.registered_asset_scripts) {
-        if (! script) continue;
-        for (const auto& asset : script->RegisteredAssets()) {
-            ResolveRegisteredAsset(context, asset.as_str());
+    for (auto* field_script : context.registered_asset_scripts) {
+        if (! field_script) continue;
+        for (const auto& asset : field_script->RegisteredAssets()) {
+            script::LayerAssetReference reference { .path        = asset.as_str(),
+                                                    .workshop_id = field_script->WorkshopId() };
+            auto                        resolved = ResolveLayerAssetPath(context, reference);
+            if (resolved.is_some()) ResolveRegisteredAsset(context, resolved->as_str());
         }
     }
 }
 
-Option<Arc<SceneNode>> InstantiateRegisteredAsset(SceneParseContext& context, SceneNode* owner,
-                                                  ref<str> asset) {
+Option<Arc<SceneNode>> InstantiateResolvedAsset(SceneParseContext& context, SceneNode* owner,
+                                                ref<str> asset) {
     auto attach = [&](Arc<SceneNode> node) {
         SceneNode* parent =
             owner && owner->Parent() ? owner->Parent() : context.scene->RootMut().as_raw_ptr();
@@ -180,6 +217,13 @@ Option<Arc<SceneNode>> InstantiateRegisteredAsset(SceneParseContext& context, Sc
     } else {
         return None();
     }
+}
+
+Option<Arc<SceneNode>> InstantiateRegisteredAsset(SceneParseContext& context, SceneNode* owner,
+                                                  const script::LayerAssetReference& reference) {
+    auto resolved = ResolveLayerAssetPath(context, reference);
+    if (resolved.is_none()) return None();
+    return InstantiateResolvedAsset(context, owner, resolved->as_str());
 }
 
 Option<Arc<SceneNode>> AttachCreatedLayer(SceneParseContext& context, SceneNode* owner,

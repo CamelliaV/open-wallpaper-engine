@@ -1844,85 +1844,6 @@ TEST(ScriptScene, CameraTransformsRoundTripThroughSceneOwner) {
     EXPECT_DOUBLE_EQ(LastScalar(script), 345.0);
 }
 
-TEST(ScriptScene, CreateLayerUsesRegisteredAssetQueue) {
-    auto root = rstd::sync::Arc<owe::SceneNode>::make();
-    auto coin = rstd::sync::Arc<owe::SceneNode>::make(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "coin-clone");
-    coin->SetVisible(false);
-
-    JsRuntime   rt;
-    FrameInputs fi {};
-    rt.SetFrameInputs(fi);
-    rt.SetSceneRoot(root.as_ptr());
-
-    std::unordered_map<std::string, std::vector<owe::SceneNode*>> assets;
-    assets["models/coin_0.json"].push_back(coin.as_ptr());
-    auto* fs = rt.MakeFieldScript(
-        R"JS(
-            let ok = 0;
-            export function init() {
-                const asset = engine.registerAsset('models/coin_0.json');
-                const coin = thisScene.createLayer(asset);
-                coin.origin = new Vec3(42, 7, 0);
-                thisScene.destroyLayer(coin);
-                const again = thisScene.createLayer(asset);
-                again.origin = new Vec3(8, 9, 0);
-                ok = again.visible && again.origin.x === 8 && again.origin.y === 9 ? 1 : 0;
-            }
-            export function update() { return ok; }
-        )JS",
-        "test/create_layer_asset_queue",
-        FieldKind::Scalar,
-        owe::MakeObject(),
-        owe::IntoJson(0),
-        root.as_ptr(),
-        std::vector<owe::SceneNode*> {},
-        std::move(assets));
-    ASSERT_NE(fs, nullptr);
-
-    rt.TickAll();
-    EXPECT_TRUE(coin->Visible());
-    EXPECT_FLOAT_EQ(coin->Translate().x(), 8.0f);
-    EXPECT_FLOAT_EQ(coin->Translate().y(), 9.0f);
-    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
-}
-
-TEST(ScriptScene, CreateLayerActivatesOnlyConsumedGenericClones) {
-    auto root  = Arc<owe::SceneNode>::make();
-    auto first = Arc<owe::SceneNode>::make(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "first");
-    auto second = Arc<owe::SceneNode>::make(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "second");
-    first->SetVisible(false);
-    second->SetVisible(false);
-
-    JsRuntime   rt;
-    FrameInputs fi {};
-    rt.SetFrameInputs(fi);
-    rt.SetSceneRoot(root.as_ptr());
-    auto* fs = rt.MakeFieldScript(
-        R"JS(
-            let ok = 0;
-            export function init() {
-                const layer = thisScene.createLayer('models/bar.json');
-                ok = layer.visible ? 1 : 0;
-            }
-            export function update() { return ok; }
-        )JS",
-        "test/create_layer_activates_consumed_generic_clone",
-        FieldKind::Scalar,
-        owe::MakeObject(),
-        owe::IntoJson(0),
-        root.as_ptr(),
-        std::vector<owe::SceneNode*> { first.as_ptr(), second.as_ptr() });
-    ASSERT_NE(fs, nullptr);
-
-    rt.TickAll();
-    EXPECT_TRUE(first->Visible());
-    EXPECT_FALSE(second->Visible());
-    EXPECT_DOUBLE_EQ(LastScalar(fs), 1.0);
-}
-
 TEST(ScriptScene, CreateLayerRoutesConfigurationAndLayerCloneToFactory) {
     auto root  = Arc<owe::SceneNode>::make();
     auto owner = Arc<owe::SceneNode>::make(
@@ -1985,14 +1906,15 @@ TEST(ScriptScene, CreateLayerRoutesConfigurationAndLayerCloneToFactory) {
     EXPECT_DOUBLE_EQ(LastScalar(fs), 2.0);
 }
 
-TEST(ScriptScene, RegisteredAssetFactoryCreatesBeyondLegacyPoolAndReusesDestroyedLayer) {
+TEST(ScriptScene, RegisteredAssetFactoryCreatesAndReusesDestroyedLayer) {
     auto                     root = Arc<owe::SceneNode>::make();
     Vec<Arc<owe::SceneNode>> created;
 
     JsRuntime rt;
     rt.SetLayerFactory(JsRuntime::LayerFactory::make(
-        [&root, &created](owe::SceneNode*, ref<str> asset) -> Option<Arc<owe::SceneNode>> {
-            if (asset != "models/prism.mdl"_str) return None();
+        [&root, &created](owe::SceneNode*,
+                          LayerAssetReference asset) -> Option<Arc<owe::SceneNode>> {
+            if (asset.path != "models/prism.mdl"_str) return None();
             auto node = Arc<owe::SceneNode>::make();
             node->SetVisible(false);
             root->AppendChild(node.clone());
@@ -2032,6 +1954,55 @@ TEST(ScriptScene, RegisteredAssetFactoryCreatesBeyondLegacyPoolAndReusesDestroye
     EXPECT_EQ(root->GetChildren().len(), usize(12));
     EXPECT_DOUBLE_EQ(LastScalar(fs), 12.0);
     EXPECT_TRUE(created[usize()]->Visible());
+}
+
+TEST(ScriptScene, DirectWorkshopAssetUsesLayerFactoryWithoutFixedCloneCapacity) {
+    auto                     root = Arc<owe::SceneNode>::make();
+    Vec<Arc<owe::SceneNode>> created;
+    Vec<String>              paths;
+    Vec<String>              workshop_ids;
+
+    JsRuntime rt;
+    rt.SetLayerFactory(JsRuntime::LayerFactory::make(
+        [&root, &created, &paths, &workshop_ids](
+            owe::SceneNode*, LayerAssetReference asset) -> Option<Arc<owe::SceneNode>> {
+            paths.push(String::make(asset.path));
+            if (asset.workshop_id.is_some()) workshop_ids.push(String::make(**asset.workshop_id));
+            auto node = Arc<owe::SceneNode>::make();
+            node->SetVisible(false);
+            root->AppendChild(node.clone());
+            created.push(node.clone());
+            return Some(rstd::move(node));
+        }));
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export let __workshopId = '3365654061';
+            let result = 0;
+            export function init() {
+                for (let i = 0; i < 127; ++i) {
+                    const layer = thisScene.createLayer('models/cav_default_texture.json');
+                    if (layer.visible) ++result;
+                }
+            }
+            export function update() { return result; }
+        )JS",
+        "test/direct_workshop_asset_factory",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        root.as_ptr());
+    ASSERT_NE(fs, nullptr);
+
+    rt.SetSceneRoot(root.as_ptr());
+    rt.ClearLayerFactory();
+    rt.TickAll();
+
+    ASSERT_EQ(created.len(), usize(127));
+    ASSERT_EQ(paths.len(), usize(127));
+    ASSERT_EQ(workshop_ids.len(), usize(127));
+    EXPECT_EQ(paths[usize()], "models/cav_default_texture.json"_str);
+    EXPECT_EQ(workshop_ids[usize()], "3365654061"_str);
+    EXPECT_DOUBLE_EQ(LastScalar(fs), 127.0);
 }
 
 TEST(ScriptScene, ParticleInstanceAndPlaybackUseNodeCapability) {

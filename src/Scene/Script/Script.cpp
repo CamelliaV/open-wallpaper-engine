@@ -470,8 +470,8 @@ struct EngineHostState {
     // Empty `ls_path` means in-memory only (the legacy bootstrap shape).
     std::unordered_map<std::string, std::string> ls_data;
     std::string                                  ls_path;
-    // The script currently running. createLayer pops clones from this
-    // FieldScript's clone_queue. Set around every init/update/cursor invoke.
+    // Set around every init/update/cursor invocation so host callbacks can
+    // resolve the owning field binding.
     FieldScript*                          active_field_script { nullptr };
     Vec<String>                           pending_registered_assets;
     Option<JsRuntime::LayerFactory>       layer_factory;
@@ -555,14 +555,11 @@ struct FieldScript::Impl {
     JSValue         wrapped_layer { JS_UNDEFINED };
     // Per-script cursor-inside-bbox state used to edge-detect
     // cursorEnter / cursorLeave between frames.
-    bool cursor_inside { false };
-    // Pre-spawned SceneNode clones available to thisScene.createLayer.
-    // Populated by WireFieldScripts for audio-bar style scripts; popped
-    // from the front each createLayer call.
-    std::vector<owe::SceneNode*>                                  clone_queue;
+    bool                                                          cursor_inside { false };
     std::unordered_map<std::string, std::vector<owe::SceneNode*>> asset_clone_queues;
     std::unordered_map<owe::SceneNode*, std::string>              clone_asset_keys;
     Vec<String>                                                   registered_assets;
+    String                                                        workshop_id;
 };
 
 FieldScript::FieldScript(): m_impl(std::make_unique<Impl>()) {}
@@ -574,14 +571,9 @@ std::string_view   FieldScript::script_sha() const noexcept { return m_impl->sha
 slice<String>      FieldScript::RegisteredAssets() const noexcept {
     return m_impl->registered_assets.as_slice();
 }
-void FieldScript::AddAssetCloneQueue(std::string asset, std::vector<owe::SceneNode*> nodes) {
-    if (asset.empty() || nodes.empty()) return;
-    auto& queue = m_impl->asset_clone_queues[asset];
-    for (auto* node : nodes) {
-        if (! node) continue;
-        m_impl->clone_asset_keys[node] = asset;
-        queue.push_back(node);
-    }
+Option<ref<str>> FieldScript::WorkshopId() const noexcept {
+    if (m_impl->workshop_id.is_empty()) return None();
+    return Some(m_impl->workshop_id.as_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -2596,13 +2588,11 @@ JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int argc
                 node = it->second.front();
                 it->second.erase(it->second.begin());
             }
-            bool registered { false };
-            for (const auto& value : fs->m_impl->registered_assets) {
-                registered = registered || rstd::cppstd::as_string_view(value.as_str()) == asset;
-            }
-            if (! node && registered && host->layer_factory.is_some()) {
-                auto created =
-                    (**host->layer_factory)(fs->m_impl->node, rstd::cppstd::as_str(asset).unwrap());
+            if (! node && host->layer_factory.is_some()) {
+                auto created = (**host->layer_factory)(
+                    fs->m_impl->node,
+                    LayerAssetReference { .path        = rstd::cppstd::as_str(asset).unwrap(),
+                                          .workshop_id = fs->WorkshopId() });
                 if (created.is_some()) {
                     node                               = (*created).as_ptr();
                     fs->m_impl->clone_asset_keys[node] = asset;
@@ -2643,10 +2633,6 @@ JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int argc
                 (void)host->initial_layer_configs.insert(node, rstd::move(initial));
             }
         }
-    }
-    if (! node && ! fs->m_impl->clone_queue.empty()) {
-        node = fs->m_impl->clone_queue.front();
-        fs->m_impl->clone_queue.erase(fs->m_impl->clone_queue.begin());
     }
     if (! node) return JS_ThrowReferenceError(ctx, "createLayer asset is unavailable");
     if (host->scene)
@@ -3570,11 +3556,9 @@ JSValue AwaitModuleEvaluation(JSContext* ctx, JSValue value) {
 
 } // namespace
 
-FieldScript* JsRuntime::MakeFieldScript(
-    std::string_view source, std::string_view script_sha, FieldKind field_kind_in,
-    const Json& properties_config, const Json& initial_value, owe::SceneNode* node,
-    std::vector<owe::SceneNode*>                                  clones,
-    std::unordered_map<std::string, std::vector<owe::SceneNode*>> asset_clones) {
+FieldScript* JsRuntime::MakeFieldScript(std::string_view source, std::string_view script_sha,
+                                        FieldKind field_kind_in, const Json& properties_config,
+                                        const Json& initial_value, owe::SceneNode* node) {
     JSContext* ctx = m_impl->ctx;
     if (! ctx) return nullptr;
     m_impl->host.pending_registered_assets.clear();
@@ -3629,12 +3613,16 @@ FieldScript* JsRuntime::MakeFieldScript(
     I->module_ns     = ns; // owns one ref now
     I->node          = node;
     I->wrapped_layer = wrapped; // takes ownership; freed in JsRuntime dtor
-    I->clone_queue   = std::move(clones);
     I->registered_assets = rstd::move(m_impl->host.pending_registered_assets);
-    for (auto& [asset, nodes] : asset_clones) {
-        fs->AddAssetCloneQueue(std::move(asset), std::move(nodes));
+    JSValue workshop_id  = JS_GetPropertyStr(ctx, ns, "__workshopId");
+    if (JS_IsString(workshop_id)) {
+        const char* value = JS_ToCString(ctx, workshop_id);
+        if (value != nullptr) {
+            I->workshop_id = String::make(rstd::cppstd::as_str(value).unwrap());
+            JS_FreeCString(ctx, value);
+        }
     }
-
+    JS_FreeValue(ctx, workshop_id);
     // 3. Wire scriptProperties._hostValues from the per-binding config so
     //    `scriptProperties.foo` returns the configured value (resolving
     //    {user, value} to value) instead of the JS-default.
