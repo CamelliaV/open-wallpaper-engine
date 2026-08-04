@@ -1309,6 +1309,51 @@ TEST(PipelineLayoutPlanner, MergesCompatibleRequirementsWithOneGlobalPrefix) {
     EXPECT_EQ(family.request.descriptor_sets[rstd::usize(2)].bindings[rstd::usize(1)].binding, 4u);
 }
 
+TEST(PipelineLayoutPlanner, UnifiesDistinctGlobalBindingsAcrossPipelines) {
+    auto requirement = [](rstd::u64 pipeline_index, rstd::u32 binding, rstd::u64 identity) {
+        auto bindings = rstd::vec::Vec<owe::vulkan::PipelineLayoutBindingRequirement>::make();
+        bindings.push(owe::vulkan::PipelineLayoutBindingRequirement {
+            .binding          = binding,
+            .descriptor_type  = rstd::u32(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+            .descriptor_count = rstd::u32(1),
+            .stage_flags      = rstd::u32(VK_SHADER_STAGE_VERTEX_BIT),
+            .shared_identity  = rstd::Some(identity),
+        });
+        auto sets = rstd::vec::Vec<owe::vulkan::PipelineLayoutSetRequirement>::make();
+        sets.push(owe::vulkan::PipelineLayoutSetRequirement {
+            .set      = rstd::u32(),
+            .bindings = rstd::move(bindings),
+        });
+        return owe::vulkan::PipelineLayoutRequirement {
+            .pipeline =
+                owe::resource::PipelineUseHandle {
+                    .index      = pipeline_index,
+                    .generation = rstd::u64(1),
+                },
+            .descriptor_sets = rstd::move(sets),
+        };
+    };
+
+    auto requirements = rstd::vec::Vec<owe::vulkan::PipelineLayoutRequirement>::make();
+    requirements.push(requirement(rstd::u64(1), rstd::u32(), rstd::u64(10)));
+    requirements.push(requirement(rstd::u64(2), rstd::u32(1), rstd::u64(11)));
+    requirements.push(requirement(rstd::u64(3), rstd::u32(2), rstd::u64(12)));
+
+    auto planned = owe::vulkan::PlanPipelineLayouts(requirements.as_slice(), true, rstd::u32(32));
+    ASSERT_TRUE(planned.is_ok());
+    auto plan = rstd::move(planned).unwrap_unchecked();
+    ASSERT_EQ(plan.global_bindings.len(), rstd::usize(3));
+    ASSERT_EQ(plan.families.len(), rstd::usize(1));
+    const auto& bindings =
+        plan.families[rstd::usize()].request.descriptor_sets[rstd::usize()].bindings;
+    ASSERT_EQ(bindings.len(), rstd::usize(3));
+    for (rstd::usize index {}; index < bindings.len(); ++index) {
+        EXPECT_EQ(bindings[index].binding, static_cast<rstd::uint32_t>(index.to_primitive()));
+        EXPECT_EQ(plan.global_bindings[index].binding,
+                  rstd::u32(static_cast<rstd::uint32_t>(index.to_primitive())));
+    }
+}
+
 TEST(PipelineLayoutPlanner, SplitsLocalConflictsAndRejectsGlobalConflicts) {
     auto make_requirement = [](rstd::u64        pipeline_index,
                                VkDescriptorType local_type,

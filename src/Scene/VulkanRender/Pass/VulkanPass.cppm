@@ -63,6 +63,12 @@ struct PassResourceUses {
     friend bool operator==(const PassResourceUses&, const PassResourceUses&) = default;
 };
 
+struct GlobalDescriptorBufferUse {
+    u32                       binding {};
+    u64                       identity {};
+    resource::BufferUseHandle buffer;
+};
+
 class PreparedPassResources {
 public:
     PreparedPassResources(const resource_registry::PreparedResourceTable& prepared,
@@ -128,6 +134,7 @@ struct PassRecordContext {
     rstd::mut_ref<vvk::CommandBuffer>                              command;
     rstd::ref<PreparedPassResources>                               resources;
     rstd::mut_ref<resource_registry::DescriptorBindingRecordState> descriptor_state;
+    Option<ref<resource_registry::PreparedDescriptorBinding>>      global_descriptor;
 };
 
 struct PassUpdateContext {
@@ -284,6 +291,10 @@ public:
     virtual auto                  pipelineLayoutRequirement(const PreparedPassResources&) const
         -> Result<Option<PipelineLayoutRequirement>, resource::ResourceError> {
         return Ok(None());
+    }
+    virtual auto globalDescriptorBufferUses(const PreparedPassResources&) const
+        -> Result<Vec<GlobalDescriptorBufferUse>, resource::ResourceError> {
+        return Ok(Vec<GlobalDescriptorBufferUse>::make());
     }
     virtual auto createUniformBufferUpdates(ref<dyn<UniformBindingPrepareContext>>,
                                             const PreparedPassResources&)

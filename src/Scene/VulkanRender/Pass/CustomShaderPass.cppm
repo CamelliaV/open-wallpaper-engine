@@ -103,6 +103,8 @@ public:
     PassResourceUses      resourceUses() const override;
     auto                  pipelineLayoutRequirement(const PreparedPassResources&) const
         -> Result<Option<PipelineLayoutRequirement>, resource::ResourceError> override;
+    auto globalDescriptorBufferUses(const PreparedPassResources&) const
+        -> Result<Vec<GlobalDescriptorBufferUse>, resource::ResourceError> override;
     auto createUniformBufferUpdates(ref<dyn<UniformBindingPrepareContext>>,
                                     const PreparedPassResources&)
         -> Result<Vec<Box<dyn<UniformBufferUpdate>>>, UniformBufferUpdateError> override;

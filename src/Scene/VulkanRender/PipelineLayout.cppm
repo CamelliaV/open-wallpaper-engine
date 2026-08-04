@@ -40,9 +40,15 @@ struct PipelineLayoutConflict {
     String                      message;
 };
 
+struct GlobalBindingIdentity {
+    u32 binding {};
+    u64 identity {};
+};
+
 struct PipelineLayoutPlan {
     Vec<PlannedPipelineLayoutFamily> families;
     Vec<PipelineLayoutConflict>      conflicts;
+    Vec<GlobalBindingIdentity>       global_bindings;
 };
 
 struct PipelineLayoutAssignment {
@@ -151,11 +157,6 @@ inline auto MergePushConstants(Vec<VkPushConstantRange>&       target,
     }
     return Ok(empty {});
 }
-
-struct GlobalBindingIdentity {
-    u32 binding {};
-    u64 identity {};
-};
 
 inline auto MergeGlobalSet(Vec<VkDescriptorSetLayoutBinding>&  target,
                            Vec<GlobalBindingIdentity>&         identities,
@@ -384,13 +385,19 @@ inline auto PlanPipelineLayouts(slice<PipelineLayoutRequirement> requirements,
     }
 
     resource_registry::PipelineLayoutRequest base;
+    rstd::slice_::sort_unstable_by(global_identities.as_mut_slice().as_mut_ref(),
+                                   [](const auto& lhs, const auto& rhs) {
+                                       return lhs.binding < rhs.binding;
+                                   });
     base.descriptor_sets.push(DescriptorSetInfo {
         .push_descriptor = false,
         .bindings        = rstd::move(global_bindings),
     });
     base.push_constants = rstd::move(canonical_push_constants);
 
-    PipelineLayoutPlan plan;
+    PipelineLayoutPlan plan {
+        .global_bindings = rstd::move(global_identities),
+    };
     for (const auto& requirement : requirements) {
         bool                                     assigned { false };
         usize                                    best_family { usize::MAX };

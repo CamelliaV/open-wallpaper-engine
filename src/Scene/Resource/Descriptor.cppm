@@ -232,14 +232,20 @@ struct DescriptorBufferBinding {
 
 struct DescriptorSetPacketKey {
     resource::DescriptorLayoutHandle layout;
-    Option<DescriptorBufferBinding>  buffer;
+    Vec<DescriptorBufferBinding>     buffers;
 
     friend bool operator==(const DescriptorSetPacketKey& lhs, const DescriptorSetPacketKey& rhs) {
-        if (lhs.layout != rhs.layout || lhs.buffer.is_some() != rhs.buffer.is_some()) return false;
-        if (lhs.buffer.is_none()) return true;
-        return lhs.buffer->binding == rhs.buffer->binding &&
-               lhs.buffer->buffer == rhs.buffer->buffer &&
-               lhs.buffer->offset == rhs.buffer->offset && lhs.buffer->size == rhs.buffer->size;
+        if (lhs.layout != rhs.layout || lhs.buffers.len() != rhs.buffers.len()) return false;
+        for (usize index {}; index < lhs.buffers.len(); ++index) {
+            const auto& lhs_buffer = lhs.buffers[index];
+            const auto& rhs_buffer = rhs.buffers[index];
+            if (lhs_buffer.binding != rhs_buffer.binding ||
+                lhs_buffer.buffer != rhs_buffer.buffer || lhs_buffer.offset != rhs_buffer.offset ||
+                lhs_buffer.size != rhs_buffer.size) {
+                return false;
+            }
+        }
+        return true;
     }
 };
 
@@ -256,12 +262,13 @@ struct Impl<hash::Hash, owe::resource_registry::DescriptorSetPacketKey>
     void hash(H& state) const noexcept {
         const auto& key = this->self();
         hash::hash_into(key.layout, state);
-        hash::hash_into(key.buffer.is_some(), state);
-        if (key.buffer.is_none()) return;
-        hash::hash_into(key.buffer->binding, state);
-        hash::hash_into(reinterpret_cast<rstd::uintptr_t>(key.buffer->buffer), state);
-        hash::hash_into(key.buffer->offset, state);
-        hash::hash_into(key.buffer->size, state);
+        hash::hash_into(key.buffers.len(), state);
+        for (const auto& buffer : key.buffers) {
+            hash::hash_into(buffer.binding, state);
+            hash::hash_into(reinterpret_cast<rstd::uintptr_t>(buffer.buffer), state);
+            hash::hash_into(buffer.offset, state);
+            hash::hash_into(buffer.size, state);
+        }
     }
 };
 
@@ -374,13 +381,13 @@ enum class DescriptorBindingReuse
 };
 
 struct PreparedDescriptorBinding {
-    resource::DescriptorBindingHandle      handle;
-    resource::DescriptorLayoutHandle       layout;
-    rstd::uint32_t                         set_index { 0 };
-    DescriptorBindingBackend               backend { DescriptorBindingBackend::Push };
-    rstd::vec::Vec<DescriptorImageBinding> images;
-    Option<DescriptorBufferBinding>        buffer;
-    Option<vvk::DescriptorSetLease>        set;
+    resource::DescriptorBindingHandle       handle;
+    resource::DescriptorLayoutHandle        layout;
+    rstd::uint32_t                          set_index { 0 };
+    DescriptorBindingBackend                backend { DescriptorBindingBackend::Push };
+    rstd::vec::Vec<DescriptorImageBinding>  images;
+    rstd::vec::Vec<DescriptorBufferBinding> buffers;
+    Option<vvk::DescriptorSetLease>         set;
 
     auto clone() const -> PreparedDescriptorBinding {
         auto cloned_images = rstd::vec::Vec<DescriptorImageBinding>::with_capacity(images.len());
@@ -397,7 +404,7 @@ struct PreparedDescriptorBinding {
             .set_index = set_index,
             .backend   = backend,
             .images    = rstd::move(cloned_images),
-            .buffer    = buffer,
+            .buffers   = buffers.clone(),
             .set       = set.is_some() ? Some(set->clone()) : None(),
         };
     }
@@ -500,31 +507,31 @@ struct PreparedDescriptorBinding {
             command.PushDescriptorSetKHR(
                 VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, set_index, write);
         }
-        if (buffer.is_none()) return;
-
-        VkDescriptorBufferInfo info {
-            .buffer = buffer->buffer,
-            .offset = buffer->offset,
-            .range  = buffer->size,
-        };
-        VkWriteDescriptorSet write {
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .pNext           = nullptr,
-            .dstSet          = {},
-            .dstBinding      = buffer->binding,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .pBufferInfo     = &info,
-        };
-        command.PushDescriptorSetKHR(
-            VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, set_index, write);
+        for (const auto& buffer : buffers) {
+            VkDescriptorBufferInfo info {
+                .buffer = buffer.buffer,
+                .offset = buffer.offset,
+                .range  = buffer.size,
+            };
+            VkWriteDescriptorSet write {
+                .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .pNext           = nullptr,
+                .dstSet          = {},
+                .dstBinding      = buffer.binding,
+                .descriptorCount = 1,
+                .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .pBufferInfo     = &info,
+            };
+            command.PushDescriptorSetKHR(
+                VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, set_index, write);
+        }
     }
 };
 
 class DescriptorSystem {
 public:
     auto PreparePush(rstd::uint32_t set_index, rstd::slice<DescriptorImageBinding> images,
-                     Option<DescriptorBufferBinding> buffer) -> PreparedDescriptorBinding {
+                     rstd::slice<DescriptorBufferBinding> buffers) -> PreparedDescriptorBinding {
         auto prepared_images = rstd::vec::Vec<DescriptorImageBinding>::with_capacity(images.len());
         for (usize index = usize(); index < images.len(); ++index) {
             prepared_images.push(DescriptorImageBinding {
@@ -533,6 +540,15 @@ public:
                 .layout  = images[index].layout,
             });
         }
+        rstd::slice_::sort_unstable_by(prepared_images.as_mut_slice().as_mut_ref(),
+                                       [](const auto& lhs, const auto& rhs) {
+                                           return lhs.binding < rhs.binding;
+                                       });
+        auto prepared_buffers = rstd::vec::Vec<DescriptorBufferBinding>::from(buffers);
+        rstd::slice_::sort_unstable_by(prepared_buffers.as_mut_slice().as_mut_ref(),
+                                       [](const auto& lhs, const auto& rhs) {
+                                           return lhs.binding < rhs.binding;
+                                       });
         return PreparedDescriptorBinding {
             .handle =
                 resource::DescriptorBindingHandle {
@@ -542,15 +558,16 @@ public:
             .set_index = set_index,
             .backend   = DescriptorBindingBackend::Push,
             .images    = rstd::move(prepared_images),
-            .buffer    = buffer,
+            .buffers   = rstd::move(prepared_buffers),
         };
     }
 
     auto Prepare(const vulkan::Device& device, rstd::uint32_t set_index,
                  const DescriptorLayoutEntry& layout, rstd::slice<DescriptorImageBinding> images,
-                 Option<DescriptorBufferBinding> buffer, DescriptorBindingReuse reuse)
+                 rstd::slice<DescriptorBufferBinding> buffers, DescriptorBindingReuse reuse)
         -> Result<PreparedDescriptorBinding, resource::ResourceError> {
-        for (const auto& image : images) {
+        for (usize index {}; index < images.len(); ++index) {
+            const auto& image = images[index];
             if (! HasBinding(
                     layout.schema, image.binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)) {
                 return Err(resource::ResourceError {
@@ -559,16 +576,41 @@ public:
                                             image.binding),
                 });
             }
+            for (usize previous {}; previous < index; ++previous) {
+                if (images[previous].binding != image.binding) continue;
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::MissingDefinition,
+                    .message = rstd::format("duplicate descriptor image binding {}", image.binding),
+                });
+            }
         }
-        if (buffer.is_some() &&
-            ! HasBinding(layout.schema, buffer->binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)) {
-            return Err(resource::ResourceError {
-                .kind    = resource::ResourceErrorKind::MissingDefinition,
-                .message = rstd::format("descriptor buffer binding {} is outside the layout",
-                                        buffer->binding),
-            });
+        for (usize index {}; index < buffers.len(); ++index) {
+            if (! HasBinding(
+                    layout.schema, buffers[index].binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::MissingDefinition,
+                    .message = rstd::format("descriptor buffer binding {} is outside the layout",
+                                            buffers[index].binding),
+                });
+            }
+            for (usize previous {}; previous < index; ++previous) {
+                if (buffers[previous].binding != buffers[index].binding) continue;
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::MissingDefinition,
+                    .message = rstd::format("duplicate descriptor buffer binding {}",
+                                            buffers[index].binding),
+                });
+            }
+            for (const auto& image : images) {
+                if (image.binding != buffers[index].binding) continue;
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::MissingDefinition,
+                    .message = rstd::format("descriptor binding {} has multiple writes",
+                                            buffers[index].binding),
+                });
+            }
         }
-        auto prepared   = PreparePush(set_index, images, buffer);
+        auto prepared   = PreparePush(set_index, images, buffers);
         prepared.layout = layout.handle;
         if (layout.schema.push_descriptor) return Ok(rstd::move(prepared));
         prepared.backend = DescriptorBindingBackend::Set;
@@ -577,8 +619,8 @@ public:
         Option<DescriptorSetPacketKey> cache_key = None();
         if (reuse == DescriptorBindingReuse::Shared && images.is_empty()) {
             cache_key = Some(DescriptorSetPacketKey {
-                .layout = layout.handle,
-                .buffer = buffer,
+                .layout  = layout.handle,
+                .buffers = prepared.buffers.clone(),
             });
             if (auto cached = m_packets.get(*cache_key); cached.is_some()) {
                 prepared.set = Some((**cached).clone());
@@ -608,15 +650,15 @@ public:
                 });
             }
         }
-        if (prepared.buffer.is_some()) {
+        for (const auto& buffer : prepared.buffers) {
             VkDescriptorBufferInfo info {
-                .buffer = prepared.buffer->buffer,
-                .offset = prepared.buffer->offset,
-                .range  = prepared.buffer->size,
+                .buffer = buffer.buffer,
+                .offset = buffer.offset,
+                .range  = buffer.size,
             };
             if (! updates.WriteBuffer(
                     prepared.set->clone(),
-                    prepared.buffer->binding,
+                    buffer.binding,
                     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                     slice<VkDescriptorBufferInfo>::from_raw_parts(&info, usize(1)))) {
                 return Err(resource::ResourceError {

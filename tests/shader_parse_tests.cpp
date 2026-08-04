@@ -463,6 +463,10 @@ void main() {
     owe::vulkan::ShaderReflected            reflected;
     ASSERT_TRUE(owe::vulkan::GenReflect(result.shader->codes, spvs, reflected));
     ASSERT_EQ(reflected.blocks.size(), 1u);
+    EXPECT_EQ(reflected.blocks.front().name, "ww_LightingUniforms");
+    EXPECT_EQ(reflected.blocks.front().set, 0u);
+    EXPECT_EQ(reflected.blocks.front().binding, 2u);
+    EXPECT_EQ(reflected.blocks.front().size, owe::kLightingUniformBlockSize.to_primitive());
     const auto& members = reflected.blocks.front().member_map;
     EXPECT_TRUE(members.contains("g_LightsPosition"));
     EXPECT_TRUE(members.contains("g_LightsColorRadius"));
@@ -513,6 +517,10 @@ void main() {
     owe::vulkan::ShaderReflected            reflected;
     ASSERT_TRUE(owe::vulkan::GenReflect(result.shader->codes, spvs, reflected));
     ASSERT_EQ(reflected.blocks.size(), 1u);
+    EXPECT_EQ(reflected.blocks.front().name, "ww_AudioUniforms");
+    EXPECT_EQ(reflected.blocks.front().set, 0u);
+    EXPECT_EQ(reflected.blocks.front().binding, 1u);
+    EXPECT_EQ(reflected.blocks.front().size, owe::kAudioUniformBlockSize.to_primitive());
     const auto& members = reflected.blocks.front().member_map;
     ASSERT_TRUE(members.contains("g_AudioSpectrum64Left"));
     const auto& spectrum = members.at("g_AudioSpectrum64Left");
@@ -718,7 +726,7 @@ void main() {
     std::vector<owe::vulkan::Uni_ShaderSpv> spvs;
     owe::vulkan::ShaderReflected            reflected;
     ASSERT_TRUE(owe::vulkan::GenReflect(result.shader->codes, spvs, reflected));
-    ASSERT_EQ(reflected.blocks.size(), 2u);
+    ASSERT_EQ(reflected.blocks.size(), 1u);
     const auto local =
         std::find_if(reflected.blocks.begin(), reflected.blocks.end(), [](const auto& block) {
             return block.name == "ww_DrawUniforms";
@@ -798,15 +806,15 @@ TEST(ShaderParser, UsesOneCanonicalGlobalAbiForLegacyDaytimeAlias) {
                                          return block.name == "ww_GlobalUniforms";
                                      });
     ASSERT_NE(global, canonical_reflection.blocks.end());
-    EXPECT_EQ(global->size, owe::kGlobalUniformBlockSize.to_primitive());
+    EXPECT_EQ(global->size, owe::kFrameUniformBlockSize.to_primitive());
     for (const auto& field : owe::GlobalUniformFields()) {
+        if (owe::GlobalUniformBlockFor(field.producer) != owe::GlobalUniformBlockKind::Frame)
+            continue;
         auto member = global->member_map.find(rstd::cppstd::to_string(field.name));
         ASSERT_NE(member, global->member_map.end());
         EXPECT_EQ(member->second.offset, field.offset.to_primitive());
     }
-    const auto matrices = global->member_map.find("g_ViewportViewProjectionMatrices");
-    ASSERT_NE(matrices, global->member_map.end());
-    EXPECT_EQ(matrices->second.num, rstd::usize(6));
+    EXPECT_EQ(canonical_reflection.blocks.size(), 1u);
 }
 
 TEST(ShaderParser, KeepsShadowMatricesInCanonicalGlobalSet) {
@@ -845,7 +853,7 @@ void main() {
     ASSERT_TRUE(owe::vulkan::GenReflect(compile.shader->codes, spvs, reflection));
     const auto global =
         std::find_if(reflection.blocks.begin(), reflection.blocks.end(), [](const auto& block) {
-            return block.name == "ww_GlobalUniforms";
+            return block.name == "ww_LightingUniforms";
         });
     ASSERT_NE(global, reflection.blocks.end());
     const auto matrices = global->member_map.find("g_ViewportViewProjectionMatrices");
@@ -890,7 +898,7 @@ void main() { gl_FragColor = texSample2D(g_Texture0, vec2(0.5)); }
               owe::SceneShaderUniformBlockScope::Local);
 }
 
-TEST(ShaderParser, PrunesUnusedDrawUniformsWithoutPruningGlobalSchema) {
+TEST(ShaderParser, PrunesUnusedDrawUniformsAndInactiveGlobalBlocks) {
     owe::SceneShaderVariantDesc desc;
     desc.scene_id    = "draw-uniform-prune-test";
     desc.shader_name = "draw-uniform-prune-test";
@@ -925,11 +933,53 @@ void main() { gl_Position = vec4(a_Position.x + g_Used, a_Position.yz, 1.0); }
     EXPECT_FALSE(local->member_map.contains("g_Unused"));
     const auto global =
         std::find_if(reflected.blocks.begin(), reflected.blocks.end(), [](const auto& block) {
-            return block.name == "ww_GlobalUniforms";
+            return block.name == "ww_GlobalUniforms" || block.name == "ww_AudioUniforms" ||
+                   block.name == "ww_LightingUniforms";
         });
-    ASSERT_NE(global, reflected.blocks.end());
-    EXPECT_TRUE(global->member_map.contains("g_Time"));
-    EXPECT_TRUE(global->member_map.contains("g_Daytime"));
+    EXPECT_EQ(global, reflected.blocks.end());
+}
+
+TEST(ShaderParser, SplitsActiveGlobalUniformsAcrossSetZeroBindings) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "split-global-uniform-abi-test";
+    desc.shader_name = "split-global-uniform-abi-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/split-global-uniform-abi-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+uniform float g_Time;
+uniform float g_AudioSpectrum16Left[16];
+uniform vec3 g_LightsPosition[4];
+void main() {
+    float inputValue = g_Time + g_AudioSpectrum16Left[0] + g_LightsPosition[0].x;
+    gl_Position = vec4(a_Position.x + inputValue * 0.0, a_Position.yz, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/split-global-uniform-abi-test.frag",
+        .source     = "void main() { gl_FragColor = vec4(1.0); }",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::ShaderParser::CompileSceneShaderVariant(desc, vfs);
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_EQ(result.shader->uniform_blocks.size(), 3u);
+    for (const auto& block : owe::GlobalUniformBlocks()) {
+        const auto reflected =
+            std::find_if(result.shader->uniform_blocks.begin(),
+                         result.shader->uniform_blocks.end(),
+                         [&](const auto& candidate) {
+                             return candidate.name == rstd::cppstd::to_string(block.name);
+                         });
+        ASSERT_NE(reflected, result.shader->uniform_blocks.end());
+        EXPECT_EQ(reflected->set, owe::kGlobalUniformSet);
+        EXPECT_EQ(reflected->binding, block.binding);
+        EXPECT_EQ(reflected->identity, block.identity);
+        EXPECT_EQ(reflected->scope, owe::SceneShaderUniformBlockScope::Shared);
+    }
 }
 
 TEST(ShaderParser, CompileSceneShaderVariantUsesPhysicalFileCache) {
@@ -1002,7 +1052,7 @@ void main() {
                (static_cast<std::uint32_t>(header[offset + 3]) << 24);
     };
     EXPECT_EQ(read_u32(8), 3u);
-    EXPECT_EQ(read_u32(12), 14u);
+    EXPECT_EQ(read_u32(12), 15u);
     EXPECT_EQ(read_u32(16), 112u);
     EXPECT_EQ(read_u32(24), 2u);
     const auto initial_write_time = std::filesystem::last_write_time(artifact_path);

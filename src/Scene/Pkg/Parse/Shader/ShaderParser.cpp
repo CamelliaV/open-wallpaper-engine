@@ -1310,6 +1310,7 @@ Set<std::string> ReferencedUniformNames(std::span<const ShaderUnit> units) {
 
 struct UniformCompileInterface {
     bool                          legacy { false };
+    Vec<GlobalUniformBlockKind>   global_blocks;
     Map<std::string, std::string> local;
 };
 
@@ -1352,6 +1353,17 @@ UniformCompileInterface BuildUniformInterface(std::span<ShaderUnit> units) {
     }
 
     const auto referenced = ReferencedUniformNames(units);
+    for (const auto& block : GlobalUniformBlocks()) {
+        bool active = false;
+        for (const auto& field : GlobalUniformFields()) {
+            if (GlobalUniformBlockFor(field.producer) != block.kind) continue;
+            if (referenced.contains(rstd::cppstd::to_string(field.name))) {
+                active = true;
+                break;
+            }
+        }
+        if (active) result.global_blocks.push(GlobalUniformBlockKind(block.kind));
+    }
     for (const auto& unit : units) {
         for (const auto& [name, type] : unit.preprocess_info.uniforms) {
             if (FindGlobalUniform(rstd::cppstd::as_str(name).unwrap()).is_some() ||
@@ -1439,12 +1451,13 @@ inline std::string EmitCBufferStd140(const Map<std::string, std::string>& unifor
     return out;
 }
 
-inline std::string EmitGlobalCBufferStd140() {
+inline std::string EmitGlobalCBufferStd140(const GlobalUniformBlockSchema& block) {
     std::string out;
-    out += "[[vk::binding(" + std::to_string(kGlobalUniformBinding.to_primitive()) + ", " +
+    out += "[[vk::binding(" + std::to_string(block.binding.to_primitive()) + ", " +
            std::to_string(kGlobalUniformSet.to_primitive()) + ")]] cbuffer " +
-           rstd::cppstd::to_string(kGlobalUniformBlockName) + " {\n";
+           rstd::cppstd::to_string(block.name) + " {\n";
     for (const auto& field : GlobalUniformFields()) {
+        if (GlobalUniformBlockFor(field.producer) != block.kind) continue;
         const auto layout = LayoutUniform(rstd::cppstd::as_string_view(field.type));
         const auto offset = field.offset.to_primitive();
         const auto reg    = offset / 16;
@@ -1455,6 +1468,15 @@ inline std::string EmitGlobalCBufferStd140() {
         out += ");\n";
     }
     out += "};\n";
+    return out;
+}
+
+inline std::string EmitGlobalCBuffersStd140(const UniformCompileInterface& interface) {
+    std::string out;
+    for (const auto kind : interface.global_blocks) {
+        auto block = FindGlobalUniformBlock(kind);
+        if (block.is_some()) out += EmitGlobalCBufferStd140(**block);
+    }
     return out;
 }
 
@@ -1515,7 +1537,7 @@ inline std::string Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo
         }
         const Map<std::string, std::string>& uniforms_union =
             interface ? interface->local : uniforms_union_local;
-        if (interface && ! interface->legacy) synth += EmitGlobalCBufferStd140();
+        if (interface && ! interface->legacy) synth += EmitGlobalCBuffersStd140(*interface);
         if (! uniforms_union.empty()) {
             synth += "\n// === auto-generated draw uniforms (HLSL, std140 via packoffset) ===\n";
             synth += EmitCBufferStd140(uniforms_union,
@@ -1582,7 +1604,7 @@ inline std::string Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo
         interface ? interface->local : uniforms_union_local;
 
     std::string uniform_block;
-    if (interface && ! interface->legacy) uniform_block += EmitGlobalCBufferStd140();
+    if (interface && ! interface->legacy) uniform_block += EmitGlobalCBuffersStd140(*interface);
     if (! uniforms_union.empty()) {
         uniform_block +=
             "\n// === auto-generated draw uniforms (HLSL, std140 via packoffset) ===\n";
@@ -1626,7 +1648,7 @@ using ShaderCacheDigest = std::array<std::uint8_t, 20>;
 
 constexpr std::array<std::uint8_t, 8> kShaderCacheMagic { 'O', 'W', 'E', 'S', 'P', 'V', '3', 0 };
 constexpr std::uint32_t               kShaderCacheFormatVersion = 3;
-constexpr std::uint32_t               kShaderCacheAbiVersion    = 14;
+constexpr std::uint32_t               kShaderCacheAbiVersion    = 15;
 // 8-byte magic, six u32 fields, and four SHA-1 digests total 112 bytes.
 constexpr std::uint32_t kShaderCacheHeaderSize = static_cast<std::uint32_t>(
     kShaderCacheMagic.size() + 6 * sizeof(std::uint32_t) + 4 * ShaderCacheDigest {}.size());
@@ -2794,15 +2816,16 @@ void ShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
             utils::hash_combine(block_seed, member.offset);
             utils::hash_combine(block_seed, member.size.to_primitive());
         }
-        const bool shared = rstd::cppstd::as_str(block.name).unwrap() == kGlobalUniformBlockName;
-        canonical_abi     = canonical_abi || shared;
+        auto       shared_block = FindGlobalUniformBlock(rstd::cppstd::as_str(block.name).unwrap());
+        const bool shared       = shared_block.is_some();
+        canonical_abi           = canonical_abi || shared;
         desc.uniform_blocks.push_back(SceneShaderUniformBlockInterface {
             .name    = block.name,
             .set     = u32(block.set),
             .binding = u32(block.binding),
             .scope =
                 shared ? SceneShaderUniformBlockScope::Shared : SceneShaderUniformBlockScope::Local,
-            .identity = shared ? kGlobalUniformSchemaIdentity : u64(block_seed),
+            .identity = shared ? (**shared_block).identity : u64(block_seed),
         });
     }
 
@@ -2818,7 +2841,7 @@ void ShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
                 .push_descriptor =
                     ! canonical_abi || binding.set != kGlobalUniformSet.to_primitive(),
                 .identity = canonical_abi && binding.set == kGlobalUniformSet.to_primitive()
-                                ? kGlobalUniformSchemaIdentity
+                                ? kGlobalUniformSetIdentity
                                 : u64(),
             });
             target = rstd::addressof(desc.descriptor_sets.back());

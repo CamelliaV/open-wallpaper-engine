@@ -169,6 +169,7 @@ struct RenderProgram {
     rstd::vec::Vec<ref<dyn<UniformBufferUpdate>>>           uniform_updates;
     resource_registry::DescriptorBindingRecordState         descriptor_record_state;
     PipelineLayoutAssignments                               pipeline_layout_assignments;
+    Option<resource::DescriptorBindingHandle>               global_descriptor_binding;
     rstd::Option<resource_registry::ResourcePrepareSession> resource_prepare_session;
     bool                                                    loaded { false };
 
@@ -177,6 +178,7 @@ struct RenderProgram {
         uniform_update_owners.clear();
         resource_prepare_session = rstd::None();
         pipeline_layout_assignments.entries.clear();
+        global_descriptor_binding = None();
         scopes.clear();
         pass_records.clear();
         resource_plan       = {};
@@ -718,6 +720,103 @@ struct RenderProgram {
         pipeline_layout_assignments = rstd::move(next_layout_assignments);
         auto graphics =
             rstd::dyn<owe::resource_registry::GraphicsResourcePreparer>::from_ref(rr.resources);
+
+        auto global_uses = Vec<GlobalDescriptorBufferUse>::make();
+        for (auto& record : pass_records) {
+            auto pass = resolve(record);
+            if (pass.is_none()) continue;
+            auto                  uses = pass->resourceUses();
+            PreparedPassResources resources(rr.resources.Prepared(), uses);
+            auto                  collected = pass->globalDescriptorBufferUses(resources);
+            if (collected.is_err()) {
+                auto error = rstd::move(collected).unwrap_err_unchecked();
+                rstd_error("collect global descriptor buffers failed for {}: {}",
+                           record.pass_name,
+                           error.message.as_str());
+                return RenderProgramPrepareStatus::Failed;
+            }
+            for (const auto& use : collected.unwrap_unchecked()) {
+                bool known = false;
+                for (const auto& existing : global_uses) {
+                    if (existing.binding != use.binding) continue;
+                    if (existing.identity != use.identity || existing.buffer != use.buffer) {
+                        rstd_error("global descriptor binding {} has incompatible resources",
+                                   use.binding);
+                        return RenderProgramPrepareStatus::Failed;
+                    }
+                    known = true;
+                    break;
+                }
+                if (! known) {
+                    global_uses.push(GlobalDescriptorBufferUse {
+                        .binding  = use.binding,
+                        .identity = use.identity,
+                        .buffer   = use.buffer,
+                    });
+                }
+            }
+        }
+        rstd::slice_::sort_unstable_by(global_uses.as_mut_slice().as_mut_ref(),
+                                       [](const auto& lhs, const auto& rhs) {
+                                           return lhs.binding < rhs.binding;
+                                       });
+        if (global_uses.len() != layout_plan.global_bindings.len()) {
+            rstd_error("global descriptor writes do not cover the planned layout");
+            return RenderProgramPrepareStatus::Failed;
+        }
+        for (const auto& binding : layout_plan.global_bindings) {
+            bool matched = false;
+            for (const auto& use : global_uses) {
+                if (use.binding == binding.binding && use.identity == binding.identity) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (! matched) {
+                rstd_error("global descriptor binding {} does not match the planned layout",
+                           binding.binding);
+                return RenderProgramPrepareStatus::Failed;
+            }
+        }
+        Option<resource::DescriptorBindingHandle> next_global_descriptor_binding;
+        if (global_descriptor_binding.is_some())
+            rr.resources.RemovePreparedDescriptor(*global_descriptor_binding);
+        if (! global_uses.is_empty()) {
+            if (pipeline_layout_assignments.entries.is_empty()) {
+                rstd_error("global descriptor buffers have no pipeline layout");
+                return RenderProgramPrepareStatus::Failed;
+            }
+            auto buffers =
+                Vec<resource_registry::DescriptorBufferBinding>::with_capacity(global_uses.len());
+            for (const auto& use : global_uses) {
+                auto prepared = rr.resources.Prepared().Resolve(use.buffer);
+                if (prepared.is_none()) {
+                    rstd_error("global descriptor buffer {} is unavailable", use.binding);
+                    return RenderProgramPrepareStatus::Failed;
+                }
+                auto& allocation = (**prepared).buffer.physical->buffer;
+                buffers.push(resource_registry::DescriptorBufferBinding {
+                    .binding = use.binding.to_primitive(),
+                    .buffer  = allocation.buffer(),
+                    .offset  = allocation.offset(),
+                    .size    = allocation.size(),
+                });
+            }
+            auto images = Vec<resource_registry::DescriptorImageBinding>::make();
+            auto prepared =
+                graphics->PrepareDescriptor(device,
+                                            pipeline_layout_assignments.entries[usize()].layout,
+                                            u32(),
+                                            images.as_slice(),
+                                            buffers.as_slice(),
+                                            resource_registry::DescriptorBindingReuse::Shared);
+            if (prepared.is_err()) {
+                auto error = rstd::move(prepared).unwrap_err_unchecked();
+                rstd_error("prepare global descriptor set failed: {}", error.message.as_str());
+                return RenderProgramPrepareStatus::Failed;
+            }
+            next_global_descriptor_binding = Some(rstd::move(prepared).unwrap_unchecked());
+        }
         PassPrepareContext prepare_context {
             .resources = rstd::ref<owe::resource_registry::PreparedResourceTable>::from_raw_parts(
                 rstd::addressof(rr.resources.Prepared())),
@@ -778,6 +877,7 @@ struct RenderProgram {
         for (const auto& binding : uniform_update_owners) {
             uniform_updates.push(binding.as_ref());
         }
+        global_descriptor_binding = next_global_descriptor_binding;
         return RenderProgramPrepareStatus::Complete;
     }
 
@@ -886,7 +986,10 @@ struct RenderProgram {
         if (pass.is_none()) return;
 
         PreparedPassResources resources(rr.resources.Prepared(), pass_records[index].resources);
-        PassRecordContext     context {
+        auto global_descriptor = global_descriptor_binding.is_some()
+                                     ? rr.resources.Prepared().Resolve(*global_descriptor_binding)
+                                     : None<ref<resource_registry::PreparedDescriptorBinding>>();
+        PassRecordContext context {
             .command =
                 rstd::mut_ref<vvk::CommandBuffer>::from_raw_parts(rstd::addressof(rr.command)),
             .resources =
@@ -894,6 +997,7 @@ struct RenderProgram {
             .descriptor_state =
                 rstd::mut_ref<resource_registry::DescriptorBindingRecordState>::from_raw_parts(
                     rstd::addressof(descriptor_record_state)),
+            .global_descriptor = global_descriptor,
         };
         callback(*pass, context);
     }

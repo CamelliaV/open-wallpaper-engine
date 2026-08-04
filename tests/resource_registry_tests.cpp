@@ -1118,14 +1118,18 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
         .binding = 2,
         .image   = image,
     });
-    auto prepared =
-        descriptors.PreparePush(3,
-                                images.as_slice(),
-                                rstd::Some(owe::resource_registry::DescriptorBufferBinding {
-                                    .binding = 0,
-                                    .offset  = 64,
-                                    .size    = 128,
-                                }));
+    auto buffers = rstd::vec::Vec<owe::resource_registry::DescriptorBufferBinding>::make();
+    buffers.push(owe::resource_registry::DescriptorBufferBinding {
+        .binding = 2,
+        .offset  = 256,
+        .size    = 512,
+    });
+    buffers.push(owe::resource_registry::DescriptorBufferBinding {
+        .binding = 0,
+        .offset  = 64,
+        .size    = 128,
+    });
+    auto prepared = descriptors.PreparePush(3, images.as_slice(), buffers.as_slice());
     EXPECT_EQ(prepared.set_index, 3u);
     auto handle = prepared.handle;
 
@@ -1134,9 +1138,13 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
     EXPECT_EQ(prepared.images[rstd::usize()].binding, 2u);
     EXPECT_EQ(prepared.images[rstd::usize()].layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     EXPECT_EQ(prepared.images[rstd::usize()].image.generation, rstd::u64(17));
-    ASSERT_TRUE(prepared.buffer.is_some());
-    EXPECT_EQ(prepared.buffer->offset, 64u);
-    EXPECT_EQ(prepared.buffer->size, 128u);
+    ASSERT_EQ(prepared.buffers.len(), rstd::usize(2));
+    EXPECT_EQ(prepared.buffers[rstd::usize()].binding, 0u);
+    EXPECT_EQ(prepared.buffers[rstd::usize()].offset, 64u);
+    EXPECT_EQ(prepared.buffers[rstd::usize()].size, 128u);
+    EXPECT_EQ(prepared.buffers[rstd::usize(1)].binding, 2u);
+    EXPECT_EQ(prepared.buffers[rstd::usize(1)].offset, 256u);
+    EXPECT_EQ(prepared.buffers[rstd::usize(1)].size, 512u);
 
     owe::resource_registry::PreparedResourceTable table;
     EXPECT_TRUE(table.Insert(rstd::move(prepared)));
@@ -1163,8 +1171,9 @@ TEST(DescriptorSystem, PreservesDepthSampledLayoutAcrossCloneAndUpdate) {
         .binding = 1,
         .layout  = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
     });
-    auto prepared = descriptors.PreparePush(2, images.as_slice(), rstd::None());
-    auto cloned   = prepared.clone();
+    auto prepared = descriptors.PreparePush(
+        2, images.as_slice(), rstd::slice<owe::resource_registry::DescriptorBufferBinding>());
+    auto cloned = prepared.clone();
     ASSERT_EQ(cloned.images.len(), rstd::usize(1));
     EXPECT_EQ(cloned.images[rstd::usize()].layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
@@ -1201,11 +1210,84 @@ TEST(DescriptorSystem, RejectsActiveWritesOutsideThePipelineLayout) {
 
     owe::resource_registry::DescriptorSystem descriptors;
     owe::vulkan::Device                      device;
+    auto                                     rejected =
+        descriptors.Prepare(device,
+                            1,
+                            layout,
+                            images.as_slice(),
+                            rstd::slice<owe::resource_registry::DescriptorBufferBinding>(),
+                            owe::resource_registry::DescriptorBindingReuse::Exclusive);
+    EXPECT_TRUE(rejected.is_err());
+}
+
+TEST(DescriptorSystem, RejectsDuplicateBufferWrites) {
+    auto bindings = rstd::vec::Vec<owe::resource_registry::DescriptorBindingSchema>::make();
+    bindings.push(owe::resource_registry::DescriptorBindingSchema {
+        .binding          = 1,
+        .descriptor_type  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptor_count = 1,
+        .stage_flags      = VK_SHADER_STAGE_VERTEX_BIT,
+    });
+    owe::resource_registry::DescriptorLayoutEntry layout {
+        .handle =
+            owe::resource::DescriptorLayoutHandle {
+                .index      = rstd::u64(2),
+                .generation = rstd::u64(1),
+            },
+        .schema =
+            owe::resource_registry::DescriptorSetSchema {
+                .push_descriptor = true,
+                .bindings        = rstd::move(bindings),
+            },
+    };
+    auto buffers = rstd::vec::Vec<owe::resource_registry::DescriptorBufferBinding>::make();
+    buffers.push(owe::resource_registry::DescriptorBufferBinding { .binding = 1, .size = 16 });
+    buffers.push(owe::resource_registry::DescriptorBufferBinding { .binding = 1, .size = 32 });
+    auto images = rstd::vec::Vec<owe::resource_registry::DescriptorImageBinding>::make();
+
+    owe::resource_registry::DescriptorSystem descriptors;
+    owe::vulkan::Device                      device;
     auto rejected = descriptors.Prepare(device,
-                                        1,
+                                        0,
                                         layout,
                                         images.as_slice(),
-                                        rstd::None(),
+                                        buffers.as_slice(),
+                                        owe::resource_registry::DescriptorBindingReuse::Exclusive);
+    EXPECT_TRUE(rejected.is_err());
+}
+
+TEST(DescriptorSystem, RejectsDuplicateImageWrites) {
+    auto bindings = rstd::vec::Vec<owe::resource_registry::DescriptorBindingSchema>::make();
+    bindings.push(owe::resource_registry::DescriptorBindingSchema {
+        .binding          = 2,
+        .descriptor_type  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptor_count = 1,
+        .stage_flags      = VK_SHADER_STAGE_FRAGMENT_BIT,
+    });
+    owe::resource_registry::DescriptorLayoutEntry layout {
+        .handle =
+            owe::resource::DescriptorLayoutHandle {
+                .index      = rstd::u64(3),
+                .generation = rstd::u64(1),
+            },
+        .schema =
+            owe::resource_registry::DescriptorSetSchema {
+                .push_descriptor = true,
+                .bindings        = rstd::move(bindings),
+            },
+    };
+    auto images = rstd::vec::Vec<owe::resource_registry::DescriptorImageBinding>::make();
+    images.push(owe::resource_registry::DescriptorImageBinding { .binding = 2 });
+    images.push(owe::resource_registry::DescriptorImageBinding { .binding = 2 });
+    auto buffers = rstd::vec::Vec<owe::resource_registry::DescriptorBufferBinding>::make();
+
+    owe::resource_registry::DescriptorSystem descriptors;
+    owe::vulkan::Device                      device;
+    auto rejected = descriptors.Prepare(device,
+                                        0,
+                                        layout,
+                                        images.as_slice(),
+                                        buffers.as_slice(),
                                         owe::resource_registry::DescriptorBindingReuse::Exclusive);
     EXPECT_TRUE(rejected.is_err());
 }
