@@ -6,7 +6,7 @@ import owe.scene_audio_response;
 import rstd;
 import rstd.cppstd;
 import wescene.scene;
-import wescene.spec_names;
+import wescene.pkg.spec_names;
 import wescene.utils;
 
 using namespace Eigen;

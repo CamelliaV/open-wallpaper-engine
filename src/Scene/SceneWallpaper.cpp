@@ -6,7 +6,6 @@ module wescene.scene_wallpaper;
 import wescene.types;
 import wescene.utils;
 import wescene.scene;
-import wescene.spec_names;
 
 import eigen;
 import owe.audio_response;

@@ -1,7 +1,7 @@
 export module wescene.pkg.parse:global_uniform;
 import rstd;
 import wescene.scene;
-import wescene.spec_names;
+import wescene.pkg.spec_names;
 
 using namespace rstd::prelude;
 using namespace rstd::literals;

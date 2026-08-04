@@ -12,7 +12,7 @@ import wescene.core;
 import wescene.particle;
 import wescene.particle.program;
 import wescene.scene;
-import wescene.spec_names;
+import wescene.pkg.spec_names;
 
 using namespace rstd::prelude;
 using namespace owe;

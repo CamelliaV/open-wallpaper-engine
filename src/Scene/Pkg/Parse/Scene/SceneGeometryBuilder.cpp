@@ -3,7 +3,7 @@ module;
 module wescene.pkg.parse;
 import :scene_context;
 import eigen;
-import wescene.spec_names;
+import wescene.pkg.spec_names;
 import rstd;
 import rstd.cppstd;
 import wescene.scene;

@@ -17,7 +17,6 @@ import wescene.resource_registry;
 import wescene.vulkan;
 import wescene.utils;
 import wescene.scene;
-import wescene.spec_names;
 import wescene.text;
 
 import wescene.rgraph;

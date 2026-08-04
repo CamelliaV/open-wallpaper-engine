@@ -58,6 +58,7 @@ target_sources(owe-base
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          SpecNames.cppm
          Pkg/mod.cppm
+         Pkg/SpecNames.cppm
          Pkg/AssetVersion.cppm
          Pkg/PkgFs.cppm
          Utils/Utils.cppm

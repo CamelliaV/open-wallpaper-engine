@@ -8,7 +8,7 @@ module;
 #include <fontconfig/fontconfig.h>
 module wescene.text;
 import eigen;
-import wescene.spec_names;
+import wescene.pkg.spec_names;
 import wescene.core;
 import wescene.types;
 import rstd;

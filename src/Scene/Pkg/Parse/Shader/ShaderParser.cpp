@@ -3,7 +3,7 @@ module;
 #include <rstd/macro.hpp>
 
 module wescene.pkg.parse;
-import wescene.spec_names;
+import wescene.pkg.spec_names;
 import wescene.core;
 import wescene.types;
 import rstd;

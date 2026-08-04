@@ -11,7 +11,7 @@ import rstd.log;
 import wescene.fs;
 import wescene.pkg.parse;
 import wescene.script;
-import wescene.spec_names;
+import wescene.pkg.spec_names;
 
 using namespace rstd::prelude;
 using namespace rstd::literals;
