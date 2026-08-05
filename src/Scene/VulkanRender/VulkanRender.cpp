@@ -25,7 +25,8 @@ using namespace owe::vulkan;
 using namespace rstd::prelude;
 using namespace rstd::literals;
 
-constexpr std::uint64_t        vk_wait_time { 10u * 1000u * 1000000u };
+constexpr std::uint64_t        vk_wait_time { static_cast<std::uint64_t>(
+    rstd::time::Duration::from_secs(u64(10)).as_nanos().to_primitive()) };
 constexpr std::uint32_t        vk_upload_command_num { 3 };
 constexpr std::uint32_t        vk_command_num { vk_upload_command_num + 1 };
 constexpr VkPipelineStageFlags vk_upload_wait_stages { VK_PIPELINE_STAGE_TRANSFER_BIT |
@@ -634,7 +635,9 @@ rstd::Option<std::size_t> VulkanRender::Impl::acquireUploadCommandSlot(Rendering
         std::uint64_t counter = 0;
         VVK_CHECK_ACT(return rstd::None(), rr.sem_upload.GetCounter(&counter));
         if (counter < wait_value) {
-            VVK_CHECK_ACT(return rstd::None(), rr.sem_upload.Wait(wait_value, vk_wait_time));
+            const auto result = rr.sem_upload.Wait(wait_value, vk_wait_time);
+            if (result == VK_TIMEOUT) return rstd::None();
+            VVK_CHECK_ACT(return rstd::None(), result);
         }
         rr.resources.CompleteUploadsThrough(u64(wait_value));
         m_upload_cmd_values[slot] = 0;
@@ -667,8 +670,9 @@ bool VulkanRender::Impl::waitForPreparedUploads(RenderingResources& rr) {
     std::uint64_t counter = 0;
     VVK_CHECK_ACT(return false, rr.sem_upload.GetCounter(&counter));
     if (counter < pending->value.to_primitive()) {
-        VVK_CHECK_ACT(return false,
-                             rr.sem_upload.Wait(pending->value.to_primitive(), vk_wait_time));
+        const auto result = rr.sem_upload.Wait(pending->value.to_primitive(), vk_wait_time);
+        if (result == VK_TIMEOUT) return false;
+        VVK_CHECK_ACT(return false, result);
     }
     rr.resources.CompleteUploadsThrough(pending->value);
     m_pending_load_bench = {};
