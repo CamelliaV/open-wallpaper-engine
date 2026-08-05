@@ -1,3 +1,9 @@
+<release version="0.2.2" date="2026-08-05">
+  <description>
+    <p>Changed: Bump up waywallen spawn version.</p>
+    <p>Fixed: Vulkan validation and stability issues in shaders, particle and video textures.</p>
+  </description>
+</release>
 <release version="0.2.1" date="2026-08-04">
   <description>
     <p>Added:</p>
