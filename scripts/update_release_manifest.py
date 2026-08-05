@@ -101,7 +101,7 @@ def update_manifest(existing: dict, release: dict, version: str, arches: list[st
     manifest = dict(existing)
     manifest["version"] = version
     manifest.setdefault("entry_version", 2)
-    manifest.setdefault("spawn_version", 6)
+    manifest["spawn_version"] = 9
 
     for arch in arches:
         name = asset_name(version, arch)
