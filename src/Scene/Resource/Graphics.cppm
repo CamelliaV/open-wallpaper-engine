@@ -44,6 +44,19 @@ struct PipelinePushConstantSchema {
                            const PipelinePushConstantSchema&) = default;
 };
 
+} // namespace owe::resource_registry
+
+export namespace rstd
+{
+
+template<>
+struct Impl<Copy, owe::resource_registry::PipelinePushConstantSchema> {};
+
+} // namespace rstd
+
+export namespace owe::resource_registry
+{
+
 struct PipelineLayoutSchema {
     rstd::vec::Vec<resource::DescriptorLayoutHandle> descriptor_layouts;
     rstd::vec::Vec<PipelinePushConstantSchema>       push_constants;

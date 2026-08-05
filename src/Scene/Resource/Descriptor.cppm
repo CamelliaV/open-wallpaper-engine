@@ -23,23 +23,27 @@ struct DescriptorBindingSchema {
                            const DescriptorBindingSchema&) = default;
 };
 
+} // namespace owe::resource_registry
+
+export namespace rstd
+{
+
+template<>
+struct Impl<Copy, owe::resource_registry::DescriptorBindingSchema> {};
+
+} // namespace rstd
+
+export namespace owe::resource_registry
+{
+
 struct DescriptorSetSchema {
     bool                                    push_descriptor { false };
     rstd::vec::Vec<DescriptorBindingSchema> bindings;
 
     auto clone() const -> DescriptorSetSchema {
-        auto cloned = rstd::vec::Vec<DescriptorBindingSchema>::with_capacity(bindings.len());
-        for (const auto& binding : bindings) {
-            cloned.push(DescriptorBindingSchema {
-                .binding          = binding.binding,
-                .descriptor_type  = binding.descriptor_type,
-                .descriptor_count = binding.descriptor_count,
-                .stage_flags      = binding.stage_flags,
-            });
-        }
         return DescriptorSetSchema {
             .push_descriptor = push_descriptor,
-            .bindings        = rstd::move(cloned),
+            .bindings        = bindings.clone(),
         };
     }
 
@@ -230,6 +234,22 @@ struct DescriptorBufferBinding {
     VkDeviceSize   size { 0 };
 };
 
+} // namespace owe::resource_registry
+
+export namespace rstd
+{
+
+template<>
+struct Impl<Copy, owe::resource_registry::DescriptorImageBinding> {};
+
+template<>
+struct Impl<Copy, owe::resource_registry::DescriptorBufferBinding> {};
+
+} // namespace rstd
+
+export namespace owe::resource_registry
+{
+
 struct DescriptorSetPacketKey {
     resource::DescriptorLayoutHandle layout;
     Vec<DescriptorBufferBinding>     buffers;
@@ -390,20 +410,12 @@ struct PreparedDescriptorBinding {
     Option<vvk::DescriptorSetLease>         set;
 
     auto clone() const -> PreparedDescriptorBinding {
-        auto cloned_images = rstd::vec::Vec<DescriptorImageBinding>::with_capacity(images.len());
-        for (const auto& image : images) {
-            cloned_images.push(DescriptorImageBinding {
-                .binding = image.binding,
-                .image   = image.image,
-                .layout  = image.layout,
-            });
-        }
         return PreparedDescriptorBinding {
             .handle    = handle,
             .layout    = layout,
             .set_index = set_index,
             .backend   = backend,
-            .images    = rstd::move(cloned_images),
+            .images    = images.clone(),
             .buffers   = buffers.clone(),
             .set       = set.is_some() ? Some(set->clone()) : None(),
         };
@@ -428,14 +440,7 @@ struct PreparedDescriptorBinding {
         }
         if (! changed) return Ok(empty {});
 
-        auto updated = rstd::vec::Vec<DescriptorImageBinding>::with_capacity(next.len());
-        for (usize index {}; index < next.len(); ++index) {
-            updated.push(DescriptorImageBinding {
-                .binding = next[index].binding,
-                .image   = next[index].image,
-                .layout  = next[index].layout,
-            });
-        }
+        auto updated = rstd::vec::Vec<DescriptorImageBinding>::from(next);
 
         if (backend == DescriptorBindingBackend::Set) {
             if (set.is_none() || ! set->valid()) {
@@ -532,14 +537,7 @@ class DescriptorSystem {
 public:
     auto PreparePush(rstd::uint32_t set_index, rstd::slice<DescriptorImageBinding> images,
                      rstd::slice<DescriptorBufferBinding> buffers) -> PreparedDescriptorBinding {
-        auto prepared_images = rstd::vec::Vec<DescriptorImageBinding>::with_capacity(images.len());
-        for (usize index = usize(); index < images.len(); ++index) {
-            prepared_images.push(DescriptorImageBinding {
-                .binding = images[index].binding,
-                .image   = images[index].image,
-                .layout  = images[index].layout,
-            });
-        }
+        auto prepared_images = rstd::vec::Vec<DescriptorImageBinding>::from(images);
         rstd::slice_::sort_unstable_by(prepared_images.as_mut_slice().as_mut_ref(),
                                        [](const auto& lhs, const auto& rhs) {
                                            return lhs.binding < rhs.binding;

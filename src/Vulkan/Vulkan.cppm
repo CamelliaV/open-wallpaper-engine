@@ -1354,6 +1354,12 @@ export namespace rstd
 {
 
 template<>
+struct Impl<Copy, owe::vulkan::ImageUploadTicket> {};
+
+template<>
+struct Impl<Copy, owe::vulkan::BufferUploadTicket> {};
+
+template<>
 struct Impl<owe::vulkan::MemoryBudgetSource, owe::vulkan::Device> : ImplBase<owe::vulkan::Device> {
     auto MemoryBudget() const -> owe::vulkan::MemoryBudgetSnapshot {
         return this->self().MemoryBudget();

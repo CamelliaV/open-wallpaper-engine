@@ -2236,6 +2236,19 @@ struct SceneShadowViewport {
     u32 scissor_height {};
 };
 
+} // namespace owe
+
+export namespace rstd
+{
+
+template<>
+struct Impl<Copy, owe::SceneShadowViewport> {};
+
+} // namespace rstd
+
+export namespace owe
+{
+
 struct SceneShadowDefinition {
     String                   target;
     Vec<SceneShadowViewport> viewports;
