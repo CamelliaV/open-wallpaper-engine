@@ -515,6 +515,42 @@ inline String NormalizePackedAudioSpectrumAccess(ref<str> src) {
     return out;
 }
 
+// glslang cannot resolve HLSL mul overloads when the leading scalar is an
+// untyped integer literal. WE shaders use these literals as float scalars.
+inline String NormalizeLeadingIntegerMulLiteral(ref<str> src) {
+    shader_lex::Lexer lx(src);
+    auto              out = String::make();
+    usize             copied {};
+    bool              changed { false };
+
+    for (;;) {
+        auto name = lx.Next();
+        if (name.kind == shader_lex::TokenKind::Eof) break;
+        if (name.kind != shader_lex::TokenKind::Ident || name.text != "mul"_str) continue;
+
+        auto save    = lx.Save();
+        auto open    = NextShaderToken(lx);
+        auto literal = PunctIs(open, '(') ? NextShaderToken(lx) : shader_lex::Token {};
+        auto comma =
+            literal.kind == shader_lex::TokenKind::Int ? NextShaderToken(lx) : shader_lex::Token {};
+        if (! PunctIs(open, '(') || literal.kind != shader_lex::TokenKind::Int ||
+            ! PunctIs(comma, ',')) {
+            lx.Restore(save);
+            continue;
+        }
+
+        auto literal_end = literal.offset + literal.text.size();
+        out.push_str(*src.get(copied, literal_end));
+        out.push_str(".0"_str);
+        copied  = literal_end;
+        changed = true;
+    }
+
+    if (! changed) return String::make(src);
+    out.push_str(*src.get(copied, src.size()));
+    return out;
+}
+
 inline bool LineDefinesMacro(ref<str> src, usize line_start, ref<str> macro_name) {
     shader_lex::Cursor c(src);
     c.SeekTo(line_start);
@@ -773,12 +809,11 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
     // GS source uses `in`/`out` storage classes; VS/FS use `attribute`/`varying`.
     ForEachDeclLine(
         source, { "attribute"_str, "varying"_str, "in"_str, "out"_str }, [&](const DeclMatch& m) {
-            // attribute-in-vertex and varying-in-fragment both behave as inputs;
-            // varying-in-vertex behaves as output. GS: `in` is input (from VS),
-            // `out` is output (to FS).
-            bool        is_input = (m.storage == "attribute"_str) ||
-                                   (m.storage == "varying"_str && type == ShaderType::FRAGMENT) ||
-                                   (m.storage == "in"_str && type == ShaderType::GEOMETRY);
+            // `in`/`out` keep their GLSL storage direction in every stage.
+            // Legacy `attribute` is a VS input; `varying` is produced by VS and
+            // consumed by FS.
+            bool        is_input = (m.storage == "attribute"_str) || (m.storage == "in"_str) ||
+                                   (m.storage == "varying"_str && type == ShaderType::FRAGMENT);
             std::string line(src.substr(m.start, m.end - m.start));
             auto        name = rstd::cppstd::to_string(m.name);
             if (is_input)
@@ -924,6 +959,92 @@ inline std::string StripUniforms(const std::string& src) {
         cursor = m.end;
     });
     out.append(src, cursor, std::string::npos);
+    return out;
+}
+
+inline bool IsGlobalVariableQualifier(ref<str> token) {
+    return token == "const"_str || token == "precise"_str || token == "row_major"_str ||
+           token == "column_major"_str || token == "static"_str;
+}
+
+// GLSL file-scope variables are private shader state. HLSL instead places an
+// unqualified file-scope variable in an implicit $Global uniform block.
+inline std::string QualifyGlobalVariablesForHlsl(const std::string& src) {
+    auto               source = rstd::cppstd::as_str(src).unwrap();
+    shader_lex::Lexer  lexer(source);
+    std::vector<usize> insertions;
+    int                brace_depth { 0 };
+    bool               statement_start { true };
+    bool               directive { false };
+
+    for (;;) {
+        auto token = lexer.Next();
+        if (token.kind == shader_lex::TokenKind::Eof) break;
+        if (token.kind == shader_lex::TokenKind::Newline) {
+            directive = false;
+            continue;
+        }
+        if (directive || token.kind == shader_lex::TokenKind::HSpace ||
+            token.kind == shader_lex::TokenKind::LineComment ||
+            token.kind == shader_lex::TokenKind::BlockComment) {
+            continue;
+        }
+        if (token.kind == shader_lex::TokenKind::Hash && brace_depth == 0) {
+            directive = true;
+            continue;
+        }
+        if (PunctIs(token, '{')) {
+            ++brace_depth;
+            statement_start = false;
+            continue;
+        }
+        if (PunctIs(token, '}')) {
+            if (brace_depth > 0) --brace_depth;
+            statement_start = brace_depth == 0;
+            continue;
+        }
+        if (brace_depth != 0) continue;
+        if (PunctIs(token, ';')) {
+            statement_start = true;
+            continue;
+        }
+        if (! statement_start) continue;
+        if (token.kind != shader_lex::TokenKind::Ident) continue;
+        if (token.text == rstd::cppstd::as_str(SHADER_PLACEHOLD).unwrap()) continue;
+        statement_start = false;
+
+        const auto declaration_start = token.offset;
+        const auto probe             = lexer.Save();
+        bool       has_static        = false;
+        bool       variable          = false;
+        auto       type              = token;
+        while (type.kind == shader_lex::TokenKind::Ident && IsGlobalVariableQualifier(type.text)) {
+            has_static = has_static || type.text == "static"_str;
+            type       = NextShaderToken(lexer);
+        }
+        if (type.kind == shader_lex::TokenKind::Ident) {
+            auto name = NextShaderToken(lexer);
+            if (name.kind == shader_lex::TokenKind::Ident) {
+                auto suffix = NextShaderToken(lexer);
+                variable = PunctIs(suffix, ';') || PunctIs(suffix, '=') || PunctIs(suffix, '[') ||
+                           PunctIs(suffix, ',') || PunctIs(suffix, ':');
+            }
+        }
+        lexer.Restore(probe);
+        if (variable && ! has_static) insertions.push_back(declaration_start);
+    }
+
+    if (insertions.empty()) return src;
+    std::string out;
+    out.reserve(src.size() + insertions.size() * 7);
+    std::size_t copied {};
+    for (auto offset : insertions) {
+        auto pos = offset.to_primitive();
+        out.append(src, copied, pos - copied);
+        out.append("static ");
+        copied = pos;
+    }
+    out.append(src, copied, std::string::npos);
     return out;
 }
 
@@ -1489,7 +1610,7 @@ inline std::string Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo
     // inout TriangleStream<WW_PSIn> OUT`.
     if (unit.stage == ShaderType::GEOMETRY) {
         auto [io_decls, stripped] = ScanAndStripIO(unit.src);
-        std::string body          = StripUniforms(stripped);
+        std::string body          = QualifyGlobalVariablesForHlsl(StripUniforms(stripped));
 
         std::vector<IODecl> in_decls, out_decls;
         auto add_to = [](std::vector<IODecl>& v,
@@ -1559,29 +1680,29 @@ inline std::string Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo
     auto [sampler_decls, stage2] = ScanAndStripSamplers(stage1);
 
     // Strip non-sampler declarations; they are re-emitted through the selected ABI.
-    std::string stage3 = StripUniforms(stage2);
+    std::string stage3 = QualifyGlobalVariablesForHlsl(StripUniforms(stage2));
 
-    // Partition IO decls into VS-attributes (`a` storage) and varyings
+    // Partition IO decls into VS inputs and varyings
     // (everything else). The producing stage owns each cross-stage interface
     // type; consumers only contribute names missing from that interface.
     std::vector<IODecl> attrs, varyings;
     auto add = [&](const IODecl& d, IODeclPrecedence precedence = IODeclPrecedence::KeepExisting) {
-        const bool vertex_system_input = unit.stage == ShaderType::VERTEX &&
-                                         (d.name == "gl_VertexID" || d.name == "gl_InstanceID");
-        std::vector<IODecl>& v = (d.storage == 'a' || vertex_system_input) ? attrs : varyings;
+        const bool vertex_input =
+            unit.stage == ShaderType::VERTEX && (d.storage == 'a' || d.storage == 'i');
+        std::vector<IODecl>& v = vertex_input ? attrs : varyings;
         AddIODecl(v, d, precedence);
     };
     for (const auto& d : io_decls) add(d);
-    auto add_from_line = [&](const std::string& line, IODeclPrecedence precedence) {
-        if (auto d = ParseIODecl(line); d) add(*d, precedence);
+    auto add_varying_from_line = [&](const std::string& line, IODeclPrecedence precedence) {
+        if (auto d = ParseIODecl(line); d) AddIODecl(varyings, *d, precedence);
     };
     if (unit.stage == ShaderType::VERTEX && next) {
         for (auto& [k, v] : next->input) {
-            add_from_line(v, IODeclPrecedence::KeepExisting);
+            add_varying_from_line(v, IODeclPrecedence::KeepExisting);
         }
     } else if (unit.stage == ShaderType::FRAGMENT && pre) {
         for (auto& [k, v] : pre->output) {
-            add_from_line(v, IODeclPrecedence::PreferIncoming);
+            add_varying_from_line(v, IODeclPrecedence::PreferIncoming);
         }
     }
 
@@ -1648,7 +1769,7 @@ using ShaderCacheDigest = std::array<std::uint8_t, 20>;
 
 constexpr std::array<std::uint8_t, 8> kShaderCacheMagic { 'O', 'W', 'E', 'S', 'P', 'V', '3', 0 };
 constexpr std::uint32_t               kShaderCacheFormatVersion = 3;
-constexpr std::uint32_t               kShaderCacheAbiVersion    = 15;
+constexpr std::uint32_t               kShaderCacheAbiVersion    = 18;
 // 8-byte magic, six u32 fields, and four SHA-1 digests total 112 bytes.
 constexpr std::uint32_t kShaderCacheHeaderSize = static_cast<std::uint32_t>(
     kShaderCacheMagic.size() + 6 * sizeof(std::uint32_t) + 4 * ShaderCacheDigest {}.size());
@@ -2285,7 +2406,8 @@ std::string ShaderParser::PreShaderHeader(const std::string& src, const Combos& 
     auto compatible = ReplaceAll(src, "\xEF\xBC\x9B", ";");
     auto undefined  = UndefBeforeConflictingMacroDefines(rstd::cppstd::as_str(compatible).unwrap());
     auto normalized_audio = NormalizePackedAudioSpectrumAccess(undefined.as_str());
-    auto user_src         = rstd::cppstd::to_string(normalized_audio.as_str());
+    auto normalized_mul   = NormalizeLeadingIntegerMulLiteral(normalized_audio.as_str());
+    auto user_src         = rstd::cppstd::to_string(normalized_mul.as_str());
 
     // All stages route through glslang's HLSL frontend.
     std::string pre;

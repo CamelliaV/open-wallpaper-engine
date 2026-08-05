@@ -349,6 +349,76 @@ mat3 rotate(vec3 c, vec3 s) {
     EXPECT_EQ(out.find("transpose(float3x3"), std::string::npos);
 }
 
+TEST(ShaderParser, CompileSceneShaderVariantAcceptsLeadingIntegerScalarMul) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "integer-scalar-mul-test";
+    desc.shader_name = "integer-scalar-mul-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/integer-scalar-mul-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+void main() {
+    float value = 2.0;
+    float scaled = mul(1, value / 50.0);
+    gl_Position = vec4(a_Position + vec3(scaled * 0.0), 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/integer-scalar-mul-test.frag",
+        .source     = R"(
+void main() {
+    gl_FragColor = vec4(1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::ShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    ASSERT_EQ(result.shader->codes.size(), 2u);
+}
+
+TEST(ShaderParser, CompileSceneShaderVariantKeepsGlobalVariablesPrivate) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "private-global-test";
+    desc.shader_name = "private-global-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/private-global-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+void main() {
+    gl_Position = vec4(a_Position, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/private-global-test.frag",
+        .source     = R"(
+float tint;
+void main() {
+    tint = 0.25;
+    gl_FragColor = vec4(tint, tint, tint, 1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::ShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    for (const auto& block : result.shader->uniform_blocks) {
+        EXPECT_NE(block.name, "$Global");
+    }
+}
+
 TEST(ShaderParser, PreShaderHeaderUsesHlslRectangularMatrixDimensions) {
     const std::string out = owe::ShaderParser::PreShaderHeader(
         R"(
