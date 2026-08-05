@@ -577,7 +577,8 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
     }
 
     mesh.AddMaterial(std::move(material));
-    RegisterMaterialBindings(*services.scene, *mesh.Material(), particle_obj.material, shaderInfo);
+    RegisterMaterialBindings(
+        *services.scene, mesh.MaterialSlots().front(), particle_obj.material, shaderInfo);
     if (services.construction_context != nullptr) {
         WireMaterialShaderValueScripts(*services.construction_context,
                                        spNode,

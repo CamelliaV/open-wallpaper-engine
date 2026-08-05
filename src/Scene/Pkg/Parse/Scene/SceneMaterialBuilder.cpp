@@ -636,7 +636,7 @@ void NormalizeEffectPositionCurve(SceneAnimationCurve& curve) {
 //       the GLSL uniform name.
 //   (3) Legacy material `usershadervalues` bindings: project key to shader
 //       material key.
-void RegisterShaderUserVarIndexImpl(Scene* pScene, SceneMaterial* stable_mat,
+void RegisterShaderUserVarIndexImpl(Scene* pScene, const std::shared_ptr<SceneMaterial>& stable_mat,
                                     const wpscene::Material& wpmat, const ShaderInfo& info) {
     if (! pScene || ! stable_mat) return;
     for (const auto& combo : info.combo_defs) {
@@ -656,7 +656,7 @@ void RegisterShaderUserVarIndexImpl(Scene* pScene, SceneMaterial* stable_mat,
         pScene->RegisterShaderComboUserBinding(combo.material.clone(), rstd::move(binding));
     }
     for (const auto& rec : info.user_var_staging) {
-        pScene->RegisterShaderUserBinding(rec.material.clone(), *stable_mat, rec.name.clone());
+        pScene->RegisterShaderUserBinding(rec.material.clone(), stable_mat, rec.name.clone());
     }
     for (const auto& [effect_key, wallpaper_key] : wpmat.constantshadervalues_user) {
         // Resolve effect-internal key → GLSL uniform name via alias.
@@ -670,7 +670,7 @@ void RegisterShaderUserVarIndexImpl(Scene* pScene, SceneMaterial* stable_mat,
             continue;
         }
         pScene->RegisterShaderUserBinding(String::make(as_str(wallpaper_key).unwrap()),
-                                          *stable_mat,
+                                          stable_mat,
                                           String::make(as_str(glname).unwrap()));
     }
     for (const auto& [wallpaper_key, material_key] : wpmat.user_shader_values) {
@@ -682,7 +682,7 @@ void RegisterShaderUserVarIndexImpl(Scene* pScene, SceneMaterial* stable_mat,
             continue;
         }
         pScene->RegisterShaderUserBinding(String::make(as_str(wallpaper_key).unwrap()),
-                                          *stable_mat,
+                                          stable_mat,
                                           String::make(as_str(glname).unwrap()));
     }
 }
@@ -729,9 +729,10 @@ std::string ResolveMaterialTextureFallback(Scene& scene, const wpscene::Material
     return fallback;
 }
 
-void RegisterMaterialUserTextureIndex(Scene* pScene, SceneMaterial* stable_mat,
-                                      const wpscene::Material& fallback_material,
-                                      const ShaderInfo&        shader_info) {
+void RegisterMaterialUserTextureIndex(Scene*                                pScene,
+                                      const std::shared_ptr<SceneMaterial>& stable_mat,
+                                      const wpscene::Material&              fallback_material,
+                                      const ShaderInfo&                     shader_info) {
     if (! pScene || ! stable_mat) return;
     for (usize i {}; i < fallback_material.usertextures.len(); ++i) {
         auto key = UserTexturePropertyKey(fallback_material.usertextures[i]);
@@ -1002,12 +1003,12 @@ void WireMaterialShaderValueScripts(SceneParseContext& context, const Arc<SceneN
     }
 }
 
-void RegisterMaterialBindings(Scene& scene, SceneMaterial& material,
+void RegisterMaterialBindings(Scene& scene, const std::shared_ptr<SceneMaterial>& material,
                               const wpscene::Material& authored, const ShaderInfo& shader_info,
                               Option<ref<wpscene::Material>> user_texture_fallback) {
-    RegisterShaderUserVarIndexImpl(&scene, &material, authored, shader_info);
+    RegisterShaderUserVarIndexImpl(&scene, material, authored, shader_info);
     if (user_texture_fallback.is_some()) {
-        RegisterMaterialUserTextureIndex(&scene, &material, **user_texture_fallback, shader_info);
+        RegisterMaterialUserTextureIndex(&scene, material, **user_texture_fallback, shader_info);
     }
 }
 

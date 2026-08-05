@@ -828,7 +828,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
                             rstd::addressof(*user_texture_fallback)));
                     }
                     RegisterMaterialBindings(
-                        scene, *mesh->Material(), wpmat, shader_info, binding_fallback);
+                        scene, mesh->MaterialSlots().front(), wpmat, shader_info, binding_fallback);
                     RegisterLayerPreviousBindings(
                         scene, *mesh->Material(), wpmat, text_node_id, as_str(composite).unwrap());
                     WireMaterialShaderValueScripts(
@@ -882,8 +882,10 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             if (published.is_none()) return;
             auto publish_mesh = std::make_shared<SceneMesh>();
             publish_mesh->AddMaterial(std::move(published->material));
-            RegisterMaterialBindings(
-                scene, *publish_mesh->Material(), published->source, published->shader_info);
+            RegisterMaterialBindings(scene,
+                                     publish_mesh->MaterialSlots().front(),
+                                     published->source,
+                                     published->shader_info);
             RegisterLayerPreviousBindings(scene,
                                           *publish_mesh->Material(),
                                           published->source,
@@ -915,7 +917,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
         compose_sv.propagated_parallax_depth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
         compose_mesh->AddMaterial(std::move(loaded->material));
         RegisterMaterialBindings(
-            scene, *compose_mesh->Material(), loaded->source, loaded->shader_info);
+            scene, compose_mesh->MaterialSlots().front(), loaded->source, loaded->shader_info);
         RegisterLayerPreviousBindings(scene,
                                       *compose_mesh->Material(),
                                       loaded->source,

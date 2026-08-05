@@ -2419,18 +2419,19 @@ public:
     auto ShadowDefinitions() const -> slice<SceneShadowDefinition>;
 
     struct ShaderUserBinding {
-        SceneMaterial* material { nullptr };
-        String         uniform;
+        std::shared_ptr<SceneMaterial> material;
+        String                         uniform;
     };
 
-    void RegisterShaderUserBinding(String key, SceneMaterial& material, String uniform);
+    void RegisterShaderUserBinding(String key, std::shared_ptr<SceneMaterial> material,
+                                   String uniform);
     auto ShaderUserBindings(ref<str> key) const -> slice<ShaderUserBinding>;
 
     struct ShaderComboUserBinding {
-        SceneMaterial*          material { nullptr };
-        String                  combo;
-        String                  fallback;
-        HashMap<String, String> options;
+        std::shared_ptr<SceneMaterial> material;
+        String                         combo;
+        String                         fallback;
+        HashMap<String, String>        options;
     };
     void RegisterShaderComboUserBinding(String key, ShaderComboUserBinding binding);
     auto ShaderComboUserBindings(ref<str> key) const -> slice<ShaderComboUserBinding>;
@@ -2453,9 +2454,9 @@ public:
     bool ApplyUserPropertyBindings(ref<str> key, const Json& property);
 
     struct MaterialTextureUserBinding {
-        SceneMaterial* material { nullptr };
-        u32            slot { 0 };
-        String         fallback;
+        std::shared_ptr<SceneMaterial> material;
+        u32                            slot { 0 };
+        String                         fallback;
     };
     void RegisterMaterialTextureUserBinding(String key, MaterialTextureUserBinding binding);
     auto MaterialTextureUserBindings(ref<str> key) const -> slice<MaterialTextureUserBinding>;

@@ -67,7 +67,8 @@ auto NeutralColorUniforms(ShaderValueMap) -> ShaderValueMap;
 auto CountVisibleImageEffects(std::span<const wpscene::ImageEffect>) -> std::int32_t;
 void ParseSpecTexName(std::string&, const wpscene::Material&, const ShaderInfo&, Scene&);
 auto IsLegacyAtmosphereShadowValue(const wpscene::Material&, std::string_view) -> bool;
-void RegisterMaterialBindings(Scene&, SceneMaterial&, const wpscene::Material&, const ShaderInfo&,
+void RegisterMaterialBindings(Scene&, const std::shared_ptr<SceneMaterial>&,
+                              const wpscene::Material&, const ShaderInfo&,
                               Option<ref<wpscene::Material>> user_texture_fallback = None());
 void RegisterLayerPreviousBindings(Scene&, SceneMaterial&, const wpscene::Material&, SceneNodeId,
                                    ref<str> composite_target);

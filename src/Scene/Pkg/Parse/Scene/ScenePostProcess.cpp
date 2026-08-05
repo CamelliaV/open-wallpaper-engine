@@ -108,7 +108,7 @@ void BuildBloomPostProcess(SceneParseContext& context, fs::VFS& vfs,
         auto pp_mesh = std::make_shared<SceneMesh>();
         pp_mesh->ChangeMeshDataFrom(*scene.DefaultEffectMesh());
         pp_mesh->AddMaterial(std::move(material));
-        RegisterMaterialBindings(scene, *pp_mesh->Material(), wpmat, wpShaderInfo);
+        RegisterMaterialBindings(scene, pp_mesh->MaterialSlots().front(), wpmat, wpShaderInfo);
         pp_node->AddMesh(pp_mesh);
 
         // Camera name drives CustomShaderPass color-write mask: empty or

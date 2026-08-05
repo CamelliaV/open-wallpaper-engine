@@ -389,7 +389,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
     track_image_property_material(mesh.MaterialSlots().back().get());
     RegisterMaterialBindings(
         *context.scene,
-        *mesh.Material(),
+        mesh.MaterialSlots().front(),
         image_wpmat,
         shaderInfo,
         Some(ref<wpscene::Material>::from_raw_parts(&image_user_texture_fallback)));
@@ -433,7 +433,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
         track_image_property_material(mesh.MaterialSlots().back().get());
         RegisterMaterialBindings(
             *context.scene,
-            *mesh.MaterialSlots().back(),
+            mesh.MaterialSlots().back(),
             *supplemental_wpmat,
             supplemental_shader_info,
             Some(ref<wpscene::Material>::from_raw_parts(&supplemental_user_texture_fallback)));
@@ -850,8 +850,11 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                     binding_fallback = Some(ref<wpscene::Material>::from_raw_parts(
                         rstd::addressof(*user_texture_fallback)));
                 }
-                RegisterMaterialBindings(
-                    *context.scene, *spMesh->Material(), wpmat, wpEffShaderInfo, binding_fallback);
+                RegisterMaterialBindings(*context.scene,
+                                         spMesh->MaterialSlots().front(),
+                                         wpmat,
+                                         wpEffShaderInfo,
+                                         binding_fallback);
                 RegisterLayerPreviousBindings(*context.scene,
                                               *spMesh->Material(),
                                               wpmat,
@@ -1002,7 +1005,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                 auto mesh = std::make_shared<SceneMesh>();
                 mesh->AddMaterial(std::move(material));
                 RegisterMaterialBindings(
-                    *context.scene, *mesh->Material(), passthrough_mat, shader_info);
+                    *context.scene, mesh->MaterialSlots().front(), passthrough_mat, shader_info);
                 RegisterLayerPreviousBindings(*context.scene,
                                               *mesh->Material(),
                                               passthrough_mat,
@@ -1081,7 +1084,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                         auto spFinalMesh = std::make_shared<SceneMesh>();
                         spFinalMesh->AddMaterial(std::move(finalMaterial));
                         RegisterMaterialBindings(*context.scene,
-                                                 *spFinalMesh->Material(),
+                                                 spFinalMesh->MaterialSlots().front(),
                                                  passthrough_mat,
                                                  wpFinalShaderInfo);
                         RegisterLayerPreviousBindings(*context.scene,

@@ -1201,14 +1201,15 @@ void Scene::RegisterTransformUpdater(Box<dyn<FnMut<void(f64)>>> updater) {
     m_transform_updaters.push(rstd::move(updater));
 }
 
-void Scene::RegisterShaderUserBinding(String key, SceneMaterial& material, String uniform) {
+void Scene::RegisterShaderUserBinding(String key, std::shared_ptr<SceneMaterial> material,
+                                      String uniform) {
     auto bindings = m_shader_user_index.get_mut(key.as_str());
     if (bindings.is_none()) {
         (void)m_shader_user_index.insert(key.clone(), Vec<ShaderUserBinding> {});
         bindings = m_shader_user_index.get_mut(key.as_str());
     }
     (*bindings)->push(ShaderUserBinding {
-        .material = rstd::addressof(material),
+        .material = rstd::move(material),
         .uniform  = rstd::move(uniform),
     });
 }

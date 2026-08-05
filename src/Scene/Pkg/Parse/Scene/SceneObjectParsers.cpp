@@ -501,8 +501,7 @@ void ParseModelObjImpl(SceneParseContext& context, wpscene::ModelObject& model_o
         const uint32_t material_slot  = static_cast<uint32_t>(mesh->MaterialSlots().size());
         const auto     texcoord_scale = Texture0UvScale(scene_mat);
         mesh->AddMaterial(std::move(scene_mat));
-        RegisterMaterialBindings(
-            *context.scene, *mesh->MaterialSlots().back(), *wpmat, shader_info);
+        RegisterMaterialBindings(*context.scene, mesh->MaterialSlots().back(), *wpmat, shader_info);
         WireMaterialShaderValueScripts(
             context, node, mesh->MaterialSlots().back(), *wpmat, shader_info);
 
