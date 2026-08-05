@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
 import rstd;
 import rstd.json;
 import wescene.scene;
@@ -60,8 +62,8 @@ TEST(SceneUserProperty, BatchUsesSinglePropertySemantics) {
 }
 
 TEST(SceneUserProperty, AppliesRegisteredShaderUniformBinding) {
-    owe::Scene         scene;
-    owe::SceneMaterial material;
+    owe::Scene scene;
+    auto       material = std::make_shared<owe::SceneMaterial>();
     scene.RegisterShaderUserBinding(
         String::make("brightness"_str), material, String::make("u_Brightness"_str));
 
@@ -70,16 +72,16 @@ TEST(SceneUserProperty, AppliesRegisteredShaderUniformBinding) {
 
     auto bindings = scene.ShaderUserBindings("brightness"_str);
     ASSERT_EQ(bindings.len(), usize(1));
-    EXPECT_EQ(bindings[usize()].material, &material);
+    EXPECT_EQ(bindings[usize()].material, material);
     EXPECT_EQ(bindings[usize()].uniform, "u_Brightness"_str);
-    EXPECT_TRUE(material.customShader.constValues.contains("u_Brightness"));
+    EXPECT_TRUE(material->customShader.constValues.contains("u_Brightness"));
 }
 
 TEST(SceneUserProperty, ReportsRegisteredShaderComboWithoutVfs) {
     owe::Scene                         scene;
-    owe::SceneMaterial                 material;
+    auto                               material = std::make_shared<owe::SceneMaterial>();
     owe::Scene::ShaderComboUserBinding binding {
-        .material = &material,
+        .material = material,
         .combo    = String::make("QUALITY"_str),
         .fallback = String::make("0"_str),
     };
@@ -100,13 +102,13 @@ TEST(SceneUserProperty, ReportsRegisteredShaderComboWithoutVfs) {
 }
 
 TEST(SceneUserProperty, AppliesRegisteredMaterialTextureBinding) {
-    owe::Scene         scene;
-    owe::SceneMaterial material;
+    owe::Scene scene;
+    auto       material = std::make_shared<owe::SceneMaterial>();
     scene.RegisterTexture(String::make("tex/new"_str), owe::SceneTexture { .url = "tex/new" });
-    material.textures.push_back("tex/old");
+    material->textures.push_back("tex/old");
     scene.RegisterMaterialTextureUserBinding(String::make("cover"_str),
                                              owe::Scene::MaterialTextureUserBinding {
-                                                 .material = &material,
+                                                 .material = material,
                                                  .slot     = rstd::u32(),
                                                  .fallback = String::make("tex/fallback"_str),
                                              });
@@ -117,7 +119,7 @@ TEST(SceneUserProperty, AppliesRegisteredMaterialTextureBinding) {
     auto bindings = scene.MaterialTextureUserBindings("cover"_str);
     ASSERT_EQ(bindings.len(), usize(1));
     EXPECT_EQ(bindings[usize()].fallback, "tex/fallback"_str);
-    EXPECT_EQ(material.textures[0], "tex/new");
+    EXPECT_EQ(material->textures[0], "tex/new");
 }
 
 TEST(SceneUserProperty, AppliesRegisteredImageColorBinding) {
