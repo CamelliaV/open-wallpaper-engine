@@ -1415,6 +1415,8 @@ public:
         sub->MarkTransDirty();
         m_children.push(rstd::move(sub));
     }
+    auto            ChildIndex(const SceneNode& child) const -> Option<usize>;
+    bool            MoveChild(SceneNode& child, usize index);
     Eigen::Matrix4d GetLocalTrans() const;
 
     const auto& Translate() const { return m_translate; }
@@ -2552,6 +2554,8 @@ public:
     SceneEffectId RegisterEffect(SceneNodeId owner, SceneNodeLayer& layer,
                                  std::shared_ptr<SceneImageEffect> effect);
     void          AttachRuntimeNode(SceneNode& parent, Arc<SceneNode> node);
+    auto          LayerIndex(const SceneNode& node) const -> Option<usize>;
+    bool          SortLayer(SceneNode& node, usize index);
     auto AudioDemand() const -> ref<AudioResponseDemand> { return m_audio_response_demand.deref(); }
     auto AudioDemandMut() -> mut_ref<AudioResponseDemand> {
         return m_audio_response_demand.deref_mut();

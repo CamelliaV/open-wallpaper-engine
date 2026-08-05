@@ -1906,6 +1906,64 @@ TEST(ScriptScene, CreateLayerRoutesConfigurationAndLayerCloneToFactory) {
     EXPECT_DOUBLE_EQ(LastScalar(fs), 2.0);
 }
 
+TEST(ScriptScene, CreatedLayersCanBeSortedBeforeAnExistingLayer) {
+    owe::Scene scene;
+    auto       ring = Arc<owe::SceneNode>::make(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "ring");
+    auto body = Arc<owe::SceneNode>::make(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "body");
+    scene.AttachRuntimeNode(*scene.RootMut(), ring.clone());
+    scene.AttachRuntimeNode(*scene.RootMut(), body.clone());
+    (void)scene.ConsumeRenderGraphDirty();
+
+    Vec<Arc<owe::SceneNode>> created;
+    JsRuntime                rt;
+    rt.SetScene(&scene);
+    rt.SetLayerFactory(JsRuntime::LayerFactory::make(
+        [&scene, &created](owe::SceneNode*, LayerAssetReference) -> Option<Arc<owe::SceneNode>> {
+            auto node = Arc<owe::SceneNode>::make();
+            scene.AttachRuntimeNode(*scene.RootMut(), node.clone());
+            created.push(node.clone());
+            return Some(rstd::move(node));
+        }));
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            let result = -1;
+            export function init() {
+                const target = thisScene.getLayerIndex(thisLayer);
+                const first = thisScene.createLayer('models/bar.json');
+                thisScene.sortLayer(first, target);
+                const second = thisScene.createLayer('models/bar.json');
+                thisScene.sortLayer(second, target);
+                result = thisScene.getLayerIndex(first) * 1000
+                       + thisScene.getLayerIndex(second) * 100
+                       + thisScene.getLayerIndex(thisLayer) * 10
+                       + thisScene.getLayerIndex('body');
+            }
+            export function update() { return result; }
+        )JS",
+        "test/sort_created_layers",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        ring.as_ptr());
+    ASSERT_NE(fs, nullptr);
+
+    rt.SetSceneRoot(scene.RootMut().as_raw_ptr());
+    rt.ClearLayerFactory();
+    rt.TickAll();
+
+    ASSERT_EQ(created.len(), usize(2));
+    const auto& children = scene.Root()->GetChildren();
+    ASSERT_EQ(children.len(), usize(4));
+    EXPECT_EQ(children[usize()].as_ptr(), created[usize(1)].as_ptr());
+    EXPECT_EQ(children[usize(1)].as_ptr(), created[usize()].as_ptr());
+    EXPECT_EQ(children[usize(2)].as_ptr(), ring.as_ptr());
+    EXPECT_EQ(children[usize(3)].as_ptr(), body.as_ptr());
+    EXPECT_DOUBLE_EQ(LastScalar(fs), 1023.0);
+    EXPECT_TRUE(scene.ConsumeRenderGraphDirty());
+}
+
 TEST(ScriptScene, RegisteredAssetFactoryCreatesAndReusesDestroyedLayer) {
     auto                     root = Arc<owe::SceneNode>::make();
     Vec<Arc<owe::SceneNode>> created;

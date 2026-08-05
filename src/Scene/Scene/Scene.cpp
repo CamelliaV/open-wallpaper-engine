@@ -1523,6 +1523,18 @@ void Scene::AttachRuntimeNode(SceneNode& parent, Arc<SceneNode> node) {
     m_render_graph_dirty = true;
 }
 
+auto Scene::LayerIndex(const SceneNode& node) const -> Option<usize> {
+    auto* parent = node.Parent();
+    return parent ? parent->ChildIndex(node) : None<usize>();
+}
+
+bool Scene::SortLayer(SceneNode& node, usize index) {
+    auto* parent = node.Parent();
+    if (parent == nullptr || ! parent->MoveChild(node, index)) return false;
+    m_render_graph_dirty = true;
+    return true;
+}
+
 bool Scene::EnsureTextureDescriptor(std::string_view key) {
     auto name = rstd::cppstd::as_str(key).unwrap();
     if (key.empty() || IsSpecTex(name)) return true;

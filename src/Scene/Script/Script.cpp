@@ -2669,13 +2669,38 @@ JSValue NodeSceneDestroyLayer(JSContext* ctx, JSValueConst, int argc, JSValueCon
     return JS_UNDEFINED;
 }
 
-// thisScene.getLayerIndex(layer) / sortLayer(layer, idx). owe doesn't have
-// a draw-order layer index that scripts can mutate at runtime; return 0
-// and no-op so audio-bar style scripts complete init without error.
-JSValue NodeSceneGetLayerIndex(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    return JS_NewInt32(ctx, 0);
+owe::SceneNode* ResolveSceneLayerArgument(JSContext* ctx, JSValueConst this_val,
+                                          JSValueConst value) {
+    if (auto* node = GetLayerNode(value)) return node;
+    auto* root = GetLayerNode(this_val);
+    if (root == nullptr) return nullptr;
+    const char* name = JS_ToCString(ctx, value);
+    if (name == nullptr) return nullptr;
+    auto* node = root->FindByName(name);
+    JS_FreeCString(ctx, name);
+    return node;
 }
-JSValue NodeSceneSortLayer(JSContext*, JSValueConst, int, JSValueConst*) { return JS_UNDEFINED; }
+
+JSValue NodeSceneGetLayerIndex(JSContext* ctx, JSValueConst this_val, int argc,
+                               JSValueConst* argv) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (host == nullptr || host->scene == nullptr || argc < 1) return JS_NewInt32(ctx, -1);
+    auto* node = ResolveSceneLayerArgument(ctx, this_val, argv[0]);
+    if (node == nullptr) return JS_NewInt32(ctx, -1);
+    auto index = host->scene->LayerIndex(*node);
+    if (index.is_none()) return JS_NewInt32(ctx, -1);
+    return JS_NewInt64(ctx, static_cast<int64_t>(index->to_primitive()));
+}
+
+JSValue NodeSceneSortLayer(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (host == nullptr || host->scene == nullptr || argc < 2) return JS_UNDEFINED;
+    auto*   node = ResolveSceneLayerArgument(ctx, this_val, argv[0]);
+    int64_t index {};
+    if (node == nullptr || JS_ToInt64(ctx, &index, argv[1]) != 0 || index < 0) return JS_UNDEFINED;
+    (void)host->scene->SortLayer(*node, usize(static_cast<std::size_t>(index)));
+    return JS_UNDEFINED;
+}
 
 JSValue NodePlay(JSContext*, JSValueConst this_val, int, JSValueConst*) {
     if (auto* n = GetLayerNode(this_val)) n->Play();

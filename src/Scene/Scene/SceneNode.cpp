@@ -2,6 +2,7 @@ module;
 
 module wescene.scene;
 import eigen;
+import rstd;
 import rstd.cppstd;
 
 using namespace owe;
@@ -60,6 +61,30 @@ void SceneNode::MarkTransDirty() {
             if (anchor) anchor->MarkTransDirty();
         }
     }
+}
+
+auto SceneNode::ChildIndex(const SceneNode& child) const -> Option<usize> {
+    for (usize index {}; index < m_children.len(); ++index) {
+        if (m_children[index].as_ptr() == rstd::addressof(child)) return Some(index);
+    }
+    return None();
+}
+
+bool SceneNode::MoveChild(SceneNode& child, usize index) {
+    if (index >= m_children.len()) return false;
+    auto current = ChildIndex(child);
+    if (current.is_none() || *current == index) return false;
+
+    auto moving = rstd::move(m_children[*current]);
+    if (*current < index) {
+        for (auto cursor = *current; cursor < index; ++cursor)
+            m_children[cursor] = rstd::move(m_children[cursor + usize(1)]);
+    } else {
+        for (auto cursor = *current; cursor > index; --cursor)
+            m_children[cursor] = rstd::move(m_children[cursor - usize(1)]);
+    }
+    m_children[index] = rstd::move(moving);
+    return true;
 }
 
 SceneNode* SceneNode::FindByName(std::string_view name) {
