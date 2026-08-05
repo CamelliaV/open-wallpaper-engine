@@ -169,6 +169,11 @@ static rg::TextureNodeRef AddCopyPass(ExtraInfo& extra, rg::TextureNodeRef in,
             copy = builder.createTexture(desc, true);
             rg::doCopy(builder, pdesc, in, copy);
             FillCopyTextureRequests(extra, pdesc);
+            pdesc.dst_matches_src = out_desc.is_none();
+            if (pdesc.dst_matches_src && pdesc.src_request.is_some()) {
+                pdesc.dst_request       = Some(pdesc.src_request->clone());
+                pdesc.dst_request->name = desc.key.clone();
+            }
         });
     return copy;
 }

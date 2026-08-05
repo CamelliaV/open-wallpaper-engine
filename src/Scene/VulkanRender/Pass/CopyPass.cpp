@@ -33,8 +33,13 @@ PassInvalidationFlags CopyPass::finalizeResourceRequests(Scene& scene) {
         request.is_some() && SetTextureRequestIfChanged(m_desc.src_request, std::move(request))) {
         flags |= ToPassInvalidationFlags(PassInvalidation::Resources);
     }
-    if (auto request = refresh(m_desc.dst);
-        request.is_some() && SetTextureRequestIfChanged(m_desc.dst_request, std::move(request))) {
+    auto dst_request = refresh(m_desc.dst);
+    if (m_desc.dst_matches_src && m_desc.src_request.is_some()) {
+        dst_request       = Some(m_desc.src_request->clone());
+        dst_request->name = String::make(as_str(m_desc.dst).unwrap());
+    }
+    if (dst_request.is_some() &&
+        SetTextureRequestIfChanged(m_desc.dst_request, std::move(dst_request))) {
         flags |= ToPassInvalidationFlags(PassInvalidation::Resources);
     }
     return flags;

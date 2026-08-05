@@ -20,6 +20,7 @@ public:
         rstd::Option<resource::TextureUseHandle> dst_use;
         rstd::Option<TextureRequest>             src_request;
         rstd::Option<TextureRequest>             dst_request;
+        bool                                     dst_matches_src { false };
 
         resource_registry::PreparedBarrierBatch before_barriers;
         resource_registry::PreparedBarrierBatch after_barriers;
