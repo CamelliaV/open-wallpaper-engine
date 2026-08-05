@@ -38,6 +38,11 @@ struct SceneShaderEnvironment {
     bool directional_shadow { false };
 };
 
+struct GeometryShaderLimits {
+    std::uint32_t max_output_vertices { 256 };
+    std::uint32_t max_total_output_components { 1024 };
+};
+
 enum class GeometryStageRequirement
 {
     None,
@@ -120,6 +125,7 @@ struct SceneParseContext {
 
     ShaderValueMap         global_base_uniforms;
     SceneShaderEnvironment shader_environment;
+    GeometryShaderLimits   geometry_shader_limits;
     Option<Arc<SceneNode>> effect_camera_node;
     Option<Arc<SceneNode>> global_camera_node;
     Option<Arc<SceneNode>> global_perspective_camera_node;
@@ -225,6 +231,7 @@ struct ParticleObjectParseServices {
     fs::VFS*               vfs { nullptr };
     Arc<ShaderCache>       shader_cache;
     SceneShaderEnvironment shader_environment;
+    GeometryShaderLimits   geometry_shader_limits;
     ShaderValueMap         global_base_uniforms;
     Arc<ParticleRuntime>   particle_runtime;
     std::int32_t           ortho_w { 0 };
@@ -286,6 +293,7 @@ SceneParseContext BuildContext(fs::VFS&, ref<str> scene_id, const wpscene::Scene
                                array<std::int32_t, 2>       ortho_extent,
                                Option<ref<rstd::json::Map>> user_properties    = None(),
                                Option<rstd::path::PathBuf>  shader_cache_dir   = None(),
+                               GeometryShaderLimits         geometry_limits    = {},
                                bool                         directional_shadow = false);
 
 void IndexSceneDocument(SceneParseContext&, ref<wpscene::SceneDocument>, slice<SceneObjectVar>);

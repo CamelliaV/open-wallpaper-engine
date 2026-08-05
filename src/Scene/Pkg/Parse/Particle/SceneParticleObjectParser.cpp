@@ -50,6 +50,48 @@ ParticleRenderDesc DescribeParticleRender(const wpscene::ParticleRender& render)
     return desc;
 }
 
+bool ShaderComboEnabled(const wpscene::Material& material, const ShaderInfo& info,
+                        std::string_view name) {
+    auto material_combo = material.combos.find(std::string(name));
+    if (material_combo != material.combos.end()) return material_combo->second != 0;
+
+    auto combo = info.combos.find(std::string(name));
+    return combo != info.combos.end() && combo->second != "0";
+}
+
+std::int32_t LimitRopeSubdivision(std::int32_t                       requested,
+                                  const ParticleObjectParseServices& services,
+                                  const wpscene::Material& material, const ShaderInfo& info) {
+    if (requested <= 0) return 0;
+
+    const bool lighting     = ShaderComboEnabled(material, info, "LIGHTING");
+    const bool refract      = ShaderComboEnabled(material, info, "REFRACT");
+    const bool fog          = ShaderComboEnabled(material, info, "FOG");
+    const bool fog_distance = ShaderComboEnabled(material, info, "FOG_DIST") ||
+                              (fog && services.shader_environment.fog_distance);
+    const bool fog_height   = ShaderComboEnabled(material, info, "FOG_HEIGHT") ||
+                              (fog && services.shader_environment.fog_height);
+
+    // genericropeparticle always emits position (4), UV (2), and color (4).
+    std::uint32_t output_components = 10;
+    if (fog_distance || fog_height || lighting) output_components += 4;
+    if (lighting) output_components += 6;
+    if (refract) output_components += 7;
+
+    const auto& limits                 = services.geometry_shader_limits;
+    const auto  vertices_by_components = limits.max_total_output_components / output_components;
+    const auto  max_vertices    = std::min(limits.max_output_vertices, vertices_by_components);
+    const auto  max_subdivision = max_vertices > 4 ? (max_vertices - 4) / 2 : 0;
+    const auto  limited =
+        static_cast<std::int32_t>(std::min(static_cast<std::uint32_t>(requested), max_subdivision));
+    if (limited != requested) {
+        rstd_warn("rope subdivision reduced from {} to {} for geometry shader limits",
+                  requested,
+                  limited);
+    }
+    return limited;
+}
+
 ParticleAnimationMode ToAnimMode(const std::string& str) {
     if (str == "randomframe")
         return ParticleAnimationMode::RANDOMONE;
@@ -409,7 +451,7 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
     }
     if (rope_shader) {
         std::int32_t subdiv = static_cast<std::int32_t>(std::round(wppartRenderer.subdivision));
-        if (subdiv < 0) subdiv = 0;
+        subdiv = LimitRopeSubdivision(subdiv, services, particle_obj.material, shaderInfo);
         shaderInfo.combos["TRAILSUBDIVISION"] = std::to_string(subdiv);
     }
 
@@ -602,15 +644,16 @@ void ParseParticleObjImpl(SceneParseContext& context, wpscene::ParticleObject& p
     }
 
     ParticleObjectParseServices services {
-        .scene                = context.scene.get(),
-        .vfs                  = context.vfs,
-        .shader_cache         = context.shader_cache.clone(),
-        .shader_environment   = context.shader_environment,
-        .global_base_uniforms = context.global_base_uniforms,
-        .particle_runtime     = (*context.particle_runtime).clone(),
-        .ortho_w              = context.ortho_w,
-        .ortho_h              = context.ortho_h,
-        .construction_context = &context,
+        .scene                  = context.scene.get(),
+        .vfs                    = context.vfs,
+        .shader_cache           = context.shader_cache.clone(),
+        .shader_environment     = context.shader_environment,
+        .geometry_shader_limits = context.geometry_shader_limits,
+        .global_base_uniforms   = context.global_base_uniforms,
+        .particle_runtime       = (*context.particle_runtime).clone(),
+        .ortho_w                = context.ortho_w,
+        .ortho_h                = context.ortho_h,
+        .construction_context   = &context,
     };
     auto output = BuildParticleObject(services, particle);
     if (output.root.is_none()) return;

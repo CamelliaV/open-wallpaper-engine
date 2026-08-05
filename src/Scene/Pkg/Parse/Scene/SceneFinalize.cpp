@@ -226,6 +226,7 @@ void FinalizeUniformSources(SceneParseContext& context) {
                  particle_runtime     = rstd::move(particle_runtime),
                  shader_cache         = context.shader_cache.clone(),
                  shader_environment   = context.shader_environment,
+                 geometry_limits      = context.geometry_shader_limits,
                  global_base_uniforms = context.global_base_uniforms,
                  ortho_w              = context.ortho_w,
                  ortho_h              = context.ortho_h,
@@ -271,14 +272,15 @@ void FinalizeUniformSources(SceneParseContext& context) {
                         particle.parent  = 0;
                         particle.visible = true;
                         ParticleObjectParseServices particle_services {
-                            .scene                = scene_ptr,
-                            .vfs                  = (*vfs).as_raw_ptr(),
-                            .shader_cache         = shader_cache.clone(),
-                            .shader_environment   = shader_environment,
-                            .global_base_uniforms = global_base_uniforms,
-                            .particle_runtime     = (*particle_runtime).clone(),
-                            .ortho_w              = ortho_w,
-                            .ortho_h              = ortho_h,
+                            .scene                  = scene_ptr,
+                            .vfs                    = (*vfs).as_raw_ptr(),
+                            .shader_cache           = shader_cache.clone(),
+                            .shader_environment     = shader_environment,
+                            .geometry_shader_limits = geometry_limits,
+                            .global_base_uniforms   = global_base_uniforms,
+                            .particle_runtime       = (*particle_runtime).clone(),
+                            .ortho_w                = ortho_w,
+                            .ortho_h                = ortho_h,
                         };
                         auto parsed = BuildParticleObject(particle_services, particle);
                         if (parsed.root.is_none()) return None();

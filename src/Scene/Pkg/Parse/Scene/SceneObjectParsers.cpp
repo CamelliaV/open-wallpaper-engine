@@ -571,13 +571,14 @@ SceneParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::S
                                array<std::int32_t, 2>       ortho_extent,
                                Option<ref<rstd::json::Map>> user_properties,
                                Option<rstd::path::PathBuf>  shader_cache_dir,
-                               bool                         directional_shadow) {
+                               GeometryShaderLimits geometry_limits, bool directional_shadow) {
     SceneParseContext context;
     InitContext(context, vfs, sc, ortho_extent);
     ParseCamera(context, sc);
-    context.pkg_version     = sc.pkg_version;
-    context.user_properties = user_properties;
-    context.shader_cache    = Arc<ShaderCache>::make(rstd::move(shader_cache_dir));
+    context.pkg_version            = sc.pkg_version;
+    context.user_properties        = user_properties;
+    context.shader_cache           = Arc<ShaderCache>::make(rstd::move(shader_cache_dir));
+    context.geometry_shader_limits = geometry_limits;
     context.shader_environment.directional_shadow =
         directional_shadow && sc.general.lightconfig.directionalshadow > 0;
 

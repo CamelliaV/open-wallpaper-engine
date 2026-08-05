@@ -51,14 +51,20 @@ auto owe::SceneParser::Parse(ref<str> scene_id, ref<wpscene::SceneDocument> docu
     }
 
     auto context_span = SceneLoadSpan(options.load_bench, &SceneLoadProbeIds::parse_context);
-    auto context = BuildContext(vfs_owner,
-                                scene_id,
-                                metadata,
-                                ResolveOrthoProjectionExtent(metadata, objects.as_slice()),
-                                options.user_properties,
-                                rstd::move(options.shader_cache_dir),
-                                options.capabilities.directional_shadow &&
-                                    has_directional_shadow_light && has_directional_shadow_caster);
+    auto context =
+        BuildContext(vfs_owner,
+                     scene_id,
+                     metadata,
+                     ResolveOrthoProjectionExtent(metadata, objects.as_slice()),
+                     options.user_properties,
+                     rstd::move(options.shader_cache_dir),
+                     GeometryShaderLimits {
+                         .max_output_vertices = options.capabilities.max_geometry_output_vertices,
+                         .max_total_output_components =
+                             options.capabilities.max_geometry_total_output_components,
+                     },
+                     options.capabilities.directional_shadow && has_directional_shadow_light &&
+                         has_directional_shadow_caster);
     auto runtime_input             = Arc<UniformRuntimeInput>::make(context.uniform_state.clone());
     context.hidden_link_source_ids = rstd::move(expanded.hidden_link_source_ids);
     context.linked_source_ids      = rstd::move(expanded.linked_source_ids);

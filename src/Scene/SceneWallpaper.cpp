@@ -1319,6 +1319,10 @@ void SceneRuntimeController::loadScene() {
                 .capabilities =
                     SceneParseCapabilities {
                         .directional_shadow = m_render_capabilities->directional_shadow(),
+                        .max_geometry_output_vertices =
+                            m_render_capabilities->max_geometry_output_vertices,
+                        .max_geometry_total_output_components =
+                            m_render_capabilities->max_geometry_total_output_components,
                     },
             });
         if (parsed.is_err()) {

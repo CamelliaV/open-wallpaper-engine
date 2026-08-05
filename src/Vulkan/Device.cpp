@@ -230,7 +230,9 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         .shader_output_viewport_index = enable_shader_output_viewport_index,
         .sampled_depth_d32            = sampled_depth_d32,
         .depth_clamp                  = supported2.features.depthClamp != VK_FALSE,
-        .memory_budget                = exists(tested_exts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME),
+        .max_geometry_output_vertices = device.m_limits.maxGeometryOutputVertices,
+        .max_geometry_total_output_components = device.m_limits.maxGeometryTotalOutputComponents,
+        .memory_budget      = exists(tested_exts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME),
         .external_memory_fd = exists(tested_exts, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
         .external_memory_dma_buf =
             exists(tested_exts, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME),
