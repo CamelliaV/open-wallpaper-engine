@@ -168,13 +168,7 @@ array<float, 2> Texture0UvScale(const SceneMaterial& material, bool nopadding) {
 
 void InstallImageAlignmentBinding(script::JsRuntime& runtime, SceneNode* node, ref<str> alignment,
                                   const SceneParseContext::ImageAlignmentSetter& setter) {
-    runtime.RegisterImageAlignmentSetter(
-        node,
-        alignment,
-        script::JsRuntime::ImageAlignmentSetter::make(
-            [node, setter = setter.clone()](ref<str> value) mutable {
-                (*setter)(node, value);
-            }));
+    runtime.RegisterImageAlignmentSetter(node, alignment, setter.clone());
 }
 
 void RegisterImageAlignmentBinding(SceneParseContext& context, SceneNode* node, ref<str> alignment,

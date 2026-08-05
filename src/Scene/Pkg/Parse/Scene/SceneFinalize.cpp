@@ -213,14 +213,16 @@ void FinalizeUniformSources(SceneParseContext& context) {
         ! context.dynamic_particle_prototypes.is_empty()) {
         auto scripts = scene.ExtensionMut<script::ScriptScene>();
         if (scripts.is_some()) {
-            auto image_prototypes    = rstd::move(context.dynamic_image_prototypes);
-            auto particle_prototypes = rstd::move(context.dynamic_particle_prototypes);
-            auto particle_runtime    = context.particle_runtime.is_some()
-                                           ? Some((*context.particle_runtime).clone())
-                                           : None<Arc<ParticleRuntime>>();
-            auto scene_ptr           = rstd::addressof(scene);
+            auto* runtime             = rstd::addressof((**scripts).runtime());
+            auto  image_prototypes    = rstd::move(context.dynamic_image_prototypes);
+            auto  particle_prototypes = rstd::move(context.dynamic_particle_prototypes);
+            auto  particle_runtime    = context.particle_runtime.is_some()
+                                            ? Some((*context.particle_runtime).clone())
+                                            : None<Arc<ParticleRuntime>>();
+            auto  scene_ptr           = rstd::addressof(scene);
             (**scripts).runtime().SetLayerFactory(script::JsRuntime::LayerFactory::make(
                 [scene_ptr,
+                 runtime,
                  image_prototypes     = rstd::move(image_prototypes),
                  particle_prototypes  = rstd::move(particle_prototypes),
                  particle_runtime     = rstd::move(particle_runtime),
@@ -242,6 +244,8 @@ void FinalizeUniformSources(SceneParseContext& context) {
                         if (auto prototype = image_prototypes.get(asset); prototype.is_some()) {
                             auto node =
                                 CloneRegisteredNode(*scene_ptr, (**prototype).node.deref(), asset);
+                            runtime->CloneImageAlignmentBinding((**prototype).node.as_ptr(),
+                                                                node.as_ptr());
                             scene_ptr->AttachRuntimeNode(*parent, node.clone());
                             if (! RegisterUniformNodeSources(*scene_ptr,
                                                              uniform_state,

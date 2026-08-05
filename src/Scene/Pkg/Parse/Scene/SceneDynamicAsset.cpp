@@ -172,6 +172,10 @@ Option<Arc<SceneNode>> InstantiateResolvedAsset(SceneParseContext& context, Scen
         auto prototype = context.dynamic_image_prototypes.get(asset);
         if (prototype.is_none()) return None();
         auto node = CloneRegisteredNode(*context.scene, (**prototype).node.deref(), asset);
+        if (context.script_scene.is_some())
+            (*context.script_scene)
+                ->runtime()
+                .CloneImageAlignmentBinding((**prototype).node.as_ptr(), node.as_ptr());
         SetUniformConfig(context, node, (**prototype).uniform_config.Clone());
         return attach(rstd::move(node));
     } else if (AssetEndsWith(asset, ".mdl"_str)) {

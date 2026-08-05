@@ -215,9 +215,10 @@ public:
     using NodeOriginSetter = Arc<dyn<FnMut<void(Vec3Value)>>>;
     void RegisterNodeOriginAccessors(owe::SceneNode* node, NodeOriginGetter getter,
                                      NodeOriginSetter setter);
-    using ImageAlignmentSetter = Arc<dyn<FnMut<void(ref<str>)>>>;
+    using ImageAlignmentSetter = Arc<dyn<FnMut<void(owe::SceneNode*, ref<str>)>>>;
     void RegisterImageAlignmentSetter(owe::SceneNode* node, ref<str> alignment,
                                       ImageAlignmentSetter setter);
+    void CloneImageAlignmentBinding(owe::SceneNode* source, owe::SceneNode* clone);
 
     using LayerFactory =
         Arc<dyn<FnMut<Option<Arc<owe::SceneNode>>(owe::SceneNode*, LayerAssetReference)>>>;

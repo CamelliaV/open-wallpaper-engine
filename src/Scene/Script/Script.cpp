@@ -2205,7 +2205,7 @@ JSValue NodeSetAlignment(JSContext* ctx, JSValueConst this_val, JSValueConst val
     const char* s = JS_ToCString(ctx, val);
     if (s == nullptr) return JS_UNDEFINED;
     (**hook).alignment = String::make(rstd::cppstd::as_str(s).unwrap());
-    (*(**hook).setter)((**hook).alignment.as_str());
+    (*(**hook).setter)(n, (**hook).alignment.as_str());
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
 }
@@ -3500,6 +3500,16 @@ void JsRuntime::RegisterImageAlignmentSetter(owe::SceneNode* node, ref<str> alig
                                                         .alignment = String::make(alignment),
                                                         .setter    = rstd::move(setter),
                                                     });
+}
+
+void JsRuntime::CloneImageAlignmentBinding(owe::SceneNode* source, owe::SceneNode* clone) {
+    if (source == nullptr || clone == nullptr) return;
+    auto hook = m_impl->host.image_alignment_hooks.get(source);
+    if (hook.is_none()) return;
+    (void)m_impl->host.image_alignment_hooks.insert(
+        clone,
+        EngineHostState::ImageAlignmentHook { .alignment = (**hook).alignment.clone(),
+                                              .setter    = (**hook).setter.clone() });
 }
 
 void JsRuntime::SetLayerFactory(LayerFactory factory) {

@@ -585,11 +585,15 @@ TEST(ScriptNodeSoftMutation, PerspectiveWritesNodeFlag) {
 }
 
 TEST(ScriptNodeSoftMutation, ImageAlignmentDispatchesRegisteredSetter) {
-    owe::SceneNode node;
-    JsRuntime      rt;
-    String         alignment;
+    owe::SceneNode  node;
+    JsRuntime       rt;
+    String          alignment;
+    owe::SceneNode* target { nullptr };
     rt.RegisterImageAlignmentSetter(
-        &node, "center"_str, JsRuntime::ImageAlignmentSetter::make([&](ref<str> value) {
+        &node,
+        "center"_str,
+        JsRuntime::ImageAlignmentSetter::make([&](owe::SceneNode* node, ref<str> value) {
+            target    = node;
             alignment = String::make(value);
         }));
 
@@ -607,6 +611,40 @@ TEST(ScriptNodeSoftMutation, ImageAlignmentDispatchesRegisteredSetter) {
         &node);
     ASSERT_NE(fs, nullptr);
 
+    EXPECT_EQ(alignment.as_str(), "bottom"_str);
+    EXPECT_EQ(target, &node);
+    rt.TickAll();
+    EXPECT_EQ(LastScalar(fs), 1.0);
+}
+
+TEST(ScriptNodeSoftMutation, ImageAlignmentBindingClonesForDynamicLayer) {
+    owe::SceneNode  source;
+    owe::SceneNode  clone;
+    JsRuntime       rt;
+    String          alignment;
+    owe::SceneNode* target { nullptr };
+    rt.RegisterImageAlignmentSetter(
+        &source,
+        "center"_str,
+        JsRuntime::ImageAlignmentSetter::make([&](owe::SceneNode* node, ref<str> value) {
+            target    = node;
+            alignment = String::make(value);
+        }));
+    rt.CloneImageAlignmentBinding(&source, &clone);
+
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            thisLayer.alignment = 'bottom';
+            export function update() { return thisLayer.alignment === 'bottom' ? 1 : 0; }
+        )JS",
+        "test/cloned_image_alignment_write",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        &clone);
+    ASSERT_NE(fs, nullptr);
+
+    EXPECT_EQ(target, &clone);
     EXPECT_EQ(alignment.as_str(), "bottom"_str);
     rt.TickAll();
     EXPECT_EQ(LastScalar(fs), 1.0);
