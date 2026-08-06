@@ -1218,8 +1218,16 @@ std::vector<std::size_t> GrepLineStarts(const std::string& text) {
 
 // 0-based index of the line containing byte position pos.
 std::size_t GrepLineOf(const std::vector<std::size_t>& starts, std::size_t pos) {
-    auto it = std::upper_bound(starts.begin(), starts.end(), pos);
-    return (std::size_t)(it - starts.begin()) - 1;
+    std::size_t first = 0;
+    std::size_t last  = starts.size();
+    while (first < last) {
+        const auto middle = first + (last - first) / 2;
+        if (starts[middle] <= pos)
+            first = middle + 1;
+        else
+            last = middle;
+    }
+    return first - 1;
 }
 
 // Line `idx` text, newline/CR stripped and capped to kGrepLineCap chars.

@@ -287,12 +287,15 @@ bool ends_with(std::string_view s, std::string_view suffix) {
 void sort_by_path(Json& value) {
     auto array = value.as_array();
     if (array.is_none()) return;
-    std::vector<const Json*> ordered;
+    std::vector<std::size_t> ordered;
     ordered.reserve((*array)->len().to_primitive());
-    for (const auto& item : **array) ordered.push_back(&item);
-    std::sort(ordered.begin(), ordered.end(), [](const Json* a, const Json* b) {
-        auto             a_path = a->get("path"_str);
-        auto             b_path = b->get("path"_str);
+    for (std::size_t index = 0; index < (*array)->len().to_primitive(); ++index)
+        ordered.push_back(index);
+    std::sort(ordered.begin(), ordered.end(), [&](std::size_t a_index, std::size_t b_index) {
+        const auto&      a      = (**array)[usize(a_index)];
+        const auto&      b      = (**array)[usize(b_index)];
+        auto             a_path = a.get("path"_str);
+        auto             b_path = b.get("path"_str);
         std::string_view a_view;
         std::string_view b_view;
         if (a_path.is_some()) {
@@ -306,7 +309,7 @@ void sort_by_path(Json& value) {
         return a_view.compare(b_view) < 0;
     });
     auto sorted = owe::MakeArray();
-    for (const auto* item : ordered) owe::AppendJson(sorted, item->clone());
+    for (auto index : ordered) owe::AppendJson(sorted, (**array)[usize(index)].clone());
     value = std::move(sorted);
 }
 
@@ -667,17 +670,22 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
                         }
                 }
                 auto                     values = jobjects.as_array();
-                std::vector<const Json*> ordered;
+                std::vector<std::size_t> ordered;
                 ordered.reserve((*values)->len().to_primitive());
-                for (const auto& object : **values) ordered.push_back(&object);
-                std::sort(ordered.begin(), ordered.end(), [](const Json* a, const Json* b) {
-                    auto a_id = a->get("id"_str);
-                    auto b_id = b->get("id"_str);
-                    return (a_id.is_some() ? JsonI64Or(**a_id, -1) : -1) <
-                           (b_id.is_some() ? JsonI64Or(**b_id, -1) : -1);
-                });
+                for (std::size_t index = 0; index < (*values)->len().to_primitive(); ++index)
+                    ordered.push_back(index);
+                std::sort(
+                    ordered.begin(), ordered.end(), [&](std::size_t a_index, std::size_t b_index) {
+                        const auto& a    = (**values)[usize(a_index)];
+                        const auto& b    = (**values)[usize(b_index)];
+                        auto        a_id = a.get("id"_str);
+                        auto        b_id = b.get("id"_str);
+                        return (a_id.is_some() ? JsonI64Or(**a_id, -1) : -1) <
+                               (b_id.is_some() ? JsonI64Or(**b_id, -1) : -1);
+                    });
                 auto sorted_objects = owe::MakeArray();
-                for (const auto* object : ordered) owe::AppendJson(sorted_objects, object->clone());
+                for (auto index : ordered)
+                    owe::AppendJson(sorted_objects, (**values)[usize(index)].clone());
                 SetSnapshot(jscene, "object_count", static_cast<int>(ordered.size()));
                 owe::SetJson(jscene, "objects", std::move(sorted_objects));
                 owe::SetJson(out, "scene", std::move(jscene));

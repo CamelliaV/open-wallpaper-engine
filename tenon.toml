@@ -1,0 +1,240 @@
+[package]
+name = "owe-wescene-test"
+version = "0.2.2"
+module = "wescene"
+
+[executable]
+name = "wescene-test"
+discovery = "explicit"
+sources = [
+  "src/Core/IO/Binary.cppm",
+  "src/Core/Fs/Fs.cppm",
+  "src/Core/Fft.cppm",
+  "src/Core/Fft.cpp",
+  "src/Core/Core.cppm",
+  "src/Core/eigen.cppm",
+  "src/Core/Fs.cppm",
+  "src/Core/Json.cppm",
+  "src/Core/UserProperty.cppm",
+  "src/Core/Json.cpp",
+  "src/Core/UserProperty.cpp",
+  "src/Core/Cli.cppm",
+  "src/Audio/AudioResponse.cppm",
+  "src/Audio/AudioResponse.cpp",
+  "src/Scene/Audio/SceneAudioResponse.cppm",
+  "src/Scene/Audio/SceneAudioResponse.cpp",
+  "src/Scene/LoadBench.cppm",
+  "src/Scene/types/types.cppm",
+  "src/Scene/types/types.cpp",
+  "src/Scene/SpecNames.cppm",
+  "src/Scene/Pkg/mod.cppm",
+  "src/Scene/Pkg/SpecNames.cppm",
+  "src/Scene/Pkg/AssetVersion.cppm",
+  "src/Scene/Pkg/PkgFs.cppm",
+  "src/Scene/Utils/Utils.cppm",
+  "src/Scene/Timer/Timer.cppm",
+  "src/Scene/Timer/ThreadTimer.cppm",
+  "src/Scene/Timer/FrameTimer.cppm",
+  "src/Scene/Particle/Particle.cppm",
+  "src/Scene/Particle/ParticleProgram.cppm",
+  "src/Scene/Scene/Id.cppm",
+  "src/Scene/Scene/Runtime.cppm",
+  "src/Scene/Scene/SceneVisibility.cppm",
+  "src/Scene/Scene/Uniform.cppm",
+  "src/Scene/Lighting/Lighting.cppm",
+  "src/Scene/Scene/Scene.cppm",
+  "src/Scene/Utils/Sha.cpp",
+  "src/Scene/Utils/FpsCounter.cpp",
+  "src/Scene/Utils/Algorism.cpp",
+  "src/Scene/Pkg/PkgFs.cpp",
+  "src/Scene/Timer/ThreadTimer.cpp",
+  "src/Scene/Timer/FrameTimer.cpp",
+  "src/Scene/Scene/Scene.cpp",
+  "src/Scene/Scene/SceneCamera.cpp",
+  "src/Scene/Scene/SceneNodeLayer.cpp",
+  "src/Scene/Scene/SceneIndexArray.cpp",
+  "src/Scene/Scene/SceneNode.cpp",
+  "src/Scene/Scene/SceneVertexArray.cpp",
+  "src/Scene/Scene/SceneShader.cpp",
+  "src/Scene/Script/Script.cppm",
+  "src/Scene/Script/Script.cpp",
+  "src/Vulkan/ShaderCompile.cppm",
+  "src/Vulkan/Shader.cpp",
+  "src/Scene/Pkg/Parse/mod.cppm",
+  "src/Scene/Pkg/Parse/Compat.cppm",
+  "src/Scene/Pkg/Parse/Puppet/PuppetCompat.cppm",
+  "src/Scene/Pkg/Parse/Particle/ParticleRuntime.cppm",
+  "src/Scene/Pkg/SceneObj/mod.cppm",
+  "src/Scene/Pkg/SceneObj/AnimationLayer.cppm",
+  "src/Scene/Pkg/SceneObj/FieldBinding.cppm",
+  "src/Scene/Pkg/SceneObj/VisibilityBinding.cppm",
+  "src/Scene/Pkg/SceneObj/ImageObject.cppm",
+  "src/Scene/Pkg/SceneObj/LightObject.cppm",
+  "src/Scene/Pkg/SceneObj/Material.cppm",
+  "src/Scene/Pkg/Parse/Puppet/MdlParser.cppm",
+  "src/Scene/Pkg/SceneObj/MiscObject.cppm",
+  "src/Scene/Pkg/SceneObj/ParticleObject.cppm",
+  "src/Scene/Pkg/Parse/Particle/ParticleParser.cppm",
+  "src/Scene/Pkg/Parse/Puppet/Puppet.cppm",
+  "src/Scene/Pkg/Parse/Uniform/GlobalUniform.cppm",
+  "src/Scene/Pkg/Parse/Uniform/UniformSource.cppm",
+  "src/Scene/Pkg/SceneObj/SceneDocument.cppm",
+  "src/Scene/Pkg/Parse/Scene/SceneStages.cppm",
+  "src/Scene/Pkg/Parse/Scene/SceneParser.cppm",
+  "src/Scene/Pkg/Parse/Shader/ShaderLex.cppm",
+  "src/Scene/Pkg/Parse/Shader/ShaderParser.cppm",
+  "src/Scene/Pkg/SceneObj/SoundObject.cppm",
+  "src/Scene/Pkg/SceneObj/Object.cppm",
+  "src/Scene/Pkg/Parse/Sound/SoundParser.cppm",
+  "src/Scene/Pkg/Parse/Image/TexImageParser.cppm",
+  "src/Scene/Pkg/Parse/Uniform/Uniform.cppm",
+  "src/Scene/Text/Text.cppm",
+  "src/Scene/Pkg/Parse/Scene/SceneContext.cppm",
+  "src/Scene/Pkg/SceneObj/FieldBinding.cpp",
+  "src/Scene/Pkg/SceneObj/ImageObject.cpp",
+  "src/Scene/Pkg/SceneObj/LightObject.cpp",
+  "src/Scene/Pkg/SceneObj/Material.cpp",
+  "src/Scene/Pkg/SceneObj/Object.cpp",
+  "src/Scene/Pkg/Parse/Puppet/MdlParser.cpp",
+  "src/Scene/Pkg/Parse/Particle/ParticleEmitter.cpp",
+  "src/Scene/Pkg/Parse/Particle/ParticleRawGenerator.cpp",
+  "src/Scene/Pkg/Parse/Particle/ParticleRuntime.cpp",
+  "src/Scene/Pkg/SceneObj/ParticleObject.cpp",
+  "src/Scene/Pkg/Parse/Particle/ParticleParser.cpp",
+  "src/Scene/Pkg/Parse/Puppet/Puppet.cpp",
+  "src/Scene/Pkg/Parse/Uniform/UniformSource.cpp",
+  "src/Scene/Pkg/SceneObj/SceneDocument.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneAnimationBinding.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneContext.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneDynamicAsset.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneFinalize.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneGeometryBuilder.cpp",
+  "src/Scene/Pkg/Parse/Image/SceneImageObjectParser.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneMaterialBuilder.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneObjectExpansion.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneObjectParsers.cpp",
+  "src/Scene/Pkg/Parse/Particle/SceneParticleObjectParser.cpp",
+  "src/Scene/Pkg/Parse/Scene/ScenePostProcess.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneScriptBinding.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneTextObjectParser.cpp",
+  "src/Scene/Pkg/Parse/Scene/SceneParser.cpp",
+  "src/Scene/Pkg/Parse/Shader/ShaderParser.cpp",
+  "src/Scene/Pkg/Parse/Shader/ShaderAnnot.cpp",
+  "src/Scene/Pkg/Parse/Uniform/Uniform.cpp",
+  "src/Scene/Pkg/Parse/Sound/SoundParser.cpp",
+  "src/Scene/Pkg/Parse/Image/TexImageParser.cpp",
+  "src/Scene/Text/Text.cpp",
+  "tests/JsonBuilder.cppm",
+  "tests/PkgHeader.cppm",
+  "tests/SceneParseProbe.cppm",
+  "tests/SceneKeys.cppm",
+  "tests/Corpus.cppm",
+  "tests/wescene_test_main.cpp",
+]
+
+[usage]
+private-include-directories = [
+  "third_party",
+  "src",
+  "src/Core",
+  "src/Scene",
+  "src/Scene/Utils",
+  "src/Scene/Utils/include",
+  "src/Scene/Utils/include/Utils",
+  "src/Scene/Scene",
+  "src/Scene/Particle",
+  "src/Scene/Script",
+  "src/Vulkan",
+  "tests",
+  "third_party/tenon/glslang",
+]
+private-definitions = [
+  'WAYWALLEN_WORKSHOP_DIR="workshop"',
+  'WAYWALLEN_ASSETS_DIR="assets"',
+  'WAYWALLEN_FIXTURE_DIR="tests/fixtures"',
+  "FT_SIZEOF_LONG=8",
+]
+private-options = [
+  "-fPIC",
+  "-fsized-deallocation",
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-Wno-missing-field-initializers",
+  "-Wno-gnu-zero-variadic-macro-arguments",
+]
+private-linker-options = ["-pthread", "-ldl"]
+
+[dependencies.rstd-std]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "private"
+
+[dependencies.rstd-cppstd]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "private"
+
+[dependencies.rstd-json]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "private"
+
+[dependencies.rstd-log]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "private"
+
+[dependencies.rstd-argparse]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "private"
+
+[dependencies.rstd-bench]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "private"
+
+[dependencies.wavsen-audio]
+git = "https://github.com/hypengw/wavsen.git"
+visibility = "private"
+
+[dependencies.vvk]
+git = "https://github.com/litocpp/vvk.git"
+visibility = "private"
+
+[external-dependencies.cmake.eigen]
+find-package = "Eigen3"
+git = "https://gitlab.com/libeigen/eigen.git"
+rev = "bc3b39870ecb690a623a3f49149a358b95c5781d"
+cache = { BUILD_TESTING = false, EIGEN_BUILD_TESTING = false, EIGEN_BUILD_BLAS = false, EIGEN_BUILD_LAPACK = false, EIGEN_BUILD_DOC = false, EIGEN_BUILD_DEMOS = false, EIGEN_BUILD_PKGCONFIG = false, EIGEN_BUILD_CMAKE_PACKAGE = true }
+targets = [{ name = "Eigen3::Eigen", visibility = "private" }]
+
+[external-dependencies.cmake.quickjs]
+find-package = "qjs"
+git = "https://github.com/quickjs-ng/quickjs.git"
+rev = "3c051980ab7e783dfbfb1c70c014ce5e05ecf24c"
+config-directory = "lib/cmake/quickjs"
+cache = { BUILD_SHARED_LIBS = false, QJS_BUILD_EXAMPLES = false, QJS_BUILD_CLI_STATIC = false, QJS_BUILD_CLI_WITH_MIMALLOC = false, QJS_BUILD_CLI_WITH_STATIC_MIMALLOC = false, QJS_ENABLE_INSTALL = true }
+targets = [{ name = "qjs", visibility = "private" }]
+
+[external-dependencies.cmake.glslang]
+find-package = "glslang"
+git = "https://github.com/KhronosGroup/glslang.git"
+rev = "275822a6261ee689aadb1da5f09a0ec2f058685c"
+cache = { ENABLE_GLSLANG_BINARIES = false, ENABLE_HLSL = true, ENABLE_OPT = false, ENABLE_CTEST = false, BUILD_EXTERNAL = false, GLSLANG_TESTS = false, BUILD_TESTING = false }
+targets = [
+  { name = "glslang::glslang", visibility = "private" },
+  { name = "glslang::SPIRV", visibility = "private" },
+  { name = "glslang::glslang-default-resource-limits", visibility = "private" },
+]
+
+[dependencies.spirv-reflect]
+git = "https://github.com/hypengw/SPIRV-Reflect.git"
+visibility = "private"
+
+[external-dependencies.pkg-config.lz4]
+module = "liblz4"
+visibility = "private"
+
+[external-dependencies.pkg-config.fontconfig]
+module = "fontconfig"
+visibility = "private"
+
+[external-dependencies.pkg-config.freetype]
+module = "freetype2"
+visibility = "private"

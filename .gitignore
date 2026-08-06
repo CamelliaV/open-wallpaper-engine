@@ -25,5 +25,7 @@ build-*
 /assets
 /record
 /CMakeUserPresets.json
+/tenon.lock
+/.tenon/
 /defaultprojects
 /myprojects
