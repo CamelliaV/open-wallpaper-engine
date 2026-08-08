@@ -803,6 +803,42 @@ equal(source_items[1].resource, item_dir .. "/scene.pkg", "source scan resource"
 equal(source_items[1].external_id, "3765064055", "source Workshop subscription id")
 equal(source_items[2].external_id, nil, "local project must not expose a subscription id")
 
+local video_dir = "/fixture/video"
+local video_ctx = {
+    fs = {
+        exists = function(path) return path == video_dir .. "/project.json" end,
+        read = function(path)
+            if path == video_dir .. "/project.json" then return "video-project" end
+            return nil
+        end,
+    },
+    json = {
+        parse = function(value)
+            if value ~= "video-project" then return nil end
+            return {
+                general = {
+                    properties = {
+                        schemecolor = {
+                            type = "color",
+                            value = "0.99608 0.72941 0.00000",
+                        },
+                    },
+                },
+            }
+        end,
+    },
+}
+local video_apply = main.wallpaper.apply({
+    wp_type = "video",
+    resource = video_dir .. "/wallpaper.mp4",
+}, video_ctx)
+equal(video_apply.extras.path, video_dir .. "/wallpaper.mp4", "video resource extra")
+equal(
+    video_apply.default_user_properties["waywallen.scheme_color"],
+    "0.99608 0.72941 0.00000",
+    "video default scheme color"
+)
+
 -- Registering a library that already points inside steamapps must still scan.
 for _, suffix in ipairs({ "/", "/steamapps", "/steamapps/workshop/content/" .. project.WE_APPID }) do
     local nested_ctx = {}

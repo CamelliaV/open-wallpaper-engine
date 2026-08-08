@@ -51,6 +51,20 @@ local PLAYBACK_SPEED_PROPERTY = {
     value = 100,
 }
 
+local function load_project_properties(entry, ctx)
+    local dir = project_util.project_dir_of(entry)
+    if not dir then return nil end
+    local proj = dir .. "/project.json"
+    if not ctx.fs.exists(proj) then return nil end
+    local content = ctx.fs.read(proj)
+    if not content then return nil end
+    local parsed = ctx.json.parse(content)
+    if not parsed or type(parsed) ~= "table" then return nil end
+    local props = parsed.general and parsed.general.properties or {}
+    if type(props) ~= "table" then return {} end
+    return props
+end
+
 local function map_property_keys(props)
     for from, to in pairs(PROPERTY_KEY_MAP) do
         local v = props[from]
@@ -59,6 +73,18 @@ local function map_property_keys(props)
             props[from] = nil
         end
     end
+end
+
+local function color_wire_value(value)
+    if type(value) == "string" then return value end
+    if type(value) ~= "table" then return nil end
+    local components = {}
+    for index = 1, #value do
+        if type(value[index]) ~= "number" then return nil end
+        components[index] = tostring(value[index])
+    end
+    if #components < 3 or #components > 4 then return nil end
+    return table.concat(components, " ")
 end
 
 local function prefix_property_titles(props)
@@ -81,16 +107,8 @@ local function add_predefined_properties(entry, props)
 end
 
 function M.properties(entry, ctx)
-    local dir = project_util.project_dir_of(entry)
-    if not dir then return nil end
-    local proj = dir .. "/project.json"
-    if not ctx.fs.exists(proj) then return nil end
-    local content = ctx.fs.read(proj)
-    if not content then return nil end
-    local parsed = ctx.json.parse(content)
-    if not parsed or type(parsed) ~= "table" then return nil end
-    local props = parsed.general and parsed.general.properties or {}
-    if type(props) ~= "table" then props = {} end
+    local props = load_project_properties(entry, ctx)
+    if not props then return nil end
     map_property_keys(props)
 
     local locale = load_locale(ctx, entry.library_root)
@@ -132,8 +150,22 @@ local function we_assets(ctx)
     return nil
 end
 
-function M.extras(entry, ctx)
-    local out = { path = entry.resource }
+function M.apply(entry, ctx)
+    local extras = { path = entry.resource }
+    local default_user_properties = {}
+    if entry.wp_type == "video" then
+        local props = load_project_properties(entry, ctx)
+        if props then
+            map_property_keys(props)
+            local scheme = props["waywallen.scheme_color"]
+            if type(scheme) == "table" then
+                local value = color_wire_value(scheme.value)
+                if value then
+                    default_user_properties["waywallen.scheme_color"] = value
+                end
+            end
+        end
+    end
     if entry.wp_type == "scene" then
         local assets
         if entry.library_root and entry.library_root ~= "" then
@@ -144,13 +176,16 @@ function M.extras(entry, ctx)
         end
         assets = assets or we_assets(ctx)
         if assets then
-            out.assets = assets
+            extras.assets = assets
         end
     end
     if entry.external_id and entry.external_id ~= "" then
-        out.workshop_id = entry.external_id
+        extras.workshop_id = entry.external_id
     end
-    return out
+    return {
+        extras = extras,
+        default_user_properties = default_user_properties,
+    }
 end
 
 return M
