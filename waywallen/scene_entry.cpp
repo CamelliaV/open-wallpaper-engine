@@ -356,7 +356,7 @@ bool parse_playback_rate_wire(const char* raw, float& out) {
     double pct = std::strtod(raw, &end);
     if (errno != 0 || end == raw || ! f64(pct).is_finite()) return false;
     while (*end && std::isspace(static_cast<unsigned char>(*end))) ++end;
-    if (*end || pct < 10.0 || pct > 200.0) return false;
+    if (*end || pct < 10.0 || pct > 400.0) return false;
     out = static_cast<float>(pct / 100.0);
     return true;
 }
@@ -368,7 +368,7 @@ bool parse_user_property_playback_rate(const owe::Json& raw, float& out) {
         auto number = value.as_f64();
         if (number.is_none() || ! number->is_finite()) return false;
         const auto pct = number->to_primitive();
-        if (pct < 10.0 || pct > 200.0) return false;
+        if (pct < 10.0 || pct > 400.0) return false;
         out = static_cast<float>(pct / 100.0);
         return true;
     }
