@@ -1126,6 +1126,10 @@ void SceneRuntimeController::on(MainMsg::SetFillMode_payload&& m) {
 }
 
 void SceneRuntimeController::on(MainMsg::SetSpeed_payload&& m) {
+    if (! m.speed.is_finite() || m.speed <= f32()) {
+        rstd_warn("SceneWallpaper: invalid playback speed {}; ignoring", m.speed);
+        return;
+    }
     m_config.speed = m.speed.to_primitive();
     m_render_controller->post(RenderMsg::SetSpeed(m.speed));
 }

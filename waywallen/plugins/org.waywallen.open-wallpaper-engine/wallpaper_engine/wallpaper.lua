@@ -35,12 +35,18 @@ local PROPERTY_KEY_MAP = {
     schemecolor = "waywallen.scheme_color"
 }
 
-local PREDEFINED_PROPERTIES = {
-    ["waywallen.enable_audio"] = {
-        text = "Enable audio",
-        type = "bool",
-        value = true,
-    },
+local ENABLE_AUDIO_PROPERTY = {
+    text = "Enable audio",
+    type = "bool",
+    value = true,
+}
+
+local PLAYBACK_SPEED_PROPERTY = {
+    text = "Playback speed (%)",
+    type = "slider",
+    min = 10,
+    max = 200,
+    value = 100,
 }
 
 local function map_property_keys(props)
@@ -63,8 +69,12 @@ end
 
 local function add_predefined_properties(entry, props)
     if entry.wp_type == "web" then return end
-    for k, v in pairs(PREDEFINED_PROPERTIES) do
-        if props[k] == nil then props[k] = v end
+    if props["waywallen.enable_audio"] == nil then
+        props["waywallen.enable_audio"] = ENABLE_AUDIO_PROPERTY
+    end
+    if (entry.wp_type == "scene" or entry.wp_type == "video") and
+        props["waywallen.playback_speed"] == nil then
+        props["waywallen.playback_speed"] = PLAYBACK_SPEED_PROPERTY
     end
 end
 

@@ -44,6 +44,7 @@ struct Options {
     uint32_t    initial_fps { 30 };
     bool        test_pattern { false };
     float       initial_volume { 1.0f };
+    float       initial_playback_rate { 1.0f };
     bool        settings_enable_audio { true };
     bool        property_enable_audio { true };
     std::string render_node;
@@ -58,6 +59,7 @@ struct Options {
 
 constexpr const char* kSettingsEnableAudioKey = "enable_audio";
 constexpr const char* kPropertyEnableAudioKey = "waywallen.enable_audio";
+constexpr const char* kPlaybackSpeedKey       = "waywallen.playback_speed";
 
 [[noreturn]] void die(const std::string& msg) {
     rstd_error("waywallen-wescene-renderer: {}", msg);
@@ -347,6 +349,36 @@ bool parse_user_property_bool(const owe::Json& raw, bool& out) {
     return false;
 }
 
+bool parse_playback_rate_wire(const char* raw, float& out) {
+    if (! raw || ! *raw) return false;
+    char* end  = nullptr;
+    errno      = 0;
+    double pct = std::strtod(raw, &end);
+    if (errno != 0 || end == raw || ! f64(pct).is_finite()) return false;
+    while (*end && std::isspace(static_cast<unsigned char>(*end))) ++end;
+    if (*end || pct < 10.0 || pct > 200.0) return false;
+    out = static_cast<float>(pct / 100.0);
+    return true;
+}
+
+bool parse_user_property_playback_rate(const owe::Json& raw, float& out) {
+    auto        member = raw.get("value"_str);
+    const auto& value  = member.is_some() ? **member : raw;
+    if (value.is_number()) {
+        auto number = value.as_f64();
+        if (number.is_none() || ! number->is_finite()) return false;
+        const auto pct = number->to_primitive();
+        if (pct < 10.0 || pct > 200.0) return false;
+        out = static_cast<float>(pct / 100.0);
+        return true;
+    }
+    if (value.is_string()) {
+        auto text = rstd::cppstd::to_string(*value.as_str());
+        return parse_playback_rate_wire(text.c_str(), out);
+    }
+    return false;
+}
+
 int32_t parse_i32(const char* s, int32_t def) {
     if (! s || ! *s) return def;
     char* end = nullptr;
@@ -555,6 +587,17 @@ void set_property_enable_audio(HostState& s, const char* value) {
     apply_audio_enabled(s, was_enabled);
 }
 
+void set_playback_rate(HostState& s, const char* value) {
+    float rate = 1.0f;
+    if (! parse_playback_rate_wire(value, rate)) {
+        rstd_warn("waywallen-wescene-renderer: invalid {} value '{}'; ignoring",
+                  kPlaybackSpeedKey,
+                  value ? value : "");
+        return;
+    }
+    if (s.wp) s.wp->setSpeed(rate);
+}
+
 void set_fps(HostState& s, uint32_t fps) {
     if (! s.wp || fps == 0) return;
     s.wp->setFps(fps);
@@ -587,6 +630,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                 set_settings_enable_audio(s, val);
             } else if (std::strcmp(key, kPropertyEnableAudioKey) == 0) {
                 set_property_enable_audio(s, val);
+            } else if (std::strcmp(key, kPlaybackSpeedKey) == 0) {
+                set_playback_rate(s, val);
             } else if (std::strcmp(key, "test_pattern") == 0) {
                 // Wescene's test_pattern flag is set on initial spawn
                 // through RenderInit; runtime toggling is not wired
@@ -881,6 +926,17 @@ int run(int argc, char** argv) {
                             }
                             return;
                         }
+                        if (k == kPlaybackSpeedKey) {
+                            float rate = 1.0f;
+                            if (parse_user_property_playback_rate(v, rate)) {
+                                opts.initial_playback_rate = rate;
+                            } else {
+                                rstd_warn("waywallen-wescene-renderer: invalid {} initial value; "
+                                          "using 100",
+                                          kPlaybackSpeedKey);
+                            }
+                            return;
+                        }
                         opts.initial_user_properties.insert(
                             ::alloc::string::String::make(rstd::cppstd::as_str(k).unwrap()),
                             v.clone());
@@ -959,6 +1015,7 @@ int run(int argc, char** argv) {
     wp_config.load_bench      = load_bench.clone();
     wp_config.user_properties = rstd::move(opts.initial_user_properties);
     wp_config.fps             = opts.initial_fps;
+    wp_config.speed           = opts.initial_playback_rate;
     wp_config.volume          = effective_volume(host);
     wp_config.muted           = ! effective_audio_enabled(host);
     wp.configure(rstd::move(wp_config));
