@@ -2272,6 +2272,33 @@ TEST(ScriptUserProperty, ApplyUserPropertiesReceivesUnwrappedValue) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
 
+TEST(ScriptUserProperty, DirectReadsReceiveUpdatedComboValue) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = MakeProbe(rt,
+                         "test/direct_combo_user_property",
+                         R"JS(
+        export function update() {
+            if (engine.userProperties.timeofday != 0) {
+                return engine.userProperties.timeofday - 1;
+            }
+            return -1;
+        }
+    )JS");
+    ASSERT_NE(fs, nullptr);
+
+    rt.SetUserProperty("timeofday",
+                       rstd::json::from_str(R"({"type":"combo","value":"1"})"_str).unwrap());
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 0.0);
+
+    rt.SetUserProperty("timeofday",
+                       rstd::json::from_str(R"({"type":"combo","value":"2"})"_str).unwrap());
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
+}
+
 TEST(ScriptUserProperty, TextInputValueRemainsAString) {
     JsRuntime   rt;
     FrameInputs fi {};

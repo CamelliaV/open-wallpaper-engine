@@ -3237,7 +3237,8 @@ void JsRuntime::SetUserProperty(std::string_view key, const Json& property) {
         JS_DefinePropertyValueStr(
             ctx, engine, "userProperties", JS_DupValue(ctx, props), JS_PROP_C_W_E);
     }
-    JS_DefinePropertyValueStr(ctx, props, key_str.c_str(), JsonToJs(ctx, property), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(
+        ctx, props, key_str.c_str(), UserPropertyValueToJs(ctx, property), JS_PROP_C_W_E);
 
     JSValue changed = JS_NewObject(ctx);
     JS_DefinePropertyValueStr(
