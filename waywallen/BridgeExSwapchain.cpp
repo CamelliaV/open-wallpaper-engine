@@ -44,7 +44,19 @@ owe::FrameSurfaceCompletionStatus ToFrameCompletionStatus(BridgeSlotCompletionSt
 
 } // namespace
 
+void BridgeExSwapchain::poll() {
+    const bool request_wake = m_frame_request_wake.exchange(false, std::memory_order_acq_rel);
+    m_core.drainPendingDirective();
+    const bool republished = m_core.republishRequestedFrame(true);
+    m_skip_acquire_in_poll = republished || m_core.hasPendingDirective() ||
+                             (request_wake && ! m_core.hasPendingFrameRequest());
+}
+
 owe::FrameSurfaceAcquireResult BridgeExSwapchain::acquireRenderTarget() {
+    if (m_skip_acquire_in_poll) {
+        m_skip_acquire_in_poll = false;
+        return { .status = owe::FrameSurfaceAcquireStatus::NotReady };
+    }
     auto acquired = m_core.acquireSlot();
     if (! acquired.acquired()) {
         switch (acquired.status) {

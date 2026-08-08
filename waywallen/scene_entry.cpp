@@ -456,6 +456,7 @@ struct HostState {
 
 void signal_shutdown(HostState& s) {
     s.shutdown.store(true, rstd::sync::atomic::Ordering::Release);
+    if (s.swapchain) s.swapchain->cancelFrameWait();
 }
 
 void set_audio_response_demand(HostState& s, bool active) {
@@ -679,6 +680,11 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         if (s.wp && s.paused.load(rstd::sync::atomic::Ordering::Acquire)) s.wp->requestFrame();
         break;
     }
+    case WW_EVT_IN_REQUEST_FRAME:
+        if (s.swapchain && s.swapchain->requestFrame() && s.wp &&
+            s.paused.load(rstd::sync::atomic::Ordering::Acquire))
+            s.wp->requestFrame();
+        break;
     default:
         rstd_warn("waywallen-wescene-renderer: unknown control op {}", static_cast<int>(msg.op));
         break;

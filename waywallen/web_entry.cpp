@@ -477,6 +477,9 @@ void apply_control(HostState& s, ReaderState& reader, ww_bridge_control_t& msg) 
         enqueue_host_message(s, HostMsg::SyncPauseVisibility());
         break;
     }
+    case WW_EVT_IN_REQUEST_FRAME:
+        if (s.core) s.core->requestFrame();
+        break;
     default:
         rstd_warn("waywallen-weweb-renderer: unknown control op {}", static_cast<int>(msg.op));
         break;
@@ -790,6 +793,8 @@ int run(int argc, char** argv) {
 
     while (! state.shutdown.load(rstd::sync::atomic::Ordering::Acquire) && ! host.ShouldExit()) {
         drain_host_messages(state);
+        core.drainPendingDirective();
+        (void)core.republishRequestedFrame();
         host.Pump();
         // CEF's OSR pacing goes idle without explicit invalidate kicks
         // (see project memory: CEF 147 OSR + DMA-BUF). Dedup happens

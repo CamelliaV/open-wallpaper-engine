@@ -50,6 +50,18 @@ int BridgeSession::submitAcquiredSlot(const ww_pool_slot_identity_t& identity, i
         m_pool, m_send_socket, &identity, producer_sync_fd, &out_result);
 }
 
+int BridgeSession::tryRepublishLatest(ww_pool_republish_result_t& out_result) {
+    std::scoped_lock lock(m_send_mutex);
+    return ww_bridge_pool_try_republish_latest(m_pool, m_send_socket, &out_result);
+}
+
+int BridgeSession::waitRepublishLatest(ww_pool_cancel_fn cancel, void* userdata,
+                                       ww_pool_republish_result_t& out_result) {
+    std::scoped_lock lock(m_send_mutex);
+    return ww_bridge_pool_wait_republish_latest(
+        m_pool, m_send_socket, cancel, userdata, &out_result);
+}
+
 int BridgeSession::abortAcquiredSlot(const ww_pool_slot_identity_t& identity) {
     return ww_bridge_pool_abort_acquired_slot(m_pool, &identity);
 }

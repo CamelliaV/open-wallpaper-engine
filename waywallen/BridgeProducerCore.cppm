@@ -94,6 +94,21 @@ public:
     // negotiation is implicitly abandoned).
     void queueDirective(const ww_pool_directive_t& directive);
 
+    // Thread-safe level-triggered request. The producer thread either
+    // republishes the latest content or lets its next submit satisfy it.
+    bool requestFrame();
+
+    bool hasPendingFrameRequest() const {
+        return m_frame_request_revision.load(std::memory_order_acquire) !=
+               m_served_frame_request_revision.load(std::memory_order_acquire);
+    }
+
+    // Producer-thread-only. True means the caller should skip producing
+    // another frame for the request that was just satisfied.
+    bool republishRequestedFrame(bool wait_for_release = false);
+
+    void cancelFrameWait() { m_cancel_frame_wait.store(true, std::memory_order_release); }
+
     // True iff a queued directive is waiting to be applied.
     bool hasPendingDirective() const { return m_pending_valid.load(std::memory_order_acquire); }
 
@@ -149,7 +164,8 @@ public:
     uint32_t fourcc() const { return m_fourcc; }
 
 private:
-    void markSessionLost();
+    void       markSessionLost();
+    static int cancelRepublishWait(void* userdata);
 
     // Producer-thread-only. Runs the bridge's apply_directive,
     // publishes new geometry/format on success. Returns:
@@ -172,13 +188,16 @@ private:
     bool                                         m_first_negotiated_done { false };
     std::function<void(const BridgeReadyEvent&)> m_on_ready_changed;
 
-    uint32_t           m_slot_count { 0 };
-    bool               m_have_pending { false };
-    bool               m_session_lost { false };
-    BridgeSlotIdentity m_pending_identity;
-    uint32_t           m_width { 0 };
-    uint32_t           m_height { 0 };
-    uint32_t           m_fourcc { 0 };
+    uint32_t              m_slot_count { 0 };
+    bool                  m_have_pending { false };
+    bool                  m_session_lost { false };
+    BridgeSlotIdentity    m_pending_identity;
+    uint32_t              m_width { 0 };
+    uint32_t              m_height { 0 };
+    uint32_t              m_fourcc { 0 };
+    std::atomic<bool>     m_cancel_frame_wait { false };
+    std::atomic<uint64_t> m_frame_request_revision { 0 };
+    std::atomic<uint64_t> m_served_frame_request_revision { 0 };
 };
 
 } // namespace ww_wescene

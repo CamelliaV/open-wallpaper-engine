@@ -23,6 +23,9 @@ public:
     int tryAcquireAnyForRender(ww_pool_slot_acquire_result_t& out_result);
     int submitAcquiredSlot(const ww_pool_slot_identity_t& identity, int producer_sync_fd,
                            ww_pool_slot_submit_result_t& out_result);
+    int tryRepublishLatest(ww_pool_republish_result_t& out_result);
+    int waitRepublishLatest(ww_pool_cancel_fn cancel, void* userdata,
+                            ww_pool_republish_result_t& out_result);
     int abortAcquiredSlot(const ww_pool_slot_identity_t& identity);
     int sendBindFailed(const waywallen_bind_failure_t& failure);
     int sendClearColor(float r, float g, float b, float a);

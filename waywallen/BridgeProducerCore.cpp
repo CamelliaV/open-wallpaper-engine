@@ -69,6 +69,48 @@ void BridgeProducerCore::queueDirective(const ww_pool_directive_t& directive) {
     m_pending_valid.store(true, std::memory_order_release);
 }
 
+bool BridgeProducerCore::requestFrame() {
+    const uint64_t previous = m_frame_request_revision.fetch_add(1, std::memory_order_acq_rel);
+    return previous == m_served_frame_request_revision.load(std::memory_order_acquire);
+}
+
+int BridgeProducerCore::cancelRepublishWait(void* userdata) {
+    auto& core = *static_cast<BridgeProducerCore*>(userdata);
+    return core.m_cancel_frame_wait.load(std::memory_order_acquire) ||
+                   core.m_pending_valid.load(std::memory_order_acquire)
+               ? 1
+               : 0;
+}
+
+bool BridgeProducerCore::republishRequestedFrame(bool wait_for_release) {
+    const uint64_t revision = m_frame_request_revision.load(std::memory_order_acquire);
+    if (revision == m_served_frame_request_revision.load(std::memory_order_acquire)) return false;
+    if (m_session_lost || m_slot_count == 0 || m_have_pending) return false;
+
+    ww_pool_republish_result_t result {};
+    const int rc = wait_for_release
+                       ? m_session->waitRepublishLatest(cancelRepublishWait, this, result)
+                       : m_session->tryRepublishLatest(result);
+    if (rc != 0) {
+        std::fprintf(stderr, "BridgeProducerCore: republish_latest rc=%d\n", rc);
+        if (rc == -EPIPE) markSessionLost();
+        return false;
+    }
+    switch (result.status) {
+    case WW_POOL_REPUBLISH_PUBLISHED:
+        m_served_frame_request_revision.store(revision, std::memory_order_release);
+        return true;
+    case WW_POOL_REPUBLISH_NO_CONTENT:
+    case WW_POOL_REPUBLISH_BUSY:
+    case WW_POOL_REPUBLISH_CANCELLED: return false;
+    case WW_POOL_REPUBLISH_SESSION_LOST: markSessionLost(); return false;
+    case WW_POOL_REPUBLISH_ERROR:
+        std::fprintf(stderr, "BridgeProducerCore: republish_latest error=%d\n", result.error_code);
+        return false;
+    }
+    return false;
+}
+
 void BridgeProducerCore::drainPendingDirective() {
     if (m_session_lost) {
         m_pending_valid.store(false, std::memory_order_release);
@@ -264,6 +306,8 @@ bool BridgeProducerCore::acquireSlot(VkImage* out_image, uint32_t* out_width,
 
 BridgeSlotCompletionResult BridgeProducerCore::submitSlot(const BridgeSlotIdentity& identity,
                                                           int producer_sync_fd) {
+    const uint64_t frame_request_revision =
+        m_frame_request_revision.load(std::memory_order_acquire);
     if (! m_have_pending) {
         if (producer_sync_fd >= 0) ::close(producer_sync_fd);
         return BridgeSlotCompletionResult {
@@ -329,6 +373,7 @@ BridgeSlotCompletionResult BridgeProducerCore::submitSlot(const BridgeSlotIdenti
     }
     m_have_pending     = false;
     m_pending_identity = {};
+    m_served_frame_request_revision.store(frame_request_revision, std::memory_order_release);
     return BridgeSlotCompletionResult {
         .status   = BridgeSlotCompletionStatus::Submitted,
         .identity = identity,

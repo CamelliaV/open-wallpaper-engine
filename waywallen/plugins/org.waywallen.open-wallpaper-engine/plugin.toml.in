@@ -21,7 +21,7 @@ bin = "@OWE_WESCENE_BIN@"
 types = ["scene"]
 priority = 100
 activity = "continuous"
-spawn_version = 9
+spawn_version = 10
 extras = ["assets", "workshop_id"]
 
 [renderers.wescene-renderer.settings]

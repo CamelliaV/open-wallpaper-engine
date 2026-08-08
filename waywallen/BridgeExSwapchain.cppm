@@ -15,13 +15,19 @@ public:
     ~BridgeExSwapchain() override;
 
     void queueDirective(const ww_pool_directive_t& directive) { m_core.queueDirective(directive); }
+    bool requestFrame() {
+        const bool wake = m_core.requestFrame();
+        if (wake) m_frame_request_wake.store(true, std::memory_order_release);
+        return wake;
+    }
+    void cancelFrameWait() { m_core.cancelFrameWait(); }
     bool hasPendingDirective() const { return m_core.hasPendingDirective(); }
 
     void setOnFirstNegotiated(std::function<void()> cb) {
         m_core.setOnFirstNegotiated(std::move(cb));
     }
 
-    void poll() override { m_core.drainPendingDirective(); }
+    void poll() override;
 
     owe::FrameSurfaceAcquireResult acquireRenderTarget() override;
 
@@ -54,6 +60,8 @@ private:
 
     BridgeProducerCore                m_core;
     std::optional<BridgeSlotIdentity> m_pending_identity;
+    std::atomic<bool>                 m_frame_request_wake { false };
+    bool                              m_skip_acquire_in_poll { false };
 };
 
 } // namespace ww_wescene
