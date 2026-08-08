@@ -122,18 +122,14 @@ bool IsShaderGraphUserProperty(const Json& property) {
     return string.is_some() && rstd::cppstd::as_string_view(*string) == "combo";
 }
 
-void ApplyClear(Scene& scene, const std::string& key, const Json& property) {
+Option<array<float, 3>> ApplyClear(Scene& scene, const std::string& key, const Json& property) {
     auto user_key = scene.ClearColorUserKey();
     if (user_key.is_empty() || CanonicalSceneUserPropertyKey(as_string_view(user_key)) != key)
-        return;
-    auto coerced = CoerceUserPropertyValue(property);
-    if (! coerced.ok || coerced.value.size() < usize(3)) return;
-    auto clamp01 = [](float value) {
-        return std::clamp(value, 0.0f, 1.0f);
-    };
-    scene.SetClearColor({ clamp01(coerced.value[usize()]),
-                          clamp01(coerced.value[usize(1)]),
-                          clamp01(coerced.value[usize(2)]) });
+        return None();
+    auto color = ResolveSceneUserPropertyColor(property);
+    if (color.is_none()) return None();
+    scene.SetClearColor(*color);
+    return color;
 }
 
 void ApplyShaderUniforms(Scene& scene, const std::string& key, const Json& property) {
@@ -439,6 +435,17 @@ std::string CanonicalSceneUserPropertyKey(std::string_view key) {
     return key == kWaywallenSchemeColorKey ? std::string(kSchemeColorKey) : std::string(key);
 }
 
+Option<array<float, 3>> ResolveSceneUserPropertyColor(const Json& property) {
+    auto coerced = CoerceUserPropertyValue(property);
+    if (! coerced.ok || coerced.value.size() < usize(3)) return None();
+    auto clamp01 = [](float value) {
+        return std::clamp(value, 0.0f, 1.0f);
+    };
+    return Some(array<float, 3> { clamp01(coerced.value[usize()]),
+                                  clamp01(coerced.value[usize(1)]),
+                                  clamp01(coerced.value[usize(2)]) });
+}
+
 SceneUserPropertyMutation SceneUserPropertyApplier::Apply(Scene& scene, std::string_view raw_key,
                                                           const Json& property) {
     SceneUserPropertyMutation mutation;
@@ -446,7 +453,7 @@ SceneUserPropertyMutation SceneUserPropertyApplier::Apply(Scene& scene, std::str
     mutation.diagnostics_changed = ! scene.ShaderComboUserBindings(as_str(key).unwrap()).is_empty();
 
     script::SetSceneUserProperty(scene, key, property);
-    ApplyClear(scene, key, property);
+    mutation.clear_color = ApplyClear(scene, key, property);
     ApplyShaderUniforms(scene, key, property);
     mutation.texture_materials = ApplyTextureProperty(scene, key, property);
     mutation.graph_changed     = ApplyShaderCombos(scene, key, property);
@@ -472,6 +479,7 @@ SceneUserPropertyMutation SceneUserPropertyApplier::ApplyAll(Scene&             
         auto mutation        = Apply(scene, rstd::cppstd::as_string_view(key->as_str()), *property);
         result.graph_changed |= mutation.graph_changed;
         result.diagnostics_changed |= mutation.diagnostics_changed;
+        if (mutation.clear_color.is_some()) result.clear_color = mutation.clear_color;
         for (auto material : mutation.texture_materials) {
             PushUniqueMaterial(result.texture_materials, material);
         }

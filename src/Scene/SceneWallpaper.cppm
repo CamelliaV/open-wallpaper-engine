@@ -27,12 +27,9 @@ using UserPropertyDiagnosticCallback = std::function<void(Vec<SceneUserPropertyD
 using RenderPassDiagnosticCallback =
     std::function<void(std::vector<vulkan::PreparedPassDiagnostic>)>;
 
-// Fired once per loaded scene with the parsed `general.clearcolor`.
-// The host forwards the value to the daemon via
-// `ww_bridge_send_report_state_clear_color` so display-side letterbox
-// bars match the scene's intended background. Components are 0..=1
-// sRGB. Alpha is fixed at 1.0 by the host (the rendered DMA-BUF is
-// always opaque).
+// Publishes the effective wallpaper background color. The project scheme color
+// takes precedence over `general.clearcolor` and runtime changes are emitted.
+// Components are 0..=1 sRGB. Alpha is fixed at 1.0 by the host.
 using ClearColorCallback = std::function<void(float r, float g, float b)>;
 
 struct MediaStatus {
@@ -116,9 +113,8 @@ public:
     void setOnUserPropertyDiagnostics(UserPropertyDiagnosticCallback);
     void requestPreparedPassDiagnostics(RenderPassDiagnosticCallback);
 
-    // Install (or clear, with `nullptr`) a callback invoked on the
-    // main thread after each scene is parsed, carrying the scene's
-    // `general.clearcolor`. Set once before initVulkan.
+    // Install a callback for the effective wallpaper background color.
+    // Set once before initVulkan.
     void setOnClearColor(ClearColorCallback);
 
     ExSwapchain* exSwapchain() const;

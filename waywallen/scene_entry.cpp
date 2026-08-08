@@ -972,9 +972,8 @@ int run(int argc, char** argv) {
         set_audio_response_demand(host, active);
     });
 
-    // Forward the scene's `general.clearcolor` to the daemon every
-    // time a scene loads. Alpha is forced to 1.0 — the rendered
-    // DMA-BUF is opaque; alpha only governs daemon-side letterbox bars.
+    // Forward the effective wallpaper background to the daemon. Alpha is
+    // forced to 1.0 because the rendered DMA-BUF is opaque.
     wp.setOnClearColor([&host](float r, float g, float b) {
         if (host.sock < 0) return;
         auto clear = host.clear_color.lock().unwrap();

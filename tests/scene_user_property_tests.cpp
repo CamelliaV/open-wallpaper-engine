@@ -4,6 +4,7 @@
 
 import rstd;
 import rstd.json;
+import owe.user_property;
 import wescene.scene;
 import wescene.scene_user_property;
 
@@ -29,6 +30,30 @@ TEST(SceneUserProperty, CanonicalizesHostSchemeColor) {
     EXPECT_EQ(owe::CanonicalSceneUserPropertyKey("custom"), "custom");
 }
 
+TEST(SceneUserProperty, ResolvesClampedColorDescriptor) {
+    auto property = rstd::json::from_str(R"({"type":"color","value":"-0.2 0.4 1.4"})"_str).unwrap();
+    auto color    = owe::ResolveSceneUserPropertyColor(property);
+
+    ASSERT_TRUE(color.is_some());
+    EXPECT_FLOAT_EQ((*color)[usize()], 0.0f);
+    EXPECT_FLOAT_EQ((*color)[usize(1)], 0.4f);
+    EXPECT_FLOAT_EQ((*color)[usize(2)], 1.0f);
+}
+
+TEST(SceneUserProperty, ResolvesResetWireValueFromExistingDescriptor) {
+    auto schema = rstd::json::from_str(R"({"type":"color","value":"0.2 0.4 0.6"})"_str).unwrap();
+    auto overridden =
+        owe::MergeUserPropertyDescriptor(schema, owe::MakeUserPropertyWirePatch("0.8 0.7 0.6"));
+    auto reset =
+        owe::MergeUserPropertyDescriptor(overridden, owe::MakeUserPropertyWirePatch("0.2 0.4 0.6"));
+    auto color = owe::ResolveSceneUserPropertyColor(reset);
+
+    ASSERT_TRUE(color.is_some());
+    EXPECT_FLOAT_EQ((*color)[usize()], 0.2f);
+    EXPECT_FLOAT_EQ((*color)[usize(1)], 0.4f);
+    EXPECT_FLOAT_EQ((*color)[usize(2)], 0.6f);
+}
+
 TEST(SceneUserProperty, BatchUsesSinglePropertySemantics) {
     owe::Scene single;
     owe::Scene batch;
@@ -49,6 +74,8 @@ TEST(SceneUserProperty, BatchUsesSinglePropertySemantics) {
 
     EXPECT_FALSE(single_mutation.graph_changed);
     EXPECT_FALSE(batch_mutation.graph_changed);
+    ASSERT_TRUE(single_mutation.clear_color.is_some());
+    ASSERT_TRUE(batch_mutation.clear_color.is_some());
     EXPECT_TRUE(single_mutation.texture_materials.is_empty());
     EXPECT_TRUE(batch_mutation.texture_materials.is_empty());
     auto single_color = single.ClearColor();

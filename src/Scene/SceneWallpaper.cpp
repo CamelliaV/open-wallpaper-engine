@@ -63,6 +63,7 @@ class MainMsg final {
               (SetFirstFrameCallback, (FirstFrameCallback cb;)),
               (SetUserPropertyDiagnosticCallback, (UserPropertyDiagnosticCallback cb;)),
               (UserPropertyDiagnostics, (Vec<SceneUserPropertyDiagnostic> diagnostics;)),
+              (SceneClearColorChanged, (f32 r; f32 g; f32 b;)),
               (PreparedPassDiagnostics, (RenderPassDiagnosticCallback                cb;
                                          std::vector<vulkan::PreparedPassDiagnostic> diagnostics;)),
               (Stop, (bool stop; u32 fade_ms { 0 }; bool scale_audio { false };)),
@@ -253,6 +254,7 @@ public:
     void on(MainMsg::SetFirstFrameCallback_payload&&);
     void on(MainMsg::SetUserPropertyDiagnosticCallback_payload&&);
     void on(MainMsg::UserPropertyDiagnostics_payload&&);
+    void on(MainMsg::SceneClearColorChanged_payload&&);
     void on(MainMsg::PreparedPassDiagnostics_payload&&);
     void on(MainMsg::Stop_payload&&);
     void on(MainMsg::PauseAudio_payload&&);
@@ -274,6 +276,8 @@ private:
                                     const rstd::bench::probe::ProbeBatch&);
     void       finishLoadBench();
     auto       loadBenchView() -> SceneLoadBenchRecorderView;
+    auto       schemeColor() const -> Option<array<float, 3>>;
+    void       publishClearColor(array<float, 3> fallback);
 
     bool m_inited { false };
 
@@ -762,6 +766,11 @@ void SceneRenderController::on(RenderMsg::SetUserProperty_payload&& m) {
         auto diagnostics = CollectSceneUserPropertyDiagnostics(*m_scene, m.key);
         (void)m_main_tx->send(MainMsg::UserPropertyDiagnostics(rstd::move(diagnostics)));
     }
+    if (mutation.clear_color.is_some() && m_main_tx) {
+        const auto color = *mutation.clear_color;
+        (void)m_main_tx->send(MainMsg::SceneClearColorChanged(
+            f32(color[usize()]), f32(color[usize(1)]), f32(color[usize(2)])));
+    }
     if (mutation.graph_changed) {
         auto rebuild_span =
             SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property_graph_rebuild);
@@ -907,6 +916,18 @@ auto SceneRuntimeController::loadBenchView() -> SceneLoadBenchRecorderView {
     };
 }
 
+auto SceneRuntimeController::schemeColor() const -> Option<array<float, 3>> {
+    auto property = m_user_properties.get("schemecolor"_str);
+    return property.is_some() ? ResolveSceneUserPropertyColor(**property) : None();
+}
+
+void SceneRuntimeController::publishClearColor(array<float, 3> fallback) {
+    if (! m_clear_color_cb) return;
+    auto color = schemeColor();
+    auto value = color.is_some() ? *color : fallback;
+    m_clear_color_cb(value[usize()], value[usize(1)], value[usize(2)]);
+}
+
 void SceneRuntimeController::ensureLoadBench(const Option<SceneLoadBenchHandle>& context) {
     if (! context) {
         finishLoadBench();
@@ -1011,6 +1032,7 @@ void SceneRuntimeController::startMainLoop() {
                     on(rstd::move(value));
                 }
                 RSTD_CASE_PAYLOAD(UserPropertyDiagnostics, value) { on(rstd::move(value)); }
+                RSTD_CASE_PAYLOAD(SceneClearColorChanged, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(PreparedPassDiagnostics, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(Stop, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(PauseAudio, value) { on(rstd::move(value)); }
@@ -1143,6 +1165,13 @@ void SceneRuntimeController::on(MainMsg::SetUserProperty_payload&& m) {
         ::alloc::string::String::make(rstd::cppstd::as_str(property).unwrap()), prop.clone());
     m_user_properties.insert(::alloc::string::String::make(rstd::cppstd::as_str(property).unwrap()),
                              prop.clone());
+    if (property == "schemecolor") {
+        auto color = ResolveSceneUserPropertyColor(prop);
+        if (color.is_some() && m_clear_color_cb) {
+            const auto value = *color;
+            m_clear_color_cb(value[usize()], value[usize(1)], value[usize(2)]);
+        }
+    }
     m_render_controller->post(RenderMsg::SetUserProperty(property, rstd::move(prop)));
 }
 
@@ -1156,6 +1185,12 @@ void SceneRuntimeController::on(MainMsg::SetUserPropertyDiagnosticCallback_paylo
 
 void SceneRuntimeController::on(MainMsg::UserPropertyDiagnostics_payload&& m) {
     if (m_user_property_diagnostic_cb) m_user_property_diagnostic_cb(rstd::move(m.diagnostics));
+}
+
+void SceneRuntimeController::on(MainMsg::SceneClearColorChanged_payload&& m) {
+    if (schemeColor().is_none() && m_clear_color_cb) {
+        m_clear_color_cb(m.r.to_primitive(), m.g.to_primitive(), m.b.to_primitive());
+    }
 }
 
 void SceneRuntimeController::on(MainMsg::PreparedPassDiagnostics_payload&& m) {
@@ -1357,13 +1392,7 @@ void SceneRuntimeController::loadScene() {
             owe::script::SetScenePersistence(*scene, rstd::move(ls_file));
         }
 
-        // Surface the parsed clear color before the scene is shipped
-        // off to the render thread; downstream callers (the daemon
-        // host) need the value to feed `set_config.clear_*`.
-        if (m_clear_color_cb) {
-            auto c = scene->ClearColor();
-            m_clear_color_cb(c[usize()], c[usize(1)], c[usize(2)]);
-        }
+        publishClearColor(scene->ClearColor());
     }
 
     auto parsed = rstd::move(parsed_scene).unwrap();

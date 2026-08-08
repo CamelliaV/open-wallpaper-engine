@@ -13,12 +13,14 @@ export namespace owe
 {
 
 struct SceneUserPropertyMutation {
-    bool                 graph_changed {};
-    bool                 diagnostics_changed {};
-    Vec<SceneMaterialId> texture_materials;
+    bool                    graph_changed {};
+    bool                    diagnostics_changed {};
+    Option<array<float, 3>> clear_color;
+    Vec<SceneMaterialId>    texture_materials;
 };
 
-std::string CanonicalSceneUserPropertyKey(std::string_view key);
+std::string             CanonicalSceneUserPropertyKey(std::string_view key);
+Option<array<float, 3>> ResolveSceneUserPropertyColor(const Json&);
 
 class SceneUserPropertyApplier {
 public:
