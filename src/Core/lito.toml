@@ -36,28 +36,25 @@ private-options = [
 private-linker-options = ["-pthread", "-ldl"]
 
 [dependencies.rstd-std]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-cppstd]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-json]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-log]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-argparse]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [external-dependencies.cmake.eigen]
-find-package = "Eigen3"
-git = "https://gitlab.com/libeigen/eigen.git"
-rev = "bc3b39870ecb690a623a3f49149a358b95c5781d"
-cache = { BUILD_TESTING = false, EIGEN_BUILD_TESTING = false, EIGEN_BUILD_BLAS = false, EIGEN_BUILD_LAPACK = false, EIGEN_BUILD_DOC = false, EIGEN_BUILD_DEMOS = false, EIGEN_BUILD_PKGCONFIG = false, EIGEN_BUILD_CMAKE_PACKAGE = true }
+workspace = true
 targets = [{ name = "Eigen3::Eigen", visibility = "public" }]

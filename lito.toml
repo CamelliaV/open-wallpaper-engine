@@ -16,3 +16,107 @@ default-members = ["viewer/SceneViewer", "viewer/WebViewer"]
 
 [workspace.package]
 version = "0.2.2"
+
+[workspace.dependencies.owe-core]
+path = "src/Core"
+
+[workspace.dependencies.owe-audio]
+path = "src/Audio"
+
+[workspace.dependencies.owe-types]
+path = "src/Scene/types"
+
+[workspace.dependencies.owe-utils]
+path = "src/Scene/Utils"
+
+[workspace.dependencies.owe-vulkan]
+path = "src/Vulkan"
+
+[workspace.dependencies.owe-scene]
+path = "src/Scene"
+
+[workspace.dependencies.owe-web]
+path = "src/Web"
+
+[workspace.dependencies.owe-viewer-common]
+path = "viewer/Common"
+
+[workspace.dependencies.rstd-std]
+git = "https://github.com/litocpp/rstd.git"
+
+[workspace.dependencies.rstd-cppstd]
+git = "https://github.com/litocpp/rstd.git"
+
+[workspace.dependencies.rstd-json]
+git = "https://github.com/litocpp/rstd.git"
+
+[workspace.dependencies.rstd-log]
+git = "https://github.com/litocpp/rstd.git"
+
+[workspace.dependencies.rstd-argparse]
+git = "https://github.com/litocpp/rstd.git"
+
+[workspace.dependencies.rstd-bench]
+git = "https://github.com/litocpp/rstd.git"
+
+[workspace.dependencies.wavsen-audio]
+git = "https://github.com/hypengw/wavsen.git"
+
+[workspace.dependencies.wavsen-video]
+git = "https://github.com/hypengw/wavsen.git"
+
+[workspace.dependencies.vvk]
+git = "https://github.com/litocpp/vvk.git"
+
+[workspace.dependencies.spirv-reflect]
+git = "https://github.com/hypengw/SPIRV-Reflect.git"
+
+[workspace.external-dependencies.pkg-config.glfw]
+module = "glfw3"
+
+[workspace.external-dependencies.pkg-config.egl]
+module = "egl"
+
+[workspace.external-dependencies.pkg-config.gles]
+module = "glesv2"
+
+[workspace.external-dependencies.pkg-config.x11]
+module = "x11"
+
+[workspace.external-dependencies.pkg-config.wayland-egl]
+module = "wayland-egl"
+
+[workspace.external-dependencies.pkg-config.lz4]
+module = "liblz4"
+
+[workspace.external-dependencies.pkg-config.fontconfig]
+module = "fontconfig"
+
+[workspace.external-dependencies.pkg-config.freetype]
+module = "freetype2"
+
+[workspace.external-dependencies.cmake.eigen]
+find-package = "Eigen3"
+git = "https://gitlab.com/libeigen/eigen.git"
+rev = "bc3b39870ecb690a623a3f49149a358b95c5781d"
+cache = { BUILD_TESTING = false, EIGEN_BUILD_TESTING = false, EIGEN_BUILD_BLAS = false, EIGEN_BUILD_LAPACK = false, EIGEN_BUILD_DOC = false, EIGEN_BUILD_DEMOS = false, EIGEN_BUILD_PKGCONFIG = false, EIGEN_BUILD_CMAKE_PACKAGE = true }
+
+[workspace.external-dependencies.cmake.glslang]
+find-package = "glslang"
+git = "https://github.com/KhronosGroup/glslang.git"
+rev = "275822a6261ee689aadb1da5f09a0ec2f058685c"
+cache = { ENABLE_GLSLANG_BINARIES = false, ENABLE_HLSL = true, ENABLE_OPT = false, ENABLE_CTEST = false, BUILD_EXTERNAL = false, GLSLANG_TESTS = false, BUILD_TESTING = false }
+
+[workspace.external-dependencies.cmake.quickjs]
+find-package = "qjs"
+git = "https://github.com/quickjs-ng/quickjs.git"
+rev = "3c051980ab7e783dfbfb1c70c014ce5e05ecf24c"
+config-directory = "lib/cmake/quickjs"
+cache = { BUILD_SHARED_LIBS = false, QJS_BUILD_EXAMPLES = false, QJS_BUILD_CLI_STATIC = false, QJS_BUILD_CLI_WITH_MIMALLOC = false, QJS_BUILD_CLI_WITH_STATIC_MIMALLOC = false, QJS_ENABLE_INSTALL = true }
+
+[workspace.external-dependencies.cmake.cef]
+find-package = "CEF"
+archive = "https://cef-builds.spotifycdn.com/cef_binary_149.0.4%2Bg2f1bfd8%2Bchromium-149.0.7827.156_linux64_minimal.tar.bz2"
+sha256 = "6d43607675e47ed6bfa40d1cfce136d04e7720529f8f1c4435d4ba1dcd1839b2"
+integration = "build-tree"
+adapter = "src/Web/cmake/CEF.cmake"

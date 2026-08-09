@@ -20,13 +20,13 @@ private-options = [
 private-linker-options = ["-pthread", "-ldl"]
 
 [dependencies.owe-core]
-path = "../../src/Core"
+workspace = true
 visibility = "private"
 
 [dependencies.owe-viewer-common]
-path = "../Common"
+workspace = true
 visibility = "private"
 
 [dependencies.owe-scene]
-path = "../../src/Scene"
+workspace = true
 visibility = "private"

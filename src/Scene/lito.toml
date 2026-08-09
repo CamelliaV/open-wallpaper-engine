@@ -190,69 +190,65 @@ private-options = [
 private-linker-options = ["-pthread", "-ldl"]
 
 [dependencies.owe-core]
-path = "../Core"
+workspace = true
 visibility = "public"
 
 [dependencies.owe-audio]
-path = "../Audio"
+workspace = true
 visibility = "public"
 
 [dependencies.owe-types]
-path = "types"
+workspace = true
 visibility = "public"
 
 [dependencies.owe-utils]
-path = "Utils"
+workspace = true
 visibility = "public"
 
 [dependencies.owe-vulkan]
-path = "../Vulkan"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-std]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-cppstd]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-json]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-log]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-argparse]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-bench]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.wavsen-audio]
-git = "https://github.com/hypengw/wavsen.git"
+workspace = true
 visibility = "public"
 
 [external-dependencies.cmake.quickjs]
-find-package = "qjs"
-git = "https://github.com/quickjs-ng/quickjs.git"
-rev = "3c051980ab7e783dfbfb1c70c014ce5e05ecf24c"
-config-directory = "lib/cmake/quickjs"
-cache = { BUILD_SHARED_LIBS = false, QJS_BUILD_EXAMPLES = false, QJS_BUILD_CLI_STATIC = false, QJS_BUILD_CLI_WITH_MIMALLOC = false, QJS_BUILD_CLI_WITH_STATIC_MIMALLOC = false, QJS_ENABLE_INSTALL = true }
+workspace = true
 targets = [{ name = "qjs", visibility = "public" }]
 
 [external-dependencies.pkg-config.lz4]
-module = "liblz4"
+workspace = true
 visibility = "public"
 
 [external-dependencies.pkg-config.fontconfig]
-module = "fontconfig"
+workspace = true
 visibility = "public"
 
 [external-dependencies.pkg-config.freetype]
-module = "freetype2"
+workspace = true
 visibility = "public"

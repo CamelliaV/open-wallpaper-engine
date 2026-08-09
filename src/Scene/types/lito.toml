@@ -20,13 +20,13 @@ private-options = [
 private-linker-options = ["-ldl"]
 
 [dependencies.owe-core]
-path = "../../Core"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-std]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-cppstd]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"

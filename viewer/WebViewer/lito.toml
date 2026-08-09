@@ -29,53 +29,53 @@ private-options = [
 private-linker-options = ["-pthread", "-ldl"]
 
 [dependencies.owe-core]
-path = "../../src/Core"
+workspace = true
 visibility = "private"
 
 [dependencies.owe-audio]
-path = "../../src/Audio"
+workspace = true
 visibility = "private"
 
 [dependencies.owe-viewer-common]
-path = "../Common"
+workspace = true
 visibility = "private"
 
 [dependencies.owe-web]
-path = "../../src/Web"
+workspace = true
 visibility = "private"
 
 [dependencies.rstd-cppstd]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "private"
 
 [dependencies.rstd-argparse]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "private"
 
 [dependencies.wavsen-audio]
-git = "https://github.com/hypengw/wavsen.git"
+workspace = true
 visibility = "private"
 
 [dependencies.vvk]
-git = "https://github.com/litocpp/vvk.git"
+workspace = true
 visibility = "private"
 
 [external-dependencies.pkg-config.glfw]
-module = "glfw3"
+workspace = true
 visibility = "private"
 
 [external-dependencies.pkg-config.egl]
-module = "egl"
+workspace = true
 visibility = "private"
 
 [external-dependencies.pkg-config.gles]
-module = "glesv2"
+workspace = true
 visibility = "private"
 
 [external-dependencies.pkg-config.x11]
-module = "x11"
+workspace = true
 visibility = "private"
 
 [external-dependencies.pkg-config.wayland-egl]
-module = "wayland-egl"
+workspace = true
 visibility = "private"

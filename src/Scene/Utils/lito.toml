@@ -26,21 +26,21 @@ private-options = [
 ]
 
 [dependencies.owe-core]
-path = "../../Core"
+workspace = true
 visibility = "public"
 
 [dependencies.owe-types]
-path = "../types"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-std]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-cppstd]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-log]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"

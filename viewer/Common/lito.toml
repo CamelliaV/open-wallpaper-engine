@@ -25,29 +25,29 @@ private-options = [
 ]
 
 [dependencies.owe-core]
-path = "../../src/Core"
+workspace = true
 visibility = "public"
 
 [dependencies.owe-audio]
-path = "../../src/Audio"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-std]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-cppstd]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-argparse]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.wavsen-audio]
-git = "https://github.com/hypengw/wavsen.git"
+workspace = true
 visibility = "public"
 
 [external-dependencies.pkg-config.glfw]
-module = "glfw3"
+workspace = true
 visibility = "public"

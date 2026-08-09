@@ -34,23 +34,19 @@ private-options = [
 private-linker-options = ["-pthread", "-ldl"]
 
 [dependencies.owe-core]
-path = "../Core"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-std]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [dependencies.rstd-cppstd]
-git = "https://github.com/litocpp/rstd.git"
+workspace = true
 visibility = "public"
 
 [external-dependencies.cmake.cef]
-find-package = "CEF"
-archive = "https://cef-builds.spotifycdn.com/cef_binary_149.0.4%2Bg2f1bfd8%2Bchromium-149.0.7827.156_linux64_minimal.tar.bz2"
-sha256 = "6d43607675e47ed6bfa40d1cfce136d04e7720529f8f1c4435d4ba1dcd1839b2"
-integration = "build-tree"
-adapter = "cmake/CEF.cmake"
+workspace = true
 targets = [
   { name = "libcef_lib", visibility = "public" },
   { name = "libcef_dll_wrapper", visibility = "public" },
