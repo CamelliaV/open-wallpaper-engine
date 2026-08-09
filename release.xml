@@ -1,3 +1,19 @@
+<release version="0.2.3" date="2026-08-09">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Playback-speed controls for video wallpapers.</li>
+      <li>Primitive scene user-property values in scripts.</li>
+      <li>On-demand frame republishing for Waywallen renderer sessions.</li>
+    </ul>
+    <p>Fixes:</p>
+    <ul>
+      <li>User-property image bindings remain alive during runtime updates. #83 by @wehrwolfmann</li>
+      <li>Effective scene clear colors after user-property updates.</li>
+      <li>MDLA v6 multi-curve puppet morph event loading.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.2.2" date="2026-08-05">
   <description>
     <p>Changed: Bump up waywallen spawn version.</p>

@@ -49,7 +49,7 @@
   {
     "dest": "build/_flatpak_deps/rstd-src",
     "disable-shallow-clone": true,
-    "commit": "c697a4b08cbb9183f78c18915f59c8f72dac5d14",
+    "commit": "03b022f37aa414c22a47021d58e054d55927c6c1",
     "type": "git",
     "url": "https://github.com/litocpp/rstd.git",
     "x-cmake": {
@@ -58,7 +58,7 @@
     }
   },
   {
-    "commit": "27114b7e06cfb0c099ef38544d3f4c653f9e71a2",
+    "commit": "867852dea22504db27559df60b74fee4c66406c7",
     "dest": "build/_flatpak_deps/vvk-src",
     "disable-shallow-clone": true,
     "type": "git",
@@ -69,7 +69,7 @@
     }
   },
   {
-    "commit": "b3452d50743bd2adfdb8b61e6359fba007bf6f3d",
+    "commit": "a76c68e55e24c7e87fc5dbae28ee5d3b24139724",
     "dest": "build/_flatpak_deps/wavsen-src",
     "disable-shallow-clone": true,
     "type": "git",
