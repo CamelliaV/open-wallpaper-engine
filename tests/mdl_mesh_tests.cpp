@@ -169,3 +169,45 @@ TEST(MdlMesh, Mdlv23ReadsPerMeshMaterialSkins) {
     EXPECT_EQ(mesh.positions.len(), usize(60));
     EXPECT_EQ(mesh.indices.len(), usize(32));
 }
+
+TEST(MdlPuppet, Mdlv23ReadsMultiCurveMorphEvents) {
+    const std::filesystem::path pkg_path =
+        std::filesystem::path(WAYWALLEN_WORKSHOP_DIR) / "3686252018" / "scene.pkg";
+    if (! std::filesystem::exists(pkg_path)) {
+        GTEST_SKIP() << "workshop 3686252018 is not available";
+    }
+
+    owe::fs::VFS vfs;
+    auto         assets_fs = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
+    if (assets_fs.is_ok()) {
+        ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets_fs).unwrap_unchecked()).is_ok());
+    }
+    auto pkg_fs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg_path.string()));
+    ASSERT_TRUE(pkg_fs.is_ok());
+    ASSERT_TRUE(vfs.mount("/assets"_str, pkg_fs->mount_handle()).is_ok());
+
+    owe::Mdl mdl;
+    ASSERT_TRUE(owe::MdlParser::Parse("models/sheet_puppet.mdl"_str, vfs, mdl));
+    ASSERT_EQ(mdl.mdla, 6);
+    ASSERT_TRUE(mdl.puppet.is_some());
+
+    const auto& anims = (*mdl.puppet)->anims;
+    ASSERT_EQ(anims.len(), usize(17));
+    const auto& left_eye = anims[usize()];
+    ASSERT_EQ(left_eye.name.as_str(), "Left eye"_str);
+    ASSERT_EQ(left_eye.v4_events.len(), usize(1));
+
+    const auto& event = left_eye.v4_events[usize()];
+    EXPECT_EQ(event.flags, 0);
+    ASSERT_EQ(event.curves.len(), usize(6));
+    for (usize i {}; i < event.curves.len(); ++i) {
+        const auto& curve = event.curves[i];
+        EXPECT_EQ(curve.id, i.to_primitive());
+        ASSERT_EQ(curve.values.len(), usize(211));
+        EXPECT_FLOAT_EQ(curve.values[usize()], 1.0f);
+    }
+
+    ASSERT_EQ(mdl.morph_sections.len(), usize(1));
+    EXPECT_FLOAT_EQ(mdl.morph_sections[usize()].event_time, event.time);
+    EXPECT_EQ(mdl.morph_sections[usize()].sections.len(), event.curves.len());
+}

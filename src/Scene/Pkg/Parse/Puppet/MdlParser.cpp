@@ -655,15 +655,25 @@ bool ParseAnimation(fs::BinaryReader& f, Puppet::Animation& anim, int mdla_ver,
             uint32_t v4_count = f.ReadUint32();
             ResetDefault(anim.v4_events, usize(v4_count));
             for (auto& ev : anim.v4_events) {
-                ev.time     = f.ReadFloat();
-                ev.flags    = f.ReadUint32();
-                uint32_t bs = f.ReadUint32();
-                if (bs % 4 != 0) {
-                    rstd_error("AnimV4Event byte_size {} not %% 4", bs);
+                ev.time              = f.ReadFloat();
+                uint16_t curve_count = f.ReadUint16();
+                ev.flags             = f.ReadUint16();
+                if (curve_count == 0) {
+                    rstd_error("AnimV4Event curve_count is zero in {}", std::string(path));
                     return false;
                 }
-                ResetDefault(ev.values, usize(bs / 4));
-                for (auto& v : ev.values) v = f.ReadFloat();
+                ResetDefault(ev.curves, usize(curve_count));
+                for (uint16_t curve_index = 0; curve_index < curve_count; ++curve_index) {
+                    auto& curve = ev.curves[usize(curve_index)];
+                    curve.id    = curve_index == 0 ? 0 : f.ReadUint16();
+                    uint32_t bs = f.ReadUint32();
+                    if (bs % 4 != 0) {
+                        rstd_error("AnimV4Curve byte_size {} not %% 4", bs);
+                        return false;
+                    }
+                    ResetDefault(curve.values, usize(bs / 4));
+                    for (auto& v : curve.values) v = f.ReadFloat();
+                }
             }
         } else if (has_v4_events != 0) {
             rstd_info("Animation has_v4_events expected 0/1, got {}", has_v4_events);
