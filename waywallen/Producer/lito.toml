@@ -1,0 +1,48 @@
+[package]
+name = "owe-waywallen-producer"
+version.workspace = true
+module = "waywallen.bridge_producer_core"
+source-root = ".."
+
+[library]
+archive = "waywallen-bridge-producer"
+discovery = "explicit"
+sources = [
+  "Bridge.cppm",
+  "BridgeSession.cppm",
+  "BridgeSession.cpp",
+  "BridgeProducerCore.cppm",
+  "BridgeProducerCore.cpp",
+  "BridgeAudio.cppm",
+]
+
+[usage]
+public-include-directories = ["."]
+public-options = ["-fPIC"]
+private-options = [
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-Wno-missing-field-initializers",
+]
+private-linker-options = ["-pthread", "-ldl"]
+
+[dependencies.owe-audio]
+workspace = true
+visibility = "public"
+
+[dependencies.rstd-cppstd]
+workspace = true
+visibility = "public"
+
+[dependencies.rstd-std]
+workspace = true
+visibility = "public"
+
+[dependencies.vvk]
+workspace = true
+visibility = "public"
+
+[external-dependencies.cmake.waywallen-bridge]
+workspace = true
+targets = [{ name = "waywallen::bridge", visibility = "public" }]
