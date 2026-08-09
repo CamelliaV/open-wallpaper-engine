@@ -966,9 +966,9 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
 
     ImageParameters ip = s.target;
 
-    const auto                  fkind = (*s.decoder)->kind();
-    wavsen::video::VkFrameView  vkv {};
-    wavsen::video::DrmFrameView drmv {};
+    const auto                           fkind = (*s.decoder)->kind();
+    wavsen::video::VkFrameView           vkv {};
+    Option<wavsen::video::DrmFrameLease> drm_frame;
 
     /* Drain decoded frames until we catch up to wall time. Cap to
      * 4 frames per tick to avoid spiral-of-death on heavy stalls. */
@@ -980,7 +980,17 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
             rstd::Ok(wavsen::video::NextFrame::Ok);
         switch (fkind) {
         case wavsen::video::FrameKind::VulkanShared: r = (*s.decoder)->next_vk_frame(vkv); break;
-        case wavsen::video::FrameKind::VaapiDrm: r = (*s.decoder)->next_drm_frame(drmv); break;
+        case wavsen::video::FrameKind::VaapiDrm: {
+            auto pulled = (*s.decoder)->next_drm_frame();
+            if (pulled.is_err()) {
+                r = Err(rstd::move(pulled).unwrap_err());
+            } else {
+                auto value = rstd::move(pulled).unwrap();
+                r          = Ok(value.status);
+                drm_frame  = rstd::move(value.frame);
+            }
+            break;
+        }
         case wavsen::video::FrameKind::Sw: r = (*s.decoder)->next_frame(s.nv12_scratch); break;
         }
         if (r.is_err()) {
@@ -1000,7 +1010,15 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
         f64        frame_pts { -1.0 };
         switch (fkind) {
         case wavsen::video::FrameKind::VulkanShared: frame_pts = vkv.pts_seconds; break;
-        case wavsen::video::FrameKind::VaapiDrm: frame_pts = drmv.pts_seconds; break;
+        case wavsen::video::FrameKind::VaapiDrm:
+            if (drm_frame.is_none()) {
+                rstd_error("PumpVideoTextures[{}]: VAAPI decode returned no frame lease",
+                           s.key.as_str());
+                publish_time();
+                return;
+            }
+            frame_pts = drm_frame->view().pts_seconds;
+            break;
         case wavsen::video::FrameKind::Sw: frame_pts = s.nv12_scratch.pts_seconds; break;
         }
         if (decoder_looped) s.pts_acc = frame_pts.max(f64());
@@ -1025,8 +1043,8 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
         cr_id = vkv.color_range;
         break;
     case wavsen::video::FrameKind::VaapiDrm:
-        cs_id = drmv.colorspace;
-        cr_id = drmv.color_range;
+        cs_id = drm_frame->view().colorspace;
+        cr_id = drm_frame->view().color_range;
         break;
     case wavsen::video::FrameKind::Sw:
         cs_id = s.nv12_scratch.colorspace;
@@ -1062,14 +1080,40 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
                                                    wavsen::video::ConvertTarget::SampledLocal);
         break;
     }
-    case wavsen::video::FrameKind::VaapiDrm:
-        cv = yuv->convert_drm_prime(drmv,
-                                    ip.handle,
-                                    u32(s.width),
-                                    u32(s.height),
-                                    color_matrix,
-                                    wavsen::video::ConvertTarget::SampledLocal);
+    case wavsen::video::FrameKind::VaapiDrm: {
+        auto reserved = yuv->try_reserve_drm(wavsen::video::ConvertTarget::SampledLocal);
+        if (reserved.is_err()) {
+            cv = Err(rstd::move(reserved).unwrap_err());
+            break;
+        }
+        auto reservation = rstd::move(reserved).unwrap();
+        if (reservation.is_none()) {
+            publish_time();
+            return;
+        }
+        auto submitted =
+            yuv->submit_drm_prime(rstd::move(*reservation),
+                                  rstd::move(*drm_frame),
+                                  {
+                                      .image  = ip.handle,
+                                      .view   = ip.view,
+                                      .width  = u32(s.width),
+                                      .height = u32(s.height),
+                                      .kind   = wavsen::video::ConvertTarget::SampledLocal,
+                                  },
+                                  color_matrix);
+        if (submitted.is_err()) {
+            cv = Err(rstd::move(submitted).unwrap_err());
+            break;
+        }
+        auto value = rstd::move(submitted).unwrap();
+        if (value.is_none()) {
+            publish_time();
+            return;
+        }
+        cv = Ok(value->sync_fd);
         break;
+    }
     case wavsen::video::FrameKind::Sw:
         cv = yuv->convert_nv12(ip.handle,
                                u32(s.width),
