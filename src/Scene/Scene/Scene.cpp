@@ -1247,34 +1247,40 @@ auto Scene::MaterialTextureUserBindings(ref<str> key) const -> slice<MaterialTex
     return bindings.is_some() ? (*bindings)->as_slice() : slice<MaterialTextureUserBinding> {};
 }
 
-void Scene::RegisterImageColorUserBinding(String key, SceneNode& node,
-                                          slice<SceneMaterial*> materials) {
+namespace
+{
+
+auto MakeImagePropertyBinding(const Arc<SceneNode>&                 node,
+                              slice<std::shared_ptr<SceneMaterial>> materials)
+    -> Scene::ImagePropertyBinding {
+    Scene::ImagePropertyBinding binding { .node = node.clone() };
+    binding.materials.reserve(materials.len());
+    for (usize index {}; index < materials.len(); ++index) {
+        binding.materials.emplace_back(materials[index]);
+    }
+    return binding;
+}
+
+} // namespace
+
+void Scene::RegisterImageColorUserBinding(String key, const Arc<SceneNode>& node,
+                                          slice<std::shared_ptr<SceneMaterial>> materials) {
     auto bindings = m_image_color_user_index.get_mut(key.as_str());
     if (bindings.is_none()) {
         (void)m_image_color_user_index.insert(key.clone(), Vec<ImagePropertyBinding> {});
         bindings = m_image_color_user_index.get_mut(key.as_str());
     }
-    ImagePropertyBinding binding { .node = rstd::addressof(node) };
-    binding.materials.reserve(materials.len());
-    for (usize index {}; index < materials.len(); ++index) {
-        binding.materials.emplace_back(materials[index]);
-    }
-    (*bindings)->push(rstd::move(binding));
+    (*bindings)->push(MakeImagePropertyBinding(node, materials));
 }
 
-void Scene::RegisterImageAlphaUserBinding(String key, SceneNode& node,
-                                          slice<SceneMaterial*> materials) {
+void Scene::RegisterImageAlphaUserBinding(String key, const Arc<SceneNode>& node,
+                                          slice<std::shared_ptr<SceneMaterial>> materials) {
     auto bindings = m_image_alpha_user_index.get_mut(key.as_str());
     if (bindings.is_none()) {
         (void)m_image_alpha_user_index.insert(key.clone(), Vec<ImagePropertyBinding> {});
         bindings = m_image_alpha_user_index.get_mut(key.as_str());
     }
-    ImagePropertyBinding binding { .node = rstd::addressof(node) };
-    binding.materials.reserve(materials.len());
-    for (usize index {}; index < materials.len(); ++index) {
-        binding.materials.emplace_back(materials[index]);
-    }
-    (*bindings)->push(rstd::move(binding));
+    (*bindings)->push(MakeImagePropertyBinding(node, materials));
 }
 
 auto Scene::ImageColorUserBindings(ref<str> key) const -> slice<ImagePropertyBinding> {

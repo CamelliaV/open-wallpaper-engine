@@ -2451,14 +2451,20 @@ public:
     void RegisterShaderComboUserBinding(String key, ShaderComboUserBinding binding);
     auto ShaderComboUserBindings(ref<str> key) const -> slice<ShaderComboUserBinding>;
 
+    // Like the material bindings above, this index is scene-wide and outlives
+    // the parse, but not every parsed node reaches the finalized scene: the
+    // prototype objects ResolveRegisteredAsset parses purely as spawn
+    // templates are dropped from the node map and die with the parse context.
+    // Retain both the node and its materials so a binding left pointing at
+    // such an object stays valid instead of dangling.
     struct ImagePropertyBinding {
-        SceneNode*          node { nullptr };
-        Vec<SceneMaterial*> materials;
+        Arc<SceneNode>                      node;
+        Vec<std::shared_ptr<SceneMaterial>> materials;
     };
-    void RegisterImageColorUserBinding(String key, SceneNode& node,
-                                       slice<SceneMaterial*> materials);
-    void RegisterImageAlphaUserBinding(String key, SceneNode& node,
-                                       slice<SceneMaterial*> materials);
+    void RegisterImageColorUserBinding(String key, const Arc<SceneNode>& node,
+                                       slice<std::shared_ptr<SceneMaterial>> materials);
+    void RegisterImageAlphaUserBinding(String key, const Arc<SceneNode>& node,
+                                       slice<std::shared_ptr<SceneMaterial>> materials);
     auto ImageColorUserBindings(ref<str> key) const -> slice<ImagePropertyBinding>;
     auto ImageAlphaUserBindings(ref<str> key) const -> slice<ImagePropertyBinding>;
 
