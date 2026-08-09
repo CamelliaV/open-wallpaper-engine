@@ -1,0 +1,53 @@
+[package]
+name = "owe-viewer-common"
+version.workspace = true
+module = "viewer.common"
+
+[library]
+archive = "owe-viewer-common"
+discovery = "explicit"
+sources = [
+  "Common.cppm",
+  "Audio.cppm",
+  "Arg.cppm",
+  "Common.cpp",
+]
+
+[usage]
+public-include-directories = ["."]
+public-options = ["-fPIC", "-fsized-deallocation"]
+private-options = [
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-Wno-missing-field-initializers",
+  "-Wno-gnu-zero-variadic-macro-arguments",
+]
+
+[dependencies.owe-core]
+path = "../../src/Core"
+visibility = "public"
+
+[dependencies.owe-audio]
+path = "../../src/Audio"
+visibility = "public"
+
+[dependencies.rstd-std]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-cppstd]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-argparse]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.wavsen-audio]
+git = "https://github.com/hypengw/wavsen.git"
+visibility = "public"
+
+[external-dependencies.pkg-config.glfw]
+module = "glfw3"
+visibility = "public"

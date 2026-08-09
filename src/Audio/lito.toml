@@ -1,0 +1,30 @@
+[package]
+name = "owe-audio"
+version.workspace = true
+module = "owe.audio_response"
+
+[library]
+archive = "owe-audio-response"
+discovery = "explicit"
+sources = [
+  "AudioResponse.cppm",
+  "AudioResponse.cpp",
+]
+
+[usage]
+public-options = ["-fPIC", "-fsized-deallocation"]
+private-options = [
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-Wno-missing-field-initializers",
+  "-Wno-gnu-zero-variadic-macro-arguments",
+]
+
+[dependencies.owe-core]
+path = "../Core"
+visibility = "public"
+
+[dependencies.rstd-std]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"

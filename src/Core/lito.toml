@@ -1,0 +1,63 @@
+[package]
+name = "owe-core"
+version.workspace = true
+module = "owe.core"
+source-root = "../.."
+
+[library]
+archive = "owe-core"
+discovery = "explicit"
+sources = [
+  "src/Core/Cli.cppm",
+  "src/Core/Core.cppm",
+  "src/Core/Fft.cppm",
+  "src/Core/Fft.cpp",
+  "src/Core/Fs.cppm",
+  "src/Core/Fs/Fs.cppm",
+  "src/Core/IO/Binary.cppm",
+  "src/Core/Json.cppm",
+  "src/Core/Json.cpp",
+  "src/Core/UserProperty.cppm",
+  "src/Core/UserProperty.cpp",
+  "src/Core/eigen.cppm",
+]
+
+[usage]
+public-include-directories = ["third_party", "src", "src/Core"]
+public-definitions = ["FT_SIZEOF_LONG=8"]
+public-options = ["-fPIC", "-fsized-deallocation"]
+private-options = [
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-Wno-missing-field-initializers",
+  "-Wno-gnu-zero-variadic-macro-arguments",
+]
+private-linker-options = ["-pthread", "-ldl"]
+
+[dependencies.rstd-std]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-cppstd]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-json]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-log]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-argparse]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[external-dependencies.cmake.eigen]
+find-package = "Eigen3"
+git = "https://gitlab.com/libeigen/eigen.git"
+rev = "bc3b39870ecb690a623a3f49149a358b95c5781d"
+cache = { BUILD_TESTING = false, EIGEN_BUILD_TESTING = false, EIGEN_BUILD_BLAS = false, EIGEN_BUILD_LAPACK = false, EIGEN_BUILD_DOC = false, EIGEN_BUILD_DEMOS = false, EIGEN_BUILD_PKGCONFIG = false, EIGEN_BUILD_CMAKE_PACKAGE = true }
+targets = [{ name = "Eigen3::Eigen", visibility = "public" }]

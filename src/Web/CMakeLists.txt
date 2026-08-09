@@ -4,7 +4,7 @@ endif()
 
 include(${CMAKE_SOURCE_DIR}/cmake/FetchDeps.cmake)
 fetchdeps(${CMAKE_SOURCE_DIR}/deps.json NAMES cef)
-include(${CMAKE_SOURCE_DIR}/cmake/CEF.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CEF.cmake)
 
 # ---------------------------------------------------------------------------
 # owe-web-api (public C++20 modules for HTML/JS wallpapers)
@@ -42,10 +42,8 @@ target_link_libraries(owe-web-host
     PUBLIC
         owe-web-api
         libcef_lib
-        libcef_dll_wrapper
-        ${CEF_STANDARD_LIBS})
+        libcef_dll_wrapper)
 target_compile_features(owe-web-host PUBLIC cxx_std_20)
-weweb_apply_cef_module_target_settings(owe-web-host)
 set_target_properties(owe-web-host PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_SCAN_FOR_MODULES ON)

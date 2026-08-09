@@ -1,0 +1,57 @@
+[package]
+name = "owe-web"
+version.workspace = true
+module = "weweb"
+
+[library]
+archive = "owe-web"
+discovery = "explicit"
+sources = [
+  "Web.cppm",
+  "DmaBufFrame.cppm",
+  "Manifest.cppm",
+  "BrowserHost.cppm",
+  "Cef.cppm",
+  "CefInternal.cppm",
+  "Manifest.cpp",
+  "UserProperties.cpp",
+  "AppHandler.cpp",
+  "ClientHandler.cpp",
+  "OsrRenderHandler.cpp",
+  "BrowserHost.cpp",
+]
+
+[usage]
+public-include-directories = ["."]
+public-options = ["-fPIC", "-fsized-deallocation"]
+private-options = [
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-Wno-missing-field-initializers",
+  "-Wno-gnu-zero-variadic-macro-arguments",
+]
+private-linker-options = ["-pthread", "-ldl"]
+
+[dependencies.owe-core]
+path = "../Core"
+visibility = "public"
+
+[dependencies.rstd-std]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-cppstd]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[external-dependencies.cmake.cef]
+find-package = "CEF"
+archive = "https://cef-builds.spotifycdn.com/cef_binary_149.0.4%2Bg2f1bfd8%2Bchromium-149.0.7827.156_linux64_minimal.tar.bz2"
+sha256 = "6d43607675e47ed6bfa40d1cfce136d04e7720529f8f1c4435d4ba1dcd1839b2"
+integration = "build-tree"
+adapter = "cmake/CEF.cmake"
+targets = [
+  { name = "libcef_lib", visibility = "public" },
+  { name = "libcef_dll_wrapper", visibility = "public" },
+]

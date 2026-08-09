@@ -1,0 +1,46 @@
+[package]
+name = "owe-utils"
+version.workspace = true
+module = "wescene.utils"
+source-root = "../../.."
+
+[library]
+archive = "owe-utils"
+discovery = "explicit"
+sources = [
+  "src/Scene/Utils/Utils.cppm",
+  "src/Scene/Utils/Algorism.cpp",
+  "src/Scene/Utils/FpsCounter.cpp",
+  "src/Scene/Utils/Sha.cpp",
+]
+
+[usage]
+public-include-directories = ["third_party", "src/Scene/Utils/include", "src/Scene/Utils/include/Utils"]
+public-options = ["-fPIC", "-fsized-deallocation"]
+private-options = [
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-Wno-missing-field-initializers",
+  "-Wno-gnu-zero-variadic-macro-arguments",
+]
+
+[dependencies.owe-core]
+path = "../../Core"
+visibility = "public"
+
+[dependencies.owe-types]
+path = "../types"
+visibility = "public"
+
+[dependencies.rstd-std]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-cppstd]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-log]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"

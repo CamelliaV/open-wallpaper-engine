@@ -1,0 +1,79 @@
+[package]
+name = "owe-vulkan"
+version.workspace = true
+module = "wescene.vulkan"
+
+[library]
+archive = "owe-vulkan"
+discovery = "explicit"
+sources = [
+  "ShaderCompile.cppm",
+  "Vulkan.cppm",
+  "BufferManager.cpp",
+  "Device.cpp",
+  "GraphicsPipeline.cpp",
+  "Instance.cpp",
+  "Parameters.cpp",
+  "Shader.cpp",
+  "Swapchain.cpp",
+  "TextureCache.cpp",
+]
+
+[usage]
+public-include-directories = ["."]
+public-options = ["-fPIC", "-fsized-deallocation"]
+private-options = [
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-Wno-missing-field-initializers",
+  "-Wno-gnu-zero-variadic-macro-arguments",
+]
+private-linker-options = ["-pthread", "-ldl"]
+
+[dependencies.owe-core]
+path = "../Core"
+visibility = "public"
+
+[dependencies.owe-types]
+path = "../Scene/types"
+visibility = "public"
+
+[dependencies.owe-utils]
+path = "../Scene/Utils"
+visibility = "private"
+
+[dependencies.rstd-std]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-cppstd]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.rstd-log]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "public"
+
+[dependencies.wavsen-video]
+git = "https://github.com/hypengw/wavsen.git"
+visibility = "private"
+
+[dependencies.vvk]
+git = "https://github.com/litocpp/vvk.git"
+visibility = "public"
+
+[dependencies.spirv-reflect]
+git = "https://github.com/hypengw/SPIRV-Reflect.git"
+visibility = "private"
+
+[external-dependencies.cmake.glslang]
+find-package = "glslang"
+git = "https://github.com/KhronosGroup/glslang.git"
+rev = "275822a6261ee689aadb1da5f09a0ec2f058685c"
+cache = { ENABLE_GLSLANG_BINARIES = false, ENABLE_HLSL = true, ENABLE_OPT = false, ENABLE_CTEST = false, BUILD_EXTERNAL = false, GLSLANG_TESTS = false, BUILD_TESTING = false }
+targets = [
+  { name = "glslang::glslang", visibility = "public" },
+  { name = "glslang::SPIRV", visibility = "public" },
+  { name = "glslang::glslang-default-resource-limits", visibility = "public" },
+]

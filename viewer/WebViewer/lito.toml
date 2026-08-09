@@ -1,0 +1,81 @@
+[package]
+name = "owe-webviewer"
+version.workspace = true
+module = "viewer.web"
+
+[executable]
+name = "WebViewer"
+discovery = "explicit"
+sources = [
+  "Web.cppm",
+  "Presenter.cppm",
+  "VulkanBlitter.cppm",
+  "EglPresenter.cppm",
+  "VulkanBlitter.cpp",
+  "EglPresenter.cpp",
+  "WebViewer.cpp",
+]
+
+[usage]
+private-options = [
+  "-fPIC",
+  "-fsized-deallocation",
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-Wno-missing-field-initializers",
+  "-Wno-gnu-zero-variadic-macro-arguments",
+]
+private-linker-options = ["-pthread", "-ldl"]
+
+[dependencies.owe-core]
+path = "../../src/Core"
+visibility = "private"
+
+[dependencies.owe-audio]
+path = "../../src/Audio"
+visibility = "private"
+
+[dependencies.owe-viewer-common]
+path = "../Common"
+visibility = "private"
+
+[dependencies.owe-web]
+path = "../../src/Web"
+visibility = "private"
+
+[dependencies.rstd-cppstd]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "private"
+
+[dependencies.rstd-argparse]
+git = "https://github.com/litocpp/rstd.git"
+visibility = "private"
+
+[dependencies.wavsen-audio]
+git = "https://github.com/hypengw/wavsen.git"
+visibility = "private"
+
+[dependencies.vvk]
+git = "https://github.com/litocpp/vvk.git"
+visibility = "private"
+
+[external-dependencies.pkg-config.glfw]
+module = "glfw3"
+visibility = "private"
+
+[external-dependencies.pkg-config.egl]
+module = "egl"
+visibility = "private"
+
+[external-dependencies.pkg-config.gles]
+module = "glesv2"
+visibility = "private"
+
+[external-dependencies.pkg-config.x11]
+module = "x11"
+visibility = "private"
+
+[external-dependencies.pkg-config.wayland-egl]
+module = "wayland-egl"
+visibility = "private"

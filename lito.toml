@@ -1,0 +1,18 @@
+[workspace]
+name = "owe"
+members = [
+  "src/Core",
+  "src/Audio",
+  "src/Scene/types",
+  "src/Scene/Utils",
+  "src/Vulkan",
+  "src/Scene",
+  "src/Web",
+  "viewer/Common",
+  "viewer/SceneViewer",
+  "viewer/WebViewer",
+]
+default-members = ["viewer/SceneViewer", "viewer/WebViewer"]
+
+[workspace.package]
+version = "0.2.2"

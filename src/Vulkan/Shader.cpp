@@ -5,7 +5,7 @@ module;
 
 #include <glslang/Public/ShaderLang.h>
 #include <glslang/Public/ResourceLimits.h>
-#include <SPIRV/GlslangToSpv.h>
+#include <glslang/SPIRV/GlslangToSpv.h>
 
 #include "Utils/Sha.hpp"
 module wescene.shader_compile;

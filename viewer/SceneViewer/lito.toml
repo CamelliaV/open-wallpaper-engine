@@ -1,0 +1,32 @@
+[package]
+name = "owe-sceneviewer"
+version.workspace = true
+
+[executable]
+name = "SceneViewer"
+discovery = "explicit"
+sources = ["SceneViewer.cpp"]
+
+[usage]
+private-options = [
+  "-fPIC",
+  "-fsized-deallocation",
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-Wno-missing-field-initializers",
+  "-Wno-gnu-zero-variadic-macro-arguments",
+]
+private-linker-options = ["-pthread", "-ldl"]
+
+[dependencies.owe-core]
+path = "../../src/Core"
+visibility = "private"
+
+[dependencies.owe-viewer-common]
+path = "../Common"
+visibility = "private"
+
+[dependencies.owe-scene]
+path = "../../src/Scene"
+visibility = "private"
