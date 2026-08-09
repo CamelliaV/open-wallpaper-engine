@@ -152,7 +152,11 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR,
         .pNext = nullptr,
     };
-    supported_timeline.pNext = &supported_sync2;
+    VkPhysicalDeviceSamplerYcbcrConversionFeatures supported_ycbcr {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES,
+        .pNext = &supported_sync2,
+    };
+    supported_timeline.pNext = &supported_ycbcr;
     VkPhysicalDeviceFeatures2KHR supported2 {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR,
         .pNext = &supported_timeline,
@@ -194,7 +198,12 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         .pNext            = nullptr,
         .synchronization2 = enable_sync2 ? VK_TRUE : VK_FALSE,
     };
-    if (enable_sync2) enabled_timeline.pNext = &enabled_sync2;
+    VkPhysicalDeviceSamplerYcbcrConversionFeatures enabled_ycbcr {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES,
+        .pNext = enable_sync2 ? &enabled_sync2 : nullptr,
+        .samplerYcbcrConversion = supported_ycbcr.samplerYcbcrConversion,
+    };
+    enabled_timeline.pNext = &enabled_ycbcr;
 
     auto queue_create_infos = device.ChooseDeviceQueue(*inst.surface());
     VVK_CHECK_BOOL_RE(vvk::Device::Create(
