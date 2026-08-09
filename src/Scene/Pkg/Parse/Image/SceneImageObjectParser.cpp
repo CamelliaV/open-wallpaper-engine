@@ -178,11 +178,10 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                          : None<WallpaperLayerId>());
     if (! wpimgobj.visible_user.empty())
         spImgNode->SetVisibleUserBinding(ToSceneUserVisibilityBinding(wpimgobj.visible_user));
-    Vec<SceneMaterial*> image_property_materials;
-    auto                track_image_property_material = [&](SceneMaterial* mat) {
-        if ((wpimgobj.color_user_key.empty() && wpimgobj.alpha_user_key.empty()) || mat == nullptr)
-            return;
-        image_property_materials.emplace_back(mat);
+    Vec<std::shared_ptr<SceneMaterial>> image_property_materials;
+    auto track_image_property_material = [&](std::shared_ptr<SceneMaterial> mat) {
+        if ((wpimgobj.color_user_key.empty() && wpimgobj.alpha_user_key.empty()) || ! mat) return;
+        image_property_materials.emplace_back(std::move(mat));
     };
     Option<Arc<PuppetLayer>> image_puppet_layer;
     if (puppet.is_some() && has_bones) {
@@ -386,7 +385,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
         if (control.is_some()) spImgNode->SetVideoControl(rstd::move(*control));
     }
     mesh.AddMaterial(std::move(material));
-    track_image_property_material(mesh.MaterialSlots().back().get());
+    track_image_property_material(mesh.MaterialSlots().back());
     RegisterMaterialBindings(
         *context.scene,
         mesh.MaterialSlots().front(),
@@ -430,7 +429,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
         const auto supplemental_uv_scale = Texture0UvScale(supplemental_material);
         const auto supplemental_slot     = static_cast<uint32_t>(mesh.MaterialSlots().size());
         mesh.AddMaterial(std::move(supplemental_material));
-        track_image_property_material(mesh.MaterialSlots().back().get());
+        track_image_property_material(mesh.MaterialSlots().back());
         RegisterMaterialBindings(
             *context.scene,
             mesh.MaterialSlots().back(),
@@ -526,7 +525,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                 mask_shaderInfo   = rstd::move(mask_build.shader_info);
                 uint32_t pre_slot = (uint32_t)mesh.MaterialSlots().size();
                 mesh.AddMaterial(std::move(mask_scene_mat));
-                track_image_property_material(mesh.MaterialSlots().back().get());
+                track_image_property_material(mesh.MaterialSlots().back());
                 mesh.Submeshes().emplace_back();
                 auto& pre_sm = mesh.Submeshes().back();
                 MdlParser::GenMaskSubmeshFromMdl(pre_sm,
@@ -563,7 +562,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                 LoadConstvalue(clip_scene_mat, clip_wpmat, clip_shaderInfo);
                 uint32_t clip_slot = (uint32_t)mesh.MaterialSlots().size();
                 mesh.AddMaterial(std::move(clip_scene_mat));
-                track_image_property_material(mesh.MaterialSlots().back().get());
+                track_image_property_material(mesh.MaterialSlots().back());
                 mesh.Submeshes().emplace_back();
                 auto& clip_sm = mesh.Submeshes().back();
                 MdlParser::GenMaskSubmeshFromMdl(clip_sm,
@@ -844,7 +843,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                     }
                 }
                 spMesh->AddMaterial(std::move(material));
-                track_image_property_material(spMesh->MaterialSlots().back().get());
+                track_image_property_material(spMesh->MaterialSlots().back());
                 Option<ref<wpscene::Material>> binding_fallback;
                 if (user_texture_fallback.is_some()) {
                     binding_fallback = Some(ref<wpscene::Material>::from_raw_parts(
@@ -902,7 +901,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                                                           image_node_id,
                                                           as_str(effect_composite).unwrap());
                             spMesh->AddMaterial(std::move(mask_material));
-                            track_image_property_material(spMesh->MaterialSlots().back().get());
+                            track_image_property_material(spMesh->MaterialSlots().back());
 
                             wpscene::Material clip_wpmat        = wpmat.clone();
                             clip_wpmat.combos["CLIPPINGTARGET"] = 1;
@@ -933,7 +932,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                                                           image_node_id,
                                                           as_str(effect_composite).unwrap());
                             spMesh->AddMaterial(std::move(clip_material));
-                            track_image_property_material(spMesh->MaterialSlots().back().get());
+                            track_image_property_material(spMesh->MaterialSlots().back());
                         }
                     }
                     return true;
@@ -1132,13 +1131,13 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
     if (! wpimgobj.color_user_key.empty()) {
         context.scene->RegisterImageColorUserBinding(
             String::make(as_str(wpimgobj.color_user_key).unwrap()),
-            *spImgNode,
+            spImgNode,
             image_property_materials.as_slice());
     }
     if (! wpimgobj.alpha_user_key.empty()) {
         context.scene->RegisterImageAlphaUserBinding(
             String::make(as_str(wpimgobj.alpha_user_key).unwrap()),
-            *spImgNode,
+            spImgNode,
             image_property_materials.as_slice());
     }
     RegisterNodeRef(context,

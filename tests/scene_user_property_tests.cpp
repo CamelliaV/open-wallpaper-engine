@@ -150,10 +150,10 @@ TEST(SceneUserProperty, AppliesRegisteredMaterialTextureBinding) {
 }
 
 TEST(SceneUserProperty, AppliesRegisteredImageColorBinding) {
-    owe::Scene                          scene;
-    owe::SceneNode                      node;
-    owe::SceneMaterial                  material;
-    rstd::array<owe::SceneMaterial*, 1> materials { &material };
+    owe::Scene scene;
+    auto       node     = Arc<owe::SceneNode>::make();
+    auto       material = std::make_shared<owe::SceneMaterial>();
+    rstd::array<std::shared_ptr<owe::SceneMaterial>, 1> materials { material };
     scene.RegisterImageColorUserBinding(String::make("tint"_str), node, materials.as_slice());
 
     auto property = rstd::json::from_str(R"({"type":"color","value":"0.2 0.4 0.6"})"_str).unwrap();
@@ -162,10 +162,51 @@ TEST(SceneUserProperty, AppliesRegisteredImageColorBinding) {
     auto bindings = scene.ImageColorUserBindings("tint"_str);
     ASSERT_EQ(bindings.len(), usize(1));
     ASSERT_EQ(bindings[usize()].materials.len(), usize(1));
-    EXPECT_EQ(bindings[usize()].materials[usize()], &material);
-    EXPECT_FLOAT_EQ(node.Color().x(), 0.2f);
-    EXPECT_FLOAT_EQ(node.Color().y(), 0.4f);
-    EXPECT_FLOAT_EQ(node.Color().z(), 0.6f);
+    EXPECT_EQ(bindings[usize()].materials[usize()], material);
+    EXPECT_FLOAT_EQ(node->Color().x(), 0.2f);
+    EXPECT_FLOAT_EQ(node->Color().y(), 0.4f);
+    EXPECT_FLOAT_EQ(node->Color().z(), 0.6f);
+}
+
+// A parsed object that never reaches the finalized scene (a spawn-template
+// prototype, say) is released with the parse context, but its image bindings
+// stay in the scene-wide index and are applied right after the parse. The
+// index has to keep those targets alive on its own.
+TEST(SceneUserProperty, KeepsImageColorBindingTargetsAliveAfterParse) {
+    owe::Scene scene;
+    {
+        auto node     = Arc<owe::SceneNode>::make();
+        auto material = std::make_shared<owe::SceneMaterial>();
+        rstd::array<std::shared_ptr<owe::SceneMaterial>, 1> materials { material };
+        scene.RegisterImageColorUserBinding(String::make("tint"_str), node, materials.as_slice());
+    }
+
+    auto property = rstd::json::from_str(R"({"type":"color","value":"0.2 0.4 0.6"})"_str).unwrap();
+    (void)owe::SceneUserPropertyApplier::Apply(scene, "tint", property);
+
+    auto bindings = scene.ImageColorUserBindings("tint"_str);
+    ASSERT_EQ(bindings.len(), usize(1));
+    ASSERT_EQ(bindings[usize()].materials.len(), usize(1));
+    EXPECT_FLOAT_EQ(bindings[usize()].node->Color().x(), 0.2f);
+    EXPECT_FLOAT_EQ(bindings[usize()].node->Color().y(), 0.4f);
+    EXPECT_FLOAT_EQ(bindings[usize()].node->Color().z(), 0.6f);
+}
+
+TEST(SceneUserProperty, KeepsImageAlphaBindingTargetsAliveAfterParse) {
+    owe::Scene scene;
+    {
+        auto node     = Arc<owe::SceneNode>::make();
+        auto material = std::make_shared<owe::SceneMaterial>();
+        rstd::array<std::shared_ptr<owe::SceneMaterial>, 1> materials { material };
+        scene.RegisterImageAlphaUserBinding(String::make("fade"_str), node, materials.as_slice());
+    }
+
+    auto property = rstd::json::from_str(R"({"type":"slider","value":0.25})"_str).unwrap();
+    (void)owe::SceneUserPropertyApplier::Apply(scene, "fade", property);
+
+    auto bindings = scene.ImageAlphaUserBindings("fade"_str);
+    ASSERT_EQ(bindings.len(), usize(1));
+    EXPECT_FLOAT_EQ(bindings[usize()].node->UserAlpha(), 0.25f);
 }
 
 TEST(SceneUserProperty, AppliesRegisteredParticleOverrideBinding) {

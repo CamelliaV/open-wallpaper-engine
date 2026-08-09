@@ -338,14 +338,12 @@ bool ApplyShaderCombos(Scene& scene, const std::string& key, const Json& propert
     return graph_changed;
 }
 
-float CurrentImageAlpha(SceneNode* node) {
-    if (! node) return 1.0f;
-    return node->IsAlphaOverridden() ? node->EffectiveAlpha() : node->BaseAlpha();
+float CurrentImageAlpha(SceneNode& node) {
+    return node.IsAlphaOverridden() ? node.EffectiveAlpha() : node.BaseAlpha();
 }
 
-Eigen::Vector3f CurrentImageColor(SceneNode* node) {
-    if (! node) return { 1.0f, 1.0f, 1.0f };
-    return node->IsColorOverridden() ? node->Color() : node->BaseColor();
+Eigen::Vector3f CurrentImageColor(SceneNode& node) {
+    return node.IsColorOverridden() ? node.Color() : node.BaseColor();
 }
 
 bool MaterialHasUniform(const SceneMaterial& material, ref<str> uniform_name) {
@@ -369,14 +367,14 @@ void ApplyImageColor(Scene& scene, const std::string& key, const Json& property)
                             coerced.value[usize(2)] };
     for (usize binding_index {}; binding_index < bindings.len(); ++binding_index) {
         const auto& binding = bindings[binding_index];
-        if (binding.node) binding.node->SetColor(color);
+        SceneNode&  node    = *binding.node;
+        node.SetColor(color);
         std::array<float, 3> color3 { color.x(), color.y(), color.z() };
         for (usize material_index {}; material_index < binding.materials.len(); ++material_index) {
-            auto* material = binding.materials[material_index];
+            const auto& material = binding.materials[material_index];
             if (! material) continue;
             const bool  has_user_alpha = MaterialHasUniform(*material, G_USERALPHA);
-            const float alpha = has_user_alpha && binding.node ? binding.node->BaseAlpha()
-                                                               : CurrentImageAlpha(binding.node);
+            const float alpha = has_user_alpha ? node.BaseAlpha() : CurrentImageAlpha(node);
             std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
             if (MaterialHasUniform(*material, G_COLOR4))
                 scene.SetMaterialShaderValue(*material, G_COLOR4, color4);
@@ -395,11 +393,12 @@ void ApplyImageAlpha(Scene& scene, const std::string& key, const Json& property)
     const float alpha = std::clamp(coerced.value[usize()], 0.0f, 1.0f);
     for (usize binding_index {}; binding_index < bindings.len(); ++binding_index) {
         const auto& binding = bindings[binding_index];
-        if (binding.node) binding.node->SetUserAlpha(alpha);
-        auto                 color = CurrentImageColor(binding.node);
+        SceneNode&  node    = *binding.node;
+        node.SetUserAlpha(alpha);
+        auto                 color = CurrentImageColor(node);
         std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
         for (usize material_index {}; material_index < binding.materials.len(); ++material_index) {
-            auto* material = binding.materials[material_index];
+            const auto& material = binding.materials[material_index];
             if (! material) continue;
             const bool has_user_alpha = MaterialHasUniform(*material, G_USERALPHA);
             if (has_user_alpha) scene.SetMaterialShaderValue(*material, G_USERALPHA, alpha);
