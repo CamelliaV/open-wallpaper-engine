@@ -1058,6 +1058,24 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
     rstd::Result<int, wavsen::video::Error> cv = rstd::Ok(-1);
     switch (fkind) {
     case wavsen::video::FrameKind::VulkanShared: {
+        auto reserved = yuv->reserve({
+            .target = {
+                .image  = ip.handle,
+                .view   = ip.view,
+                .width  = u32(s.width),
+                .height = u32(s.height),
+                .kind   = wavsen::video::ConvertTarget::SampledLocal,
+            },
+        });
+        if (reserved.is_err()) {
+            cv = Err(rstd::move(reserved).unwrap_err());
+            break;
+        }
+        auto reservation = rstd::move(reserved).unwrap();
+        if (reservation.is_none()) {
+            publish_time();
+            return;
+        }
         wavsen::video::YuvToRgba::VkFrameImports im {};
         im.y_image           = vkv.img[0];
         im.uv_image          = vkv.plane_count > u32(1) ? vkv.img[1] : VK_NULL_HANDLE;
@@ -1072,16 +1090,24 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
         im.src_w        = vkv.width;
         im.src_h        = vkv.height;
         im.bit_depth    = vkv.bit_depth;
-        cv              = yuv->convert_av_vk_frame(im,
-                                                   ip.handle,
-                                                   u32(s.width),
-                                                   u32(s.height),
-                                                   color_matrix,
-                                                   wavsen::video::ConvertTarget::SampledLocal);
+        auto submitted  = yuv->submit_av_vk_frame(rstd::move(*reservation), im, color_matrix);
+        if (submitted.is_err()) {
+            cv = Err(rstd::move(submitted).unwrap_err());
+        } else {
+            cv = Ok(rstd::move(submitted).unwrap().sync_fd);
+        }
         break;
     }
     case wavsen::video::FrameKind::VaapiDrm: {
-        auto reserved = yuv->try_reserve_drm(wavsen::video::ConvertTarget::SampledLocal);
+        auto reserved = yuv->reserve({
+            .target = {
+                .image  = ip.handle,
+                .view   = ip.view,
+                .width  = u32(s.width),
+                .height = u32(s.height),
+                .kind   = wavsen::video::ConvertTarget::SampledLocal,
+            },
+        });
         if (reserved.is_err()) {
             cv = Err(rstd::move(reserved).unwrap_err());
             break;
@@ -1096,17 +1122,8 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
             cv = Err(rstd::move(mapped).unwrap_err());
             break;
         }
-        auto submitted =
-            yuv->submit_drm_prime(rstd::move(*reservation),
-                                  rstd::move(mapped).unwrap(),
-                                  {
-                                      .image  = ip.handle,
-                                      .view   = ip.view,
-                                      .width  = u32(s.width),
-                                      .height = u32(s.height),
-                                      .kind   = wavsen::video::ConvertTarget::SampledLocal,
-                                  },
-                                  color_matrix);
+        auto submitted = yuv->submit_drm_prime(
+            rstd::move(*reservation), rstd::move(mapped).unwrap(), color_matrix);
         if (submitted.is_err()) {
             cv = Err(rstd::move(submitted).unwrap_err());
             break;
@@ -1235,7 +1252,16 @@ bool TextureCache::UploadFontAtlasRegion(ref<TextureAllocation> texture, const r
 
 TextureCache::TextureCache(const Device& device): m_device(device) {}
 
-TextureCache::~TextureCache() {};
+TextureCache::~TextureCache() {
+    if (m_video_registry.is_none() || m_video_registry->get()->yuv.is_none()) return;
+    auto* yuv = m_video_registry->get()->yuv->get();
+    if (auto drained = yuv->drain_submissions(u64(1'000'000'000)); drained.is_err()) {
+        rstd_warn("TextureCache: conversion drain failed during shutdown: {}",
+                  rstd::move(drained).unwrap_err().message);
+        (void)m_device.handle().WaitIdle();
+        (void)yuv->reclaim_submissions();
+    }
+}
 
 u64 TextureCache::nextImageGeneration() { return m_next_image_generation++; }
 
