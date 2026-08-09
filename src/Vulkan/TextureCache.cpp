@@ -966,9 +966,9 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
 
     ImageParameters ip = s.target;
 
-    const auto                           fkind = (*s.decoder)->kind();
-    wavsen::video::VkFrameView           vkv {};
-    Option<wavsen::video::DrmFrameLease> drm_frame;
+    const auto                             fkind = (*s.decoder)->kind();
+    wavsen::video::VkFrameView             vkv {};
+    Option<wavsen::video::VaapiFrameLease> vaapi_frame;
 
     /* Drain decoded frames until we catch up to wall time. Cap to
      * 4 frames per tick to avoid spiral-of-death on heavy stalls. */
@@ -981,13 +981,13 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
         switch (fkind) {
         case wavsen::video::FrameKind::VulkanShared: r = (*s.decoder)->next_vk_frame(vkv); break;
         case wavsen::video::FrameKind::VaapiDrm: {
-            auto pulled = (*s.decoder)->next_drm_frame();
+            auto pulled = (*s.decoder)->next_vaapi_frame();
             if (pulled.is_err()) {
                 r = Err(rstd::move(pulled).unwrap_err());
             } else {
-                auto value = rstd::move(pulled).unwrap();
-                r          = Ok(value.status);
-                drm_frame  = rstd::move(value.frame);
+                auto value  = rstd::move(pulled).unwrap();
+                r           = Ok(value.status);
+                vaapi_frame = rstd::move(value.frame);
             }
             break;
         }
@@ -1011,13 +1011,13 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
         switch (fkind) {
         case wavsen::video::FrameKind::VulkanShared: frame_pts = vkv.pts_seconds; break;
         case wavsen::video::FrameKind::VaapiDrm:
-            if (drm_frame.is_none()) {
-                rstd_error("PumpVideoTextures[{}]: VAAPI decode returned no frame lease",
+            if (vaapi_frame.is_none()) {
+                rstd_error("PumpVideoTextures[{}]: VAAPI decode returned no surface lease",
                            s.key.as_str());
                 publish_time();
                 return;
             }
-            frame_pts = drm_frame->view().pts_seconds;
+            frame_pts = vaapi_frame->view().pts_seconds;
             break;
         case wavsen::video::FrameKind::Sw: frame_pts = s.nv12_scratch.pts_seconds; break;
         }
@@ -1043,8 +1043,8 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
         cr_id = vkv.color_range;
         break;
     case wavsen::video::FrameKind::VaapiDrm:
-        cs_id = drm_frame->view().colorspace;
-        cr_id = drm_frame->view().color_range;
+        cs_id = vaapi_frame->view().colorspace;
+        cr_id = vaapi_frame->view().color_range;
         break;
     case wavsen::video::FrameKind::Sw:
         cs_id = s.nv12_scratch.colorspace;
@@ -1091,9 +1091,14 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
             publish_time();
             return;
         }
+        auto mapped = rstd::move(*vaapi_frame).into_drm();
+        if (mapped.is_err()) {
+            cv = Err(rstd::move(mapped).unwrap_err());
+            break;
+        }
         auto submitted =
             yuv->submit_drm_prime(rstd::move(*reservation),
-                                  rstd::move(*drm_frame),
+                                  rstd::move(mapped).unwrap(),
                                   {
                                       .image  = ip.handle,
                                       .view   = ip.view,
