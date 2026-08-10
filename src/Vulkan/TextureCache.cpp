@@ -967,7 +967,7 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
     ImageParameters ip = s.target;
 
     const auto                             fkind = (*s.decoder)->kind();
-    wavsen::video::VkFrameView             vkv {};
+    Option<wavsen::video::VkFrameLease>    vulkan_frame;
     Option<wavsen::video::VaapiFrameLease> vaapi_frame;
 
     /* Drain decoded frames until we catch up to wall time. Cap to
@@ -979,7 +979,17 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
         rstd::Result<wavsen::video::NextFrame, wavsen::video::Error> r =
             rstd::Ok(wavsen::video::NextFrame::Ok);
         switch (fkind) {
-        case wavsen::video::FrameKind::VulkanShared: r = (*s.decoder)->next_vk_frame(vkv); break;
+        case wavsen::video::FrameKind::VulkanShared: {
+            auto pulled = (*s.decoder)->next_vk_frame();
+            if (pulled.is_err()) {
+                r = Err(rstd::move(pulled).unwrap_err());
+            } else {
+                auto value = rstd::move(pulled).unwrap();
+                r          = Ok(value.status);
+                if (value.frame.is_some()) vulkan_frame = rstd::move(value.frame);
+            }
+            break;
+        }
         case wavsen::video::FrameKind::VaapiDrm: {
             auto pulled = (*s.decoder)->next_vaapi_frame();
             if (pulled.is_err()) {
@@ -1009,7 +1019,15 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
         const bool decoder_looped = kind == wavsen::video::NextFrame::Looped;
         f64        frame_pts { -1.0 };
         switch (fkind) {
-        case wavsen::video::FrameKind::VulkanShared: frame_pts = vkv.pts_seconds; break;
+        case wavsen::video::FrameKind::VulkanShared:
+            if (vulkan_frame.is_none()) {
+                rstd_error("PumpVideoTextures[{}]: Vulkan decode returned no frame lease",
+                           s.key.as_str());
+                publish_time();
+                return;
+            }
+            frame_pts = vulkan_frame->info().pts_seconds;
+            break;
         case wavsen::video::FrameKind::VaapiDrm:
             if (vaapi_frame.is_none()) {
                 rstd_error("PumpVideoTextures[{}]: VAAPI decode returned no surface lease",
@@ -1039,8 +1057,8 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
     u32 cr_id;
     switch (fkind) {
     case wavsen::video::FrameKind::VulkanShared:
-        cs_id = vkv.colorspace;
-        cr_id = vkv.color_range;
+        cs_id = vulkan_frame->info().colorspace;
+        cr_id = vulkan_frame->info().color_range;
         break;
     case wavsen::video::FrameKind::VaapiDrm:
         cs_id = vaapi_frame->view().colorspace;
@@ -1076,21 +1094,8 @@ void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
             publish_time();
             return;
         }
-        wavsen::video::YuvToRgba::VkFrameImports im {};
-        im.y_image           = vkv.img[0];
-        im.uv_image          = vkv.plane_count > u32(1) ? vkv.img[1] : VK_NULL_HANDLE;
-        im.y_sem             = vkv.sem[0];
-        im.uv_sem            = vkv.plane_count > u32(1) ? vkv.sem[1] : vkv.sem[0];
-        im.y_sem_val_in_out  = &vkv.sem_value[0];
-        im.uv_sem_val_in_out = vkv.plane_count > u32(1) ? &vkv.sem_value[1] : &vkv.sem_value[0];
-        im.y_layout_in_out   = &vkv.layout[0];
-        im.uv_layout_in_out  = vkv.plane_count > u32(1) ? &vkv.layout[1] : &vkv.layout[0];
-        im.y_qf_in_out       = &vkv.queue_family[0];
-        im.uv_qf_in_out = vkv.plane_count > u32(1) ? &vkv.queue_family[1] : &vkv.queue_family[0];
-        im.src_w        = vkv.width;
-        im.src_h        = vkv.height;
-        im.bit_depth    = vkv.bit_depth;
-        auto submitted  = yuv->submit_av_vk_frame(rstd::move(*reservation), im, color_matrix);
+        auto submitted = yuv->submit_av_vk_frame(
+            rstd::move(*reservation), rstd::move(*vulkan_frame), color_matrix);
         if (submitted.is_err()) {
             cv = Err(rstd::move(submitted).unwrap_err());
         } else {
