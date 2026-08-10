@@ -2,18 +2,14 @@
 name = "owe-sceneviewer"
 version.workspace = true
 
-[executable]
+[[bin]]
 name = "SceneViewer"
 discovery = "explicit"
 sources = ["SceneViewer.cpp"]
 
 [usage]
 private-options = [
-  "-fPIC",
-  "-fsized-deallocation",
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]

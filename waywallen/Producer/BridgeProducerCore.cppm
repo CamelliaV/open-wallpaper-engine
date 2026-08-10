@@ -3,7 +3,7 @@ module;
 export module waywallen.bridge_producer_core;
 
 import rstd.cppstd;
-import vulkan;
+import vvk;
 export import waywallen.bridge;
 export import waywallen.bridge_session;
 

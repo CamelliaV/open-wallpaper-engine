@@ -1,19 +1,17 @@
 [package]
 name = "owe-types"
 version.workspace = true
-module = "wescene.types"
 
-[library]
+[lib]
+name = "owe-types"
+module = "wescene.types"
 archive = "owe-types"
 discovery = "explicit"
 sources = ["types.cppm", "types.cpp"]
 
 [usage]
-public-options = ["-fPIC", "-fsized-deallocation"]
 private-options = [
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]

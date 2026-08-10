@@ -1,9 +1,10 @@
 [package]
 name = "owe-web"
 version.workspace = true
-module = "weweb"
 
-[library]
+[lib]
+name = "owe-web"
+module = "weweb"
 archive = "owe-web"
 discovery = "explicit"
 sources = [
@@ -23,11 +24,8 @@ sources = [
 
 [usage]
 public-include-directories = ["."]
-public-options = ["-fPIC", "-fsized-deallocation"]
 private-options = [
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]

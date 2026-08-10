@@ -1,9 +1,10 @@
 [package]
 name = "owe-vulkan"
 version.workspace = true
-module = "wescene.vulkan"
 
-[library]
+[lib]
+name = "owe-vulkan"
+module = "wescene.vulkan"
 archive = "owe-vulkan"
 discovery = "explicit"
 sources = [
@@ -21,11 +22,8 @@ sources = [
 
 [usage]
 public-include-directories = ["."]
-public-options = ["-fPIC", "-fsized-deallocation"]
 private-options = [
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]
@@ -55,7 +53,7 @@ visibility = "public"
 workspace = true
 visibility = "public"
 
-[dependencies.wavsen-video]
+[dependencies.wavsen]
 workspace = true
 visibility = "private"
 

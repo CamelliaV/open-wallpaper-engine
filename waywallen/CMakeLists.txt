@@ -22,16 +22,16 @@ set(_OWE_STRIP_FILES ${OWE_WESCENE_BIN})
 add_library(waywallen-bridge-producer STATIC)
 target_sources(waywallen-bridge-producer
     PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        Bridge.cppm
-        BridgeSession.cppm
-        BridgeProducerCore.cppm
-        BridgeAudio.cppm
+        Producer/Bridge.cppm
+        Producer/BridgeSession.cppm
+        Producer/BridgeProducerCore.cppm
+        Producer/BridgeAudio.cppm
 )
 target_sources(waywallen-bridge-producer PRIVATE
-    BridgeSession.cpp
-    BridgeProducerCore.cpp
+    Producer/BridgeSession.cpp
+    Producer/BridgeProducerCore.cpp
 )
-target_include_directories(waywallen-bridge-producer PUBLIC .)
+target_include_directories(waywallen-bridge-producer PUBLIC Producer)
 target_link_libraries(waywallen-bridge-producer
     PUBLIC
         waywallen::bridge
@@ -45,15 +45,15 @@ set_target_properties(waywallen-bridge-producer PROPERTIES
     CXX_SCAN_FOR_MODULES ON)
 
 add_executable(waywallen-wescene-renderer
-    scene_main.cpp
-    scene_entry.cpp
+    SceneRenderer/scene_main.cpp
+    SceneRenderer/scene_entry.cpp
 )
 target_sources(waywallen-wescene-renderer
     PRIVATE FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        scene_entry.cppm
-        BridgeExSwapchain.cppm
+        SceneRenderer/scene_entry.cppm
+        SceneRenderer/BridgeExSwapchain.cppm
 )
-target_sources(waywallen-wescene-renderer PRIVATE BridgeExSwapchain.cpp)
+target_sources(waywallen-wescene-renderer PRIVATE SceneRenderer/BridgeExSwapchain.cpp)
 
 target_compile_features(waywallen-wescene-renderer PRIVATE cxx_std_20)
 set_target_properties(waywallen-wescene-renderer PROPERTIES
@@ -94,12 +94,12 @@ if(BUILD_WEWEB)
     add_library(waywallen-web-producer-device STATIC)
     target_sources(waywallen-web-producer-device
         PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
-            WebProducerDevice.cppm
+            WebRenderer/WebProducerDevice.cppm
     )
-    target_sources(waywallen-web-producer-device PRIVATE WebProducerDevice.cpp)
+    target_sources(waywallen-web-producer-device PRIVATE WebRenderer/WebProducerDevice.cpp)
     target_include_directories(waywallen-web-producer-device
         PUBLIC
-            .
+            WebRenderer
     )
     target_link_libraries(waywallen-web-producer-device
         PUBLIC
@@ -113,12 +113,12 @@ if(BUILD_WEWEB)
         CXX_SCAN_FOR_MODULES ON)
 
     add_executable(waywallen-weweb-renderer
-        web_main.cpp
-        web_entry.cpp
+        WebRenderer/web_main.cpp
+        WebRenderer/web_entry.cpp
     )
     target_sources(waywallen-weweb-renderer
         PRIVATE FILE_SET cxx_modules TYPE CXX_MODULES FILES
-            web_entry.cppm
+            WebRenderer/web_entry.cppm
     )
     target_compile_features(waywallen-weweb-renderer PRIVATE cxx_std_20)
     set_target_properties(waywallen-weweb-renderer PROPERTIES

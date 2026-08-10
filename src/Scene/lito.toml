@@ -1,10 +1,11 @@
 [package]
 name = "owe-scene"
 version.workspace = true
-module = "wescene"
 source-root = "../.."
 
-[library]
+[lib]
+name = "owe-scene"
+module = "wescene"
 archive = "owe-scene"
 discovery = "explicit"
 sources = [
@@ -179,11 +180,8 @@ public-definitions = [
   'WAYWALLEN_ASSETS_DIR="assets"',
   "FT_SIZEOF_LONG=8",
 ]
-public-options = ["-fPIC", "-fsized-deallocation"]
 private-options = [
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]
@@ -233,7 +231,7 @@ visibility = "public"
 workspace = true
 visibility = "public"
 
-[dependencies.wavsen-audio]
+[dependencies.wavsen]
 workspace = true
 visibility = "public"
 

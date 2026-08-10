@@ -1,11 +1,10 @@
 [package]
 name = "owe-waywallen-web-renderer"
 version.workspace = true
-module = "waywallen.web_entry"
-source-root = ".."
 
-[executable]
+[[bin]]
 name = "waywallen-weweb-renderer"
+module = "waywallen.web_entry"
 discovery = "explicit"
 sources = [
   "web_entry.cppm",
@@ -17,11 +16,7 @@ sources = [
 
 [usage]
 private-options = [
-  "-fPIC",
-  "-fsized-deallocation",
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]

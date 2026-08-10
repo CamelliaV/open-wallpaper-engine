@@ -1,10 +1,10 @@
 [package]
 name = "owe-webviewer"
 version.workspace = true
-module = "viewer.web"
 
-[executable]
+[[bin]]
 name = "WebViewer"
+module = "viewer.web"
 discovery = "explicit"
 sources = [
   "Web.cppm",
@@ -18,11 +18,7 @@ sources = [
 
 [usage]
 private-options = [
-  "-fPIC",
-  "-fsized-deallocation",
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]
@@ -52,7 +48,7 @@ visibility = "private"
 workspace = true
 visibility = "private"
 
-[dependencies.wavsen-audio]
+[dependencies.wavsen]
 workspace = true
 visibility = "private"
 

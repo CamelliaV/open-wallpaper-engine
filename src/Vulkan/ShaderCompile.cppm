@@ -8,7 +8,7 @@ module;
 // compilation get the headers but no libvulkan dependency.
 export module wescene.shader_compile;
 import wescene.core;
-export import vulkan;
+export import vvk;
 import wescene.types;
 import rstd;
 import rstd.cppstd;

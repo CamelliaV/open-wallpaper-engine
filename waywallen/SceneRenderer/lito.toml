@@ -1,11 +1,10 @@
 [package]
 name = "owe-waywallen-scene-renderer"
 version.workspace = true
-module = "waywallen.scene_entry"
-source-root = ".."
 
-[executable]
+[[bin]]
 name = "waywallen-wescene-renderer"
+module = "waywallen.scene_entry"
 discovery = "explicit"
 sources = [
   "scene_entry.cppm",
@@ -17,11 +16,7 @@ sources = [
 
 [usage]
 private-options = [
-  "-fPIC",
-  "-fsized-deallocation",
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]

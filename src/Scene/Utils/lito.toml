@@ -1,10 +1,11 @@
 [package]
 name = "owe-utils"
 version.workspace = true
-module = "wescene.utils"
 source-root = "../../.."
 
-[library]
+[lib]
+name = "owe-utils"
+module = "wescene.utils"
 archive = "owe-utils"
 discovery = "explicit"
 sources = [
@@ -16,11 +17,8 @@ sources = [
 
 [usage]
 public-include-directories = ["third_party", "src/Scene/Utils/include", "src/Scene/Utils/include/Utils"]
-public-options = ["-fPIC", "-fsized-deallocation"]
 private-options = [
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]

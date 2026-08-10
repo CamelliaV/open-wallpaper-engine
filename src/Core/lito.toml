@@ -1,10 +1,11 @@
 [package]
 name = "owe-core"
 version.workspace = true
-module = "owe.core"
 source-root = "../.."
 
-[library]
+[lib]
+name = "owe-core"
+module = "owe.core"
 archive = "owe-core"
 discovery = "explicit"
 sources = [
@@ -25,11 +26,8 @@ sources = [
 [usage]
 public-include-directories = ["third_party", "src", "src/Core"]
 public-definitions = ["FT_SIZEOF_LONG=8"]
-public-options = ["-fPIC", "-fsized-deallocation"]
 private-options = [
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]

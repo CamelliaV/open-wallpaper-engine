@@ -6,7 +6,7 @@ export module viewer.web:vulkan_blitter;
 
 import rstd.cppstd;
 import weweb;
-import vulkan;
+import vvk;
 import :presenter;
 
 export namespace weweb

@@ -18,7 +18,6 @@ import wescene.types;
 // (wescene.vulkan_render etc.) that `import wescene.vulkan;` still see
 // every Vk type / enumerator / PFN_* without needing their own
 // `import vulkan;`.
-export import vulkan;
 export import vvk;
 
 // Re-export the host-only shader compile API. Lets existing consumers

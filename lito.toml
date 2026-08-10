@@ -65,10 +65,7 @@ git = "https://github.com/litocpp/rstd.git"
 [workspace.dependencies.rstd-bench]
 git = "https://github.com/litocpp/rstd.git"
 
-[workspace.dependencies.wavsen-audio]
-git = "https://github.com/hypengw/wavsen.git"
-
-[workspace.dependencies.wavsen-video]
+[workspace.dependencies.wavsen]
 git = "https://github.com/hypengw/wavsen.git"
 
 [workspace.dependencies.vvk]

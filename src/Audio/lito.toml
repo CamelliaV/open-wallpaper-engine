@@ -1,9 +1,10 @@
 [package]
 name = "owe-audio"
 version.workspace = true
-module = "owe.audio_response"
 
-[library]
+[lib]
+name = "owe-audio"
+module = "owe.audio_response"
 archive = "owe-audio-response"
 discovery = "explicit"
 sources = [
@@ -12,11 +13,8 @@ sources = [
 ]
 
 [usage]
-public-options = ["-fPIC", "-fsized-deallocation"]
 private-options = [
-  "-Wall",
   "-Wextra",
-  "-Wpedantic",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]

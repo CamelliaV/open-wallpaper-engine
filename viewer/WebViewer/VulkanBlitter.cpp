@@ -10,7 +10,7 @@ module viewer.web;
 
 import rstd.cppstd;
 import weweb;
-import vulkan;
+import vvk;
 
 namespace weweb
 {
