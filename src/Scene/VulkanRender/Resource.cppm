@@ -288,6 +288,48 @@ inline Option<String> ResolveImportedTextureName(const RenderSceneSnapshot& rend
     return Some(resolved->name.clone());
 }
 
+inline Arc<Image> MakeMissingTexturePlaceholder(ref<str> key) {
+    constexpr std::int32_t size = 2;
+    auto                   img  = Arc<Image>::make();
+    img->key                    = std::string(rstd::cppstd::as_string_view(key));
+    auto& header                = img->header;
+    header.width                = size;
+    header.height               = size;
+    header.mapWidth             = size;
+    header.mapHeight            = size;
+    header.format               = TextureFormat::RGBA8;
+    header.type                 = ImageType::PNG;
+    header.count                = 1;
+    header.sample               = TextureSample { TextureWrap::CLAMP_TO_EDGE,
+                                                  TextureWrap::CLAMP_TO_EDGE,
+                                                  TextureFilter::LINEAR,
+                                                  TextureFilter::LINEAR };
+    // 2x2 is pow2, so no mipmap downsampling constraints apply.
+    header.mipmap_pow2   = true;
+    header.mipmap_larger = false;
+    img->slots.resize(1);
+    auto& slot  = img->slots[0];
+    slot.width  = size;
+    slot.height = size;
+    slot.mipmaps.resize(1);
+    auto& mipmap  = slot.mipmaps[0];
+    mipmap.width  = size;
+    mipmap.height = size;
+    mipmap.size   = isize(static_cast<std::ptrdiff_t>(size * size * 4));
+    // Opaque magenta (#FF00FF), WE-style missing-texture marker.
+    auto* pixels = new uint8_t[static_cast<std::size_t>(size * size * 4)];
+    for (std::int32_t i = 0; i < size * size; ++i) {
+        pixels[i * 4 + 0] = 0xFF;
+        pixels[i * 4 + 1] = 0x00;
+        pixels[i * 4 + 2] = 0xFF;
+        pixels[i * 4 + 3] = 0xFF;
+    }
+    mipmap.data = ImageDataPtr(pixels, [](uint8_t* data) {
+        delete[] data;
+    });
+    return img;
+}
+
 class SnapshotImportedTextureLoader {
 public:
     explicit SnapshotImportedTextureLoader(ref<Scene> scene): m_scene(scene) {}
@@ -296,10 +338,12 @@ public:
         auto parsed = m_scene->ParseImage(key);
         if (parsed.is_ok()) return Ok(rstd::move(parsed).unwrap_unchecked());
         auto error = rstd::move(parsed).unwrap_err_unchecked();
+        if (error.kind == ImageParseErrorKind::MissingContent) {
+            rstd_warn("texture {} not found, using placeholder", key);
+            return Ok(MakeMissingTexturePlaceholder(key));
+        }
         return Err(resource::ResourceError {
-            .kind    = error.kind == ImageParseErrorKind::MissingContent
-                           ? resource::ResourceErrorKind::MissingContent
-                           : resource::ResourceErrorKind::BackendFailure,
+            .kind    = resource::ResourceErrorKind::BackendFailure,
             .message = rstd::move(error.message),
         });
     }
