@@ -498,8 +498,17 @@ std::vector<PassTextureRequestDiagnostic> CustomShaderPass::textureRequestDiagno
 MaterialTextureBindingRefresh
 CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& render_scene) {
     MaterialTextureBindingRefresh result;
-    if (m_desc.material_override) return result;
-    if (m_desc.node.is_none() || (*m_desc.node)->Mesh() == nullptr) return result;
+    if (m_desc.material_override) {
+        // This pass renders a build-time clone of the material (effect chain);
+        // an in-place refresh cannot see the mutated base material (e.g. a new
+        // $mediaThumbnail), so rebuild the graph to regenerate the override.
+        // Only reached when the caller matched this pass to a changed material.
+        result.requires_graph_rebuild = true;
+        return result;
+    }
+    if (m_desc.node.is_none() || (*m_desc.node)->Mesh() == nullptr) {
+        return result;
+    }
 
     auto&             mesh          = *(*m_desc.node)->Mesh();
     const std::size_t submesh_index = m_desc.submesh_index.to_primitive();
@@ -531,6 +540,19 @@ CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& rend
         if (old.name == rstd::cppstd::as_str(next).unwrap() &&
             ! IsLocalSceneMaterialTextureDependency(next_dep))
             continue;
+
+        if (! next.empty()) {
+            // A slot that was empty at graph build (e.g. $mediaThumbnail before
+            // any track played) has no texture use slot or graph read edge, so
+            // an in-place refresh cannot bind the new image. Likewise a texture
+            // registered after the snapshot was taken (runtime media art) is
+            // unknown to this snapshot. Both need a graph rebuild to bind.
+            if (old.use.is_none() ||
+                render_scene.textureDescId(rstd::cppstd::as_str(next).unwrap()).is_none()) {
+                result.requires_graph_rebuild = true;
+                return result;
+            }
+        }
 
         TextureBindingRequest binding;
         if (! next.empty()) {
