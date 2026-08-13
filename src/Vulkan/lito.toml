@@ -6,7 +6,6 @@ version.workspace = true
 name = "owe-vulkan"
 module = "wescene.vulkan"
 archive = "owe-vulkan"
-discovery = "explicit"
 sources = [
   "ShaderCompile.cppm",
   "Vulkan.cppm",

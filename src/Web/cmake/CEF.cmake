@@ -28,6 +28,29 @@ set_property(GLOBAL PROPERTY WEWEB_CEF_BINARY_FILES "${CEF_BINARY_FILES}")
 set_property(GLOBAL PROPERTY WEWEB_CEF_RESOURCE_DIR "${CEF_RESOURCE_DIR}")
 set_property(GLOBAL PROPERTY WEWEB_CEF_RESOURCE_FILES "${CEF_RESOURCE_FILES}")
 
+if(COMMAND lito_export_asset_set)
+    lito_export_asset_set(
+        NAME runtime
+        ROOT "${CEF_BINARY_DIR}"
+        FILES ${CEF_BINARY_FILES})
+
+    set(_weweb_cef_resource_assets)
+    foreach(_resource IN LISTS CEF_RESOURCE_FILES)
+        if(_resource STREQUAL "locales")
+            file(GLOB _weweb_cef_locales
+                RELATIVE "${CEF_RESOURCE_DIR}"
+                "${CEF_RESOURCE_DIR}/locales/*.pak")
+            list(APPEND _weweb_cef_resource_assets ${_weweb_cef_locales})
+        else()
+            list(APPEND _weweb_cef_resource_assets "${_resource}")
+        endif()
+    endforeach()
+    lito_export_asset_set(
+        NAME runtime
+        ROOT "${CEF_RESOURCE_DIR}"
+        FILES ${_weweb_cef_resource_assets})
+endif()
+
 if(NOT TARGET libcef_dll_wrapper)
     add_subdirectory(
         "${CEF_LIBCEF_DLL_WRAPPER_PATH}"

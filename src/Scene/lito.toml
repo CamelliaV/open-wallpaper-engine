@@ -7,7 +7,6 @@ source-root = "../.."
 name = "owe-scene"
 module = "wescene"
 archive = "owe-scene"
-discovery = "explicit"
 sources = [
   "src/Scene/Audio/SceneAudioResponse.cppm",
   "src/Scene/Audio/SceneAudioResponse.cpp",

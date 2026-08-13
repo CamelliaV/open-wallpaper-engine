@@ -6,7 +6,6 @@ version.workspace = true
 name = "owe-audio"
 module = "owe.audio_response"
 archive = "owe-audio-response"
-discovery = "explicit"
 sources = [
   "AudioResponse.cppm",
   "AudioResponse.cpp",

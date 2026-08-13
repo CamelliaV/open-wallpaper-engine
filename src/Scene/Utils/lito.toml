@@ -7,7 +7,6 @@ source-root = "../../.."
 name = "owe-utils"
 module = "wescene.utils"
 archive = "owe-utils"
-discovery = "explicit"
 sources = [
   "src/Scene/Utils/Utils.cppm",
   "src/Scene/Utils/Algorism.cpp",

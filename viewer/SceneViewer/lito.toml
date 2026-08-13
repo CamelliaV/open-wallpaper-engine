@@ -4,7 +4,6 @@ version.workspace = true
 
 [[bin]]
 name = "SceneViewer"
-discovery = "explicit"
 sources = ["SceneViewer.cpp"]
 
 [usage]

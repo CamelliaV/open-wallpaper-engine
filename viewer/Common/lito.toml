@@ -6,7 +6,6 @@ version.workspace = true
 name = "owe-viewer-common"
 module = "viewer.common"
 archive = "owe-viewer-common"
-discovery = "explicit"
 sources = [
   "Common.cppm",
   "Audio.cppm",

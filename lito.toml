@@ -14,11 +14,12 @@ members = [
   "waywallen/Producer",
   "waywallen/SceneRenderer",
   "waywallen/WebRenderer",
+  "waywallen/plugins/org.waywallen.open-wallpaper-engine",
 ]
 default-members = ["viewer/SceneViewer", "viewer/WebViewer"]
 
 [workspace.package]
-version = "0.2.2"
+version = "0.2.3"
 
 [workspace.dependencies.owe-core]
 path = "src/Core"
@@ -46,6 +47,12 @@ path = "viewer/Common"
 
 [workspace.dependencies.owe-waywallen-producer]
 path = "waywallen/Producer"
+
+[workspace.dependencies.owe-waywallen-scene-renderer]
+path = "waywallen/SceneRenderer"
+
+[workspace.dependencies.owe-waywallen-web-renderer]
+path = "waywallen/WebRenderer"
 
 [workspace.dependencies.rstd-std]
 git = "https://github.com/litocpp/rstd.git"

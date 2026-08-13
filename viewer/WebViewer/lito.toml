@@ -5,7 +5,6 @@ version.workspace = true
 [[bin]]
 name = "WebViewer"
 module = "viewer.web"
-discovery = "explicit"
 sources = [
   "Web.cppm",
   "Presenter.cppm",

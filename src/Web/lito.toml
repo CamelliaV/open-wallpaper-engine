@@ -6,7 +6,6 @@ version.workspace = true
 name = "owe-web"
 module = "weweb"
 archive = "owe-web"
-discovery = "explicit"
 sources = [
   "Web.cppm",
   "DmaBufFrame.cppm",

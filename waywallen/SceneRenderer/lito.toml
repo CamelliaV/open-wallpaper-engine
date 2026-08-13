@@ -5,7 +5,6 @@ version.workspace = true
 [[bin]]
 name = "waywallen-wescene-renderer"
 module = "waywallen.scene_entry"
-discovery = "explicit"
 sources = [
   "scene_entry.cppm",
   "scene_entry.cpp",

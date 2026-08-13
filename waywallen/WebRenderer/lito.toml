@@ -5,7 +5,6 @@ version.workspace = true
 [[bin]]
 name = "waywallen-weweb-renderer"
 module = "waywallen.web_entry"
-discovery = "explicit"
 sources = [
   "web_entry.cppm",
   "web_entry.cpp",
@@ -20,7 +19,7 @@ private-options = [
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]
-private-linker-options = ["-pthread", "-ldl"]
+private-linker-options = ["-pthread", "-ldl", "-Wl,-rpath,$ORIGIN"]
 
 [dependencies.owe-audio]
 workspace = true

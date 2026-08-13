@@ -6,7 +6,6 @@ version.workspace = true
 name = "owe-types"
 module = "wescene.types"
 archive = "owe-types"
-discovery = "explicit"
 sources = ["types.cppm", "types.cpp"]
 
 [usage]

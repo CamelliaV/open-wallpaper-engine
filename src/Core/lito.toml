@@ -7,7 +7,6 @@ source-root = "../.."
 name = "owe-core"
 module = "owe.core"
 archive = "owe-core"
-discovery = "explicit"
 sources = [
   "src/Core/Cli.cppm",
   "src/Core/Core.cppm",
