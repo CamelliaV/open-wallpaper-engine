@@ -1125,6 +1125,85 @@ inline std::size_t ArraySlots(const std::string& arr) {
     return n > 0 ? n : 1;
 }
 
+struct PackedIOArray {
+    std::string_view vector_type;
+    std::size_t      elements;
+    std::size_t      components;
+    std::size_t      slots;
+};
+
+inline Option<PackedIOArray> BuildPackedIOArray(const IODecl& decl) {
+    if (decl.array.empty()) return None();
+
+    const auto elements = ArraySlots(decl.array);
+    if (elements <= 1) return None();
+
+    const auto       type = ToHLSLType(decl.type);
+    std::string_view vector_type;
+    std::size_t      components {};
+    if (type == "float") {
+        vector_type = "float4";
+        components  = 1;
+    } else if (type == "float2") {
+        vector_type = "float4";
+        components  = 2;
+    } else if (type == "float3") {
+        vector_type = "float4";
+        components  = 3;
+    } else if (type == "int") {
+        vector_type = "int4";
+        components  = 1;
+    } else if (type == "int2") {
+        vector_type = "int4";
+        components  = 2;
+    } else if (type == "int3") {
+        vector_type = "int4";
+        components  = 3;
+    } else if (type == "uint") {
+        vector_type = "uint4";
+        components  = 1;
+    } else if (type == "uint2") {
+        vector_type = "uint4";
+        components  = 2;
+    } else if (type == "uint3") {
+        vector_type = "uint4";
+        components  = 3;
+    } else {
+        return None();
+    }
+
+    if (elements > std::numeric_limits<std::size_t>::max() / components) return None();
+    const auto scalar_count = elements * components;
+    return Some(PackedIOArray {
+        .vector_type = vector_type,
+        .elements    = elements,
+        .components  = components,
+        .slots       = (scalar_count + 3) / 4,
+    });
+}
+
+inline std::string PackedIOField(const IODecl& decl) { return "_ww_packed_" + decl.name; }
+
+inline void EmitPackedIOCopy(std::string& out, const IODecl& decl, std::string_view packed_owner,
+                             bool pack) {
+    auto layout = BuildPackedIOArray(decl);
+    if (layout.is_none()) return;
+
+    static constexpr std::string_view components { "xyzw" };
+    const auto                        field = PackedIOField(decl);
+    for (std::size_t element = 0; element < layout->elements; ++element) {
+        for (std::size_t component = 0; component < layout->components; ++component) {
+            const auto  scalar = element * layout->components + component;
+            std::string source = decl.name + "[" + std::to_string(element) + "]";
+            if (layout->components > 1) source += "." + std::string(1, components[component]);
+            std::string packed = std::string(packed_owner) + "." + field + "[" +
+                                 std::to_string(scalar / 4) + "]." +
+                                 std::string(1, components[scalar % 4]);
+            out += "    " + (pack ? packed : source) + " = " + (pack ? source : packed) + ";\n";
+        }
+    }
+}
+
 // Build `layout(location=N) in/out TYPE NAME[arr];` declarations from a
 // list of IO decls, with locations assigned alphabetically so neighbouring
 // stages agree without explicit coordination. `is_input` picks the storage
@@ -1195,8 +1274,11 @@ inline std::string_view HLSLSystemSemantic(std::string_view name) {
 // attribute lets glslang auto-assign sequential locations in declaration
 // order. Both VS and FS sort fields alphabetically over the same
 // cross-stage union, so the location assignment is stable across stages.
+// Direct VS/FS interfaces pack sub-vec4 arrays because glslang otherwise
+// consumes one full location per element and can exceed Vulkan's component
+// limit even when the scalar payload itself fits.
 inline std::string EmitVSFSStruct(std::string_view name, std::vector<IODecl> decls,
-                                  bool include_sv_position) {
+                                  bool include_sv_position, bool pack_arrays = false) {
     decls.erase(std::remove_if(decls.begin(),
                                decls.end(),
                                [](const IODecl& d) {
@@ -1215,8 +1297,14 @@ inline std::string EmitVSFSStruct(std::string_view name, std::vector<IODecl> dec
     }
     for (const auto& d : decls) {
         const auto semantic = HLSLSystemSemantic(d.name);
-        out += "    " + ToHLSLType(d.type) + " " + d.name + d.array + " : " +
-               (semantic.empty() ? d.name : std::string(semantic)) + ";\n";
+        auto       packed   = pack_arrays ? BuildPackedIOArray(d) : None();
+        if (packed.is_some()) {
+            out += "    " + std::string(packed->vector_type) + " " + PackedIOField(d) + "[" +
+                   std::to_string(packed->slots) + "] : " + d.name + ";\n";
+        } else {
+            out += "    " + ToHLSLType(d.type) + " " + d.name + d.array + " : " +
+                   (semantic.empty() ? d.name : std::string(semantic)) + ";\n";
+        }
     }
     out += "};\n";
     return out;
@@ -1227,7 +1315,7 @@ inline std::string EmitVSFSStruct(std::string_view name, std::vector<IODecl> dec
 // vert/frag stages agree without explicit coordination — both are called
 // with the same cross-stage varying union.
 inline SynthOutput SynthesizeHLSLEntry(ShaderType stage, std::vector<IODecl> attrs,
-                                       std::vector<IODecl> varyings) {
+                                       std::vector<IODecl> varyings, bool pack_varying_arrays) {
     SynthOutput so;
     if (stage == ShaderType::GEOMETRY) return so;
 
@@ -1266,7 +1354,7 @@ inline SynthOutput SynthesizeHLSLEntry(ShaderType stage, std::vector<IODecl> att
     out += "\n// === auto-generated entry point ===\n";
     if (stage == ShaderType::VERTEX) {
         out += EmitVSFSStruct("WW_VSIn", attrs, /*sv_pos=*/false);
-        out += EmitVSFSStruct("WW_VSOut", varyings, /*sv_pos=*/true);
+        out += EmitVSFSStruct("WW_VSOut", varyings, /*sv_pos=*/true, pack_varying_arrays);
         out += "WW_VSOut main_vs(WW_VSIn _ww_in) {\n";
         for (const auto& a : attrs) {
             out += "    " + a.name + " = _ww_in." + a.name + ";\n";
@@ -1276,17 +1364,25 @@ inline SynthOutput SynthesizeHLSLEntry(ShaderType stage, std::vector<IODecl> att
         out += "    _ww_out._ww_sv_position = gl_Position;\n";
         for (const auto& v : varyings) {
             if (v.name == "gl_Position" || v.name == "_ww_sv_position") continue;
-            out += "    _ww_out." + v.name + " = " + v.name + ";\n";
+            if (pack_varying_arrays && BuildPackedIOArray(v).is_some()) {
+                EmitPackedIOCopy(out, v, "_ww_out", true);
+            } else {
+                out += "    _ww_out." + v.name + " = " + v.name + ";\n";
+            }
         }
         out += "    return _ww_out;\n";
         out += "}\n";
     } else { // FRAGMENT
-        out += EmitVSFSStruct("WW_PSIn", varyings, /*sv_pos=*/true);
+        out += EmitVSFSStruct("WW_PSIn", varyings, /*sv_pos=*/true, pack_varying_arrays);
         out += "float4 main_ps(WW_PSIn _ww_in) : SV_Target0 {\n";
         out += "    gl_FragCoord = _ww_in._ww_sv_position;\n";
         for (const auto& v : varyings) {
             if (v.name == "gl_Position" || v.name == "_ww_sv_position") continue;
-            out += "    " + v.name + " = _ww_in." + v.name + ";\n";
+            if (pack_varying_arrays && BuildPackedIOArray(v).is_some()) {
+                EmitPackedIOCopy(out, v, "_ww_in", false);
+            } else {
+                out += "    " + v.name + " = _ww_in." + v.name + ";\n";
+            }
         }
         out += "    shader_main();\n";
         out += "    return glOutColor;\n";
@@ -1603,7 +1699,8 @@ inline std::string EmitGlobalCBuffersStd140(const UniformCompileInterface& inter
 
 inline std::string Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo* pre,
                                   const PreprocessorInfo*        next,
-                                  const UniformCompileInterface* interface = nullptr) {
+                                  const UniformCompileInterface* interface,
+                                  bool                           pack_varying_arrays) {
     // GS: feed glslang's HLSL frontend. Strip GLSL-style top-level `in`/`out`
     // decls, emit HLSL structs (WW_VSOut/WW_PSIn) + ww_Uniforms cbuffer, and
     // rewrite `void main()` to the entry signature `point WW_VSOut IN[1],
@@ -1709,7 +1806,7 @@ inline std::string Finalprocessor(const ShaderUnit& unit, const PreprocessorInfo
     // Synthesize the HLSL entry point: static globals for every attr /
     // varying, WW_VSIn/WW_VSOut/WW_PSIn structs, and a main_vs / main_ps
     // wrapper that copies between the struct and the statics.
-    SynthOutput synth = SynthesizeHLSLEntry(unit.stage, attrs, varyings);
+    SynthOutput synth = SynthesizeHLSLEntry(unit.stage, attrs, varyings, pack_varying_arrays);
 
     // Legacy callers still synthesize one cross-stage uniform block.
     Map<std::string, std::string> uniforms_union_local;
@@ -1769,7 +1866,7 @@ using ShaderCacheDigest = std::array<std::uint8_t, 20>;
 
 constexpr std::array<std::uint8_t, 8> kShaderCacheMagic { 'O', 'W', 'E', 'S', 'P', 'V', '3', 0 };
 constexpr std::uint32_t               kShaderCacheFormatVersion = 3;
-constexpr std::uint32_t               kShaderCacheAbiVersion    = 18;
+constexpr std::uint32_t               kShaderCacheAbiVersion    = 19;
 // 8-byte magic, six u32 fields, and four SHA-1 digests total 112 bytes.
 constexpr std::uint32_t kShaderCacheHeaderSize = static_cast<std::uint32_t>(
     kShaderCacheMagic.size() + 6 * sizeof(std::uint32_t) + 4 * ShaderCacheDigest {}.size());
@@ -2704,7 +2801,13 @@ bool ShaderParser::CompileToSpv(std::string_view scene_id, std::span<ShaderUnit>
             PreprocessorInfo* post_info =
                 i + 1 < units.size() ? &units[i + 1].preprocess_info : nullptr;
 
-            unit.src = Finalprocessor(unit, pre_info, post_info, &uniform_interface);
+            const bool pack_varying_arrays =
+                (unit.stage == ShaderType::VERTEX && i + 1 < units.size() &&
+                 units[i + 1].stage == ShaderType::FRAGMENT) ||
+                (unit.stage == ShaderType::FRAGMENT && i >= 1 &&
+                 units[i - 1].stage == ShaderType::VERTEX);
+            unit.src =
+                Finalprocessor(unit, pre_info, post_info, &uniform_interface, pack_varying_arrays);
 
             vunit.src   = unit.src;
             vunit.stage = unit.stage;

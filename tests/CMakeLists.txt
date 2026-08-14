@@ -97,7 +97,7 @@ set_target_properties(scene_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 # tolerance, comment handling, and the [COMBO] / texture / scalar / u_*
 # schemas.
 add_executable(shader_parse_tests shader_parse_tests.cpp)
-target_link_libraries(shader_parse_tests PRIVATE owe-parse GTest::gtest_main)
+target_link_libraries(shader_parse_tests PRIVATE owe-parse spirv-reflect-static GTest::gtest_main)
 set_target_properties(shader_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 add_executable(material_parse_tests material_parse_tests.cpp)

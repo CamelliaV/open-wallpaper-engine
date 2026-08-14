@@ -6,7 +6,7 @@ add_library(owe-shader-compile STATIC Shader.cpp)
 target_sources(owe-shader-compile
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES ShaderCompile.cppm)
 target_link_libraries(owe-shader-compile
-  PUBLIC rstd::rstd rstd.cppstd owe-types vvk::ffi::vulkan
+  PUBLIC rstd::rstd rstd.cppstd owe-types vvk::vvk
   PRIVATE glslang SPIRV glslang-default-resource-limits spirv-reflect-static)
 target_include_directories(owe-shader-compile
   PUBLIC  .. ../Scene/Utils/include

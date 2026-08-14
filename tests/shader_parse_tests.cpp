@@ -5,6 +5,7 @@
 // handling resists obvious false positives.
 
 #include <gtest/gtest.h>
+#include <spirv_reflect.h>
 
 #include <array>
 #include <filesystem>
@@ -601,6 +602,69 @@ void main() {
     EXPECT_EQ(spectrum.array_stride, 16u);
 }
 
+TEST(ShaderParser, CompileSceneShaderVariantPacksLargeVaryingArrays) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "large-varying-array-test";
+    desc.shader_name = "large-varying-array-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/large-varying-array-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+varying float audioValue[32];
+varying vec2 v_TexCoord;
+void main() {
+    for (int i = 0; i < 32; ++i) {
+        audioValue[i] = a_Position.x + float(i);
+    }
+    v_TexCoord = a_Position.xy;
+    gl_Position = vec4(a_Position, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/large-varying-array-test.frag",
+        .source     = R"(
+varying float audioValue[32];
+varying vec2 v_TexCoord;
+void main() {
+    float value = 0.0;
+    for (int i = 0; i < 32; ++i) {
+        value += audioValue[i];
+    }
+    gl_FragColor = vec4(v_TexCoord, value, 1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::ShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    ASSERT_EQ(result.shader->codes.size(), 2u);
+    for (std::size_t stage = 0; stage < result.shader->codes.size(); ++stage) {
+        const auto&            code = result.shader->codes[stage];
+        SpvReflectShaderModule module {};
+        ASSERT_EQ(spvReflectCreateShaderModule(code.size() * sizeof(code[0]), code.data(), &module),
+                  SPV_REFLECT_RESULT_SUCCESS);
+
+        std::uint32_t count = 0;
+        const auto    enumerate =
+            stage == 0 ? spvReflectEnumerateOutputVariables : spvReflectEnumerateInputVariables;
+        ASSERT_EQ(enumerate(&module, &count, nullptr), SPV_REFLECT_RESULT_SUCCESS);
+        std::vector<SpvReflectInterfaceVariable*> variables(count);
+        ASSERT_EQ(enumerate(&module, &count, variables.data()), SPV_REFLECT_RESULT_SUCCESS);
+        for (const auto* variable : variables) {
+            if ((variable->decoration_flags & SPV_REFLECT_DECORATION_BUILT_IN) == 0) {
+                EXPECT_LT(variable->location, 32u);
+            }
+        }
+        spvReflectDestroyShaderModule(&module);
+    }
+}
+
 TEST(ShaderParser, CompileSceneShaderVariantUsesNarrowProducerVaryingType) {
     owe::SceneShaderVariantDesc desc;
     desc.scene_id    = "narrow-producer-varying-test";
@@ -1122,7 +1186,7 @@ void main() {
                (static_cast<std::uint32_t>(header[offset + 3]) << 24);
     };
     EXPECT_EQ(read_u32(8), 3u);
-    EXPECT_EQ(read_u32(12), 15u);
+    EXPECT_EQ(read_u32(12), 19u);
     EXPECT_EQ(read_u32(16), 112u);
     EXPECT_EQ(read_u32(24), 2u);
     const auto initial_write_time = std::filesystem::last_write_time(artifact_path);

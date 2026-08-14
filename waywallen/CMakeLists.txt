@@ -36,7 +36,7 @@ target_link_libraries(waywallen-bridge-producer
     PUBLIC
         waywallen::bridge
         owe-audio-response
-        vvk::ffi::vulkan
+        vvk::vvk
         rstd.cppstd
 )
 target_compile_features(waywallen-bridge-producer PUBLIC cxx_std_20)
@@ -104,7 +104,7 @@ if(BUILD_WEWEB)
     target_link_libraries(waywallen-web-producer-device
         PUBLIC
             owe-web-api
-            vvk::ffi::vulkan
+            vvk::vvk
             rstd.cppstd
     )
     target_compile_features(waywallen-web-producer-device PUBLIC cxx_std_20)
@@ -137,7 +137,7 @@ if(BUILD_WEWEB)
             waywallen::bridge
             waywallen-bridge-producer
             waywallen-web-producer-device
-            vvk::ffi::vulkan
+            vvk::vvk
             rstd::rstd
             rstd.cppstd
     )

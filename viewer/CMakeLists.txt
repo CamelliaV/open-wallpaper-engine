@@ -58,7 +58,7 @@ if(BUILD_WEWEB)
         owe-web-api
         owe-web-host
         rstd.cppstd
-        vvk::ffi::vulkan
+        vvk::vvk
         wavsen::audio
         PkgConfig::GLFW
         PkgConfig::WEWEB_EGL
