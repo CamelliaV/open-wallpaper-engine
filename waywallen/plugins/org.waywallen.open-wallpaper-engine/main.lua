@@ -12,6 +12,11 @@ local function expand_home(path)
     local getenv = os and os.getenv
     local home = getenv and getenv("HOME") or nil
     if type(home) == "string" and home ~= "" and string.sub(path, 1, 1) == "~" then
+        if home == "/var/home" then
+            home = "/home"
+        elseif string.sub(home, 1, 10) == "/var/home/" then
+            home = "/home/" .. string.sub(home, 11)
+        end
         return home .. string.sub(path, 2)
     end
     return path
