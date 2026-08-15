@@ -23,12 +23,15 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def read_plugin_version(cmake_path: Path) -> str:
-    text = cmake_path.read_text(encoding="utf-8")
-    match = re.search(r"^\s*set\s*\(\s*OWE_PLUGIN_VERSION\s+([^) \t\r\n]+)", text, re.MULTILINE)
-    if not match:
-        raise SystemExit(f"could not read OWE_PLUGIN_VERSION from {cmake_path}")
-    return match.group(1).strip("\"'")
+def read_plugin_version(manifest_path: Path) -> str:
+    try:
+        document = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise SystemExit(f"could not parse lito manifest {manifest_path}: {exc}") from exc
+    version = document.get("workspace", {}).get("package", {}).get("version")
+    if not isinstance(version, str) or not version:
+        raise SystemExit(f"could not read workspace.package.version from {manifest_path}")
+    return version
 
 
 def read_toml_template(path: Path) -> dict:
@@ -190,12 +193,14 @@ def parse_args() -> argparse.Namespace:
     root = repo_root()
     parser = argparse.ArgumentParser(description="Update update.json from GitHub release assets.")
     parser.add_argument("--repo", default=DEFAULT_REPO, help=f"GitHub repo, default: {DEFAULT_REPO}")
-    parser.add_argument("--version", help="plugin version; defaults to OWE_PLUGIN_VERSION in CMakeLists.txt")
+    parser.add_argument("--version", help="plugin version; defaults to workspace.package.version")
     parser.add_argument("--tag", help="release tag; defaults to v<version>")
     parser.add_argument("--latest", action="store_true", help="read the latest GitHub release instead of a tag")
     parser.add_argument("--arch", action="append", choices=DEFAULT_ARCHES, help="architecture to update; can be repeated")
     parser.add_argument("--update-json", type=Path, default=root / "update.json", help="manifest path")
-    parser.add_argument("--cmake", type=Path, default=root / "CMakeLists.txt", help="CMakeLists.txt path")
+    parser.add_argument(
+        "--lito-manifest", type=Path, default=root / "lito.toml", help="workspace lito.toml path"
+    )
     parser.add_argument(
         "--plugin-toml",
         action="append",
@@ -212,7 +217,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    version = args.version or read_plugin_version(args.cmake)
+    version = args.version or read_plugin_version(args.lito_manifest)
     template_paths = args.plugin_toml or [
         repo_root() / PLUGIN_TEMPLATE_DIR / name for name in PLUGIN_TEMPLATE_NAMES
     ]

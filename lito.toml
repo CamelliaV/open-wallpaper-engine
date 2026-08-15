@@ -15,6 +15,7 @@ members = [
   "waywallen/SceneRenderer",
   "waywallen/WebRenderer",
   "waywallen/plugins/org.waywallen.open-wallpaper-engine",
+  "tests",
 ]
 default-members = ["viewer/SceneViewer", "viewer/WebViewer"]
 
@@ -70,6 +71,9 @@ git = "https://github.com/litocpp/rstd.git"
 git = "https://github.com/litocpp/rstd.git"
 
 [workspace.dependencies.rstd-bench]
+git = "https://github.com/litocpp/rstd.git"
+
+[workspace.dependencies.rstd-test]
 git = "https://github.com/litocpp/rstd.git"
 
 [workspace.dependencies.wavsen]

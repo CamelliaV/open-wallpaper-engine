@@ -1,5 +1,5 @@
-# Wallpaper Engine — scene (.pkg) renderer + Workshop subscription source,
-# plus the CEF web renderer when built with -DBUILD_WEWEB=ON.
+# Wallpaper Engine — scene (.pkg) and CEF web renderers plus the Workshop
+# subscription source.
 #
 # GENERATED from plugin.toml.in. Edit the template, not the installed copy.
 # Every plugin must ship a sibling `files.txt` with one path per line.
