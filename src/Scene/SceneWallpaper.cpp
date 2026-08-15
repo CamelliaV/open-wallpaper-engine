@@ -314,6 +314,7 @@ public:
     }
     ~SceneRenderController() {
         stop();
+        detachSceneAudioResponseDemandCallback();
         m_render->destroy();
         rstd_info("render handler deleted");
     }
@@ -385,6 +386,7 @@ private:
     void refreshPreparedRenderTargetDirtyEvents();
     void refreshPreparedMeshDirtyEvents();
     void refreshPreparedMaterialDirtyEvents();
+    void detachSceneAudioResponseDemandCallback();
 
     SceneRuntimeController& m_main;
 
@@ -437,6 +439,11 @@ auto SceneRenderController::loadBenchView() -> SceneLoadBenchRecorderView {
         .recorder = m_load_bench_recorder ? &*m_load_bench_recorder : nullptr,
         .ids      = m_load_bench ? &BenchContext(m_load_bench).ids() : nullptr,
     };
+}
+
+void SceneRenderController::detachSceneAudioResponseDemandCallback() {
+    if (! m_scene) return;
+    m_scene->AudioDemandMut()->SetCallback(None<AudioResponseDemandCallback>());
 }
 
 void SceneRenderController::start() {
@@ -729,9 +736,7 @@ void SceneRenderController::on(RenderMsg::SetScene_payload&& m) {
         using Seed = decltype(Random::max());
         Random::seed(static_cast<Seed>(m.random_seed->to_primitive()));
     }
-    if (m_scene) {
-        m_scene->AudioDemandMut()->SetCallback(None<AudioResponseDemandCallback>());
-    }
+    detachSceneAudioResponseDemandCallback();
     m_scene               = nullptr;
     m_uniform_input       = nullptr;
     m_scene_owner         = Some(rstd::move(m.scene));
