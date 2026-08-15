@@ -79,7 +79,7 @@ private:
 
 class RenderGraph {
 public:
-    RenderGraph() = default;
+    RenderGraph();
 
     auto getPass(PassHandle) -> rstd::Option<Pass&>;
     auto getPass(PassHandle) const -> rstd::Option<const Pass&>;
@@ -142,6 +142,7 @@ private:
     auto passWriteTarget(NodeHandle) const -> rstd::Option<String>;
 
     usize           m_next_pass_index { 0 };
+    u64             m_resource_generation { 0 };
     DependencyGraph m_dg;
     PassNodeMap     m_pass_nodes;
     TexNodeMap      m_tex_nodes;

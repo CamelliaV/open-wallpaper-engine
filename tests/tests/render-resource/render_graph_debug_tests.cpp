@@ -259,6 +259,37 @@ TEST(RenderGraphResources, CompilesBackendNeutralTexturePlan) {
     EXPECT_EQ(plan.textures[rstd::usize(1)].request.definition->width, rstd::i32(1920));
 }
 
+TEST(RenderGraphResources, UsesDistinctResourceGenerationsAcrossGraphs) {
+    owe::rg::RenderGraph    first;
+    owe::rg::RenderGraph    second;
+    owe::rg::TextureNodeRef first_texture;
+    owe::rg::TextureNodeRef second_texture;
+
+    first.addPass<DebugPass>("first"_str,
+                             owe::rg::PassNode::Type::CustomShader,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 first_texture = builder.createTexture(CompositeDesc(), true);
+                                 builder.write(first_texture);
+                             });
+    second.addPass<DebugPass>("second"_str,
+                              owe::rg::PassNode::Type::CustomShader,
+                              [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                  second_texture = builder.createTexture(CompositeDesc(), true);
+                                  builder.write(second_texture);
+                              });
+
+    auto first_plan   = first.resourcePlan();
+    auto second_plan  = second.resourcePlan();
+    auto first_state  = first.textureState(first_texture);
+    auto second_state = second.textureState(second_texture);
+
+    ASSERT_TRUE(first_state.is_some());
+    ASSERT_TRUE(second_state.is_some());
+    EXPECT_NE(first_plan.generation, second_plan.generation);
+    EXPECT_EQ(first_state->use.generation, first_plan.generation);
+    EXPECT_EQ(second_state->use.generation, second_plan.generation);
+}
+
 TEST(RenderGraphResources, UsesGraphKeyAsTextureRequestIdentity) {
     owe::rg::RenderGraph graph;
     graph.addPass<DebugPass>(

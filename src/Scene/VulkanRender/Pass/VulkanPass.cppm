@@ -248,6 +248,10 @@ public:
         return m_shaders.get(request);
     }
 
+    auto ScopeResourceName(String local_name) const -> String {
+        return rstd::format("plan:{}:{}", m_plan.generation, local_name);
+    }
+
 private:
     auto AddBuffer(resource::BufferRequest request, rstd::vec::Vec<rstd::u8> content)
         -> resource::BufferUseHandle {

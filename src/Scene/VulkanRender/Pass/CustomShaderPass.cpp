@@ -182,11 +182,11 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
                                               static_cast<rstd::uint32_t>(m_desc.render_view),
                                               block.set,
                                               block.binding))
-                        : rstd::format("pass:{}:{}:uniform:{}:{}",
-                                       m_desc.graph_pass_index,
-                                       m_desc.submesh_index,
-                                       block.set,
-                                       block.binding);
+                        : context.ScopeResourceName(rstd::format("pass:{}:{}:uniform:{}:{}",
+                                                                 m_desc.graph_pass_index,
+                                                                 m_desc.submesh_index,
+                                                                 block.set,
+                                                                 block.binding));
                 auto request = resource::BufferRequest {
                     .name = rstd::move(name),
                     .definition =
@@ -210,14 +210,15 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
 
     for (std::size_t index = 0; index < submesh.vertex_arrays.size(); ++index) {
         const auto& vertex = submesh.vertex_arrays[index];
-        auto        name =
-            m_desc.draw_item.Valid()
-                ? BuildDrawBufferResourceName(m_desc.draw_item,
-                                              DrawBufferRole::Vertex,
-                                              u32(static_cast<rstd::uint32_t>(index)))
-                : rstd::format(
-                      "pass:{}:{}:vertex:{}", m_desc.graph_pass_index, m_desc.submesh_index, index);
-        auto use = context.AddBuffer(
+        auto name = m_desc.draw_item.Valid()
+                        ? BuildDrawBufferResourceName(m_desc.draw_item,
+                                                      DrawBufferRole::Vertex,
+                                                      u32(static_cast<rstd::uint32_t>(index)))
+                        : context.ScopeResourceName(rstd::format("pass:{}:{}:vertex:{}",
+                                                                 m_desc.graph_pass_index,
+                                                                 m_desc.submesh_index,
+                                                                 index));
+        auto use  = context.AddBuffer(
             resource::BufferRequest {
                 .name = rstd::move(name),
                 .definition =
@@ -237,11 +238,11 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
     if (submesh.index_arrays.empty()) return;
 
     const auto& index = submesh.index_arrays[0];
-    auto        name =
-        m_desc.draw_item.Valid()
-            ? BuildDrawBufferResourceName(m_desc.draw_item, DrawBufferRole::Index)
-            : rstd::format("pass:{}:{}:index", m_desc.graph_pass_index, m_desc.submesh_index);
-    auto use = context.AddBuffer(
+    auto name = m_desc.draw_item.Valid()
+                    ? BuildDrawBufferResourceName(m_desc.draw_item, DrawBufferRole::Index)
+                    : context.ScopeResourceName(rstd::format(
+                          "pass:{}:{}:index", m_desc.graph_pass_index, m_desc.submesh_index));
+    auto use  = context.AddBuffer(
         resource::BufferRequest {
             .name = rstd::move(name),
             .definition =

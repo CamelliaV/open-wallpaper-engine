@@ -13,6 +13,13 @@ namespace resource = owe::resource;
 
 namespace
 {
+u64 NextRenderGraphResourceGeneration() {
+    static std::atomic_uint64_t next { 1 };
+    auto                        generation = next.fetch_add(1, std::memory_order_relaxed);
+    if (generation == 0) generation = next.fetch_add(1, std::memory_order_relaxed);
+    return u64(generation);
+}
+
 auto ToTexType(TextureKind kind) -> TexNode::TexType {
     return kind == TextureKind::Temp ? TexNode::TexType::Temp : TexNode::TexType::Imported;
 }
@@ -51,6 +58,8 @@ auto Sorted(rstd::slice<NodeHandle> handles) -> rstd::vec::Vec<NodeHandle> {
     return sorted;
 }
 } // namespace
+
+RenderGraph::RenderGraph(): m_resource_generation(NextRenderGraphResourceGeneration()) {}
 
 auto RenderGraph::getPassNode(NodeHandle handle) -> rstd::Option<PassNode&> {
     auto node = m_pass_nodes.get_mut(handle);
@@ -160,7 +169,7 @@ auto RenderGraph::textureState(TextureNodeRef ref) const -> rstd::Option<Texture
     return rstd::Some(TextureNodeState {
         .ref     = ref,
         .use     = resource::TextureUseHandle { .index      = rstd::as_cast<u64>(ref.handle.index),
-                                                .generation = u64(1) },
+                                                .generation = m_resource_generation },
         .desc    = ToTextureDesc(*node),
         .version = node->version,
     });
@@ -492,7 +501,7 @@ auto RenderGraph::resourcePlan() const -> resource::ResourcePlan {
         }
     }
 
-    resource::ResourcePlan plan { .generation = u64(1) };
+    resource::ResourcePlan plan { .generation = m_resource_generation };
     auto                   plan_nodes = Vec<NodeHandle>::make();
     for (usize index {}; index < m_dg.NodeNum(); ++index) {
         auto node = getTexNode(NodeHandle { .index = index });
