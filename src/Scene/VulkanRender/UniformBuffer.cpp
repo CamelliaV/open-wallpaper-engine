@@ -786,7 +786,7 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
 
     struct RankedSource {
         UniformSourceId source;
-        rstd::int32_t   priority { 0 };
+        i32             priority {};
     };
     auto ranked = Vec<RankedSource>::make();
     auto append = [&](slice<UniformSourceAttachment> attachments) {

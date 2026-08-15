@@ -82,7 +82,7 @@ template<typename T, typename Tarray>
 rstd::array<T, std::tuple_size<Tarray>::value> array_cast(const Tarray& array) noexcept {
     rstd::array<T, std::tuple_size<Tarray>::value> res;
     for (std::size_t index = 0; index < array.size(); ++index) {
-        res[rstd::usize(index)] = T(array[index]);
+        res[rstd::usize(index)] = rstd::as_cast<T>(array[index]);
     }
     return res;
 }

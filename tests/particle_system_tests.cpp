@@ -485,11 +485,11 @@ TEST(ParticleInstanceOverride, TracksProvidedControlpoints) {
     owe::wpscene::ParticleInstanceoverride override;
 
     ASSERT_TRUE(override.FromJosn(json));
-    EXPECT_FALSE(override.controlpoint[0].has_value());
-    ASSERT_TRUE(override.controlpoint[1].has_value());
+    EXPECT_TRUE(override.controlpoint[0].is_none());
+    ASSERT_TRUE(override.controlpoint[1].is_some());
     EXPECT_FLOAT_EQ((*override.controlpoint[1])[0], 120.0f);
     EXPECT_FLOAT_EQ((*override.controlpoint[1])[1], 240.0f);
-    EXPECT_FALSE(override.controlpoint[2].has_value());
+    EXPECT_TRUE(override.controlpoint[2].is_none());
 }
 
 TEST(ParticleInstanceModifiers, SharesStateAndFiltersDisabledOverrides) {
@@ -546,8 +546,8 @@ TEST(ParticleSubSystem, ResolvesWorldControlpointOverridesThroughOwnerTransform)
                                                           Eigen::Vector3f::Zero());
     auto override = rstd::sync::Arc<owe::wpscene::ParticleInstanceoverride>::make();
     override->enabled         = true;
-    override->controlpoint[1] = std::array<float, 3> { 120.0f, 240.0f, 0.0f };
-    override->controlpoint[3] = std::array<float, 3> { 3.0f, 4.0f, 0.0f };
+    override->controlpoint[1] = Some(std::array<float, 3> { 120.0f, 240.0f, 0.0f });
+    override->controlpoint[3] = Some(std::array<float, 3> { 3.0f, 4.0f, 0.0f });
     subsystem.SetOwnerNode(owner.as_ptr());
     subsystem.SetInstanceModifiers(owe::ParticleInstanceModifiers(
         override.clone(), owe::wpscene::Particle::EFlags { 0 }, true));

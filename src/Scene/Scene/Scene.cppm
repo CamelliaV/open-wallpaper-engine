@@ -157,8 +157,8 @@ struct SceneShaderVariantStage {
 };
 
 struct SceneShaderDefaultTexture {
-    std::int32_t slot { 0 };
-    std::string  texture;
+    i32         slot {};
+    std::string texture;
 };
 
 struct SceneShaderVariantDesc {
@@ -213,11 +213,11 @@ struct SceneRenderTarget {
         double      scale { 1.0 };
     };
 
-    std::int32_t width;
-    std::int32_t height;
+    i32 width {};
+    i32 height {};
     // Keep authored layout dimensions separate from backend-limited allocation dimensions.
-    std::int32_t          physical_width { 0 };
-    std::int32_t          physical_height { 0 };
+    i32                   physical_width {};
+    i32                   physical_height {};
     bool                  allowReuse { false };
     bool                  withDepth { false };
     SceneRenderTargetKind kind { SceneRenderTargetKind::Color };
@@ -245,8 +245,8 @@ struct SceneRenderTarget {
     // for composition targets, not transient effect outputs.
     bool preserve_on_write { false };
 
-    std::int32_t PhysicalWidth() const { return physical_width > 0 ? physical_width : width; }
-    std::int32_t PhysicalHeight() const { return physical_height > 0 ? physical_height : height; }
+    i32 PhysicalWidth() const { return physical_width > i32() ? physical_width : width; }
+    i32 PhysicalHeight() const { return physical_height > i32() ? physical_height : height; }
 };
 
 // ============================================================================
@@ -448,11 +448,11 @@ struct SceneShaderValueAnimation {
 using SceneShaderValueAnimationMap = BTreeMap<String, SceneShaderValueAnimation>;
 
 struct SceneMaterialCustomShader {
-    std::shared_ptr<SceneShader>          shader;
-    ShaderValues                          constValues;
-    SceneShaderValueAnimationMap          valueAnimations;
-    std::optional<SceneShaderVariantDesc> variant;
-    u64                                   value_version { 1 };
+    std::shared_ptr<SceneShader>   shader;
+    ShaderValues                   constValues;
+    SceneShaderValueAnimationMap   valueAnimations;
+    Option<SceneShaderVariantDesc> variant;
+    u64                            value_version { 1 };
 
     auto Clone() const -> SceneMaterialCustomShader;
 };
@@ -762,7 +762,7 @@ public:
     bool SetShaderVariant(std::shared_ptr<SceneShader> shader, SceneShaderVariantDesc variant) {
         if (! shader || ! variant.Valid()) return false;
         SceneMaterialDirtyFlags flags =
-            customShader.variant.has_value()
+            customShader.variant.is_some()
                 ? ClassifySceneShaderVariantMutation(*customShader.variant, variant)
                 : SceneMaterialDirtyGraph;
         if (flags == SceneMaterialDirtyNone) return false;
@@ -794,7 +794,7 @@ public:
             }
         }
         customShader.shader  = std::move(shader);
-        customShader.variant = std::move(variant);
+        customShader.variant = Some(rstd::move(variant));
         SetDirty(flags);
         return true;
     }
@@ -922,8 +922,8 @@ public:
     // issued per range in vector order — matching the file's z-order. All
     // ranges in a submesh share the submesh's material slot.
     struct DrawRange {
-        rstd::uint32_t first_index;
-        rstd::uint32_t index_count;
+        u32 first_index;
+        u32 index_count;
     };
 
     // = glTF "primitive": one vertex-stream set + one index array + one
@@ -934,7 +934,7 @@ public:
         std::vector<SceneVertexArray> vertex_arrays;
         std::vector<SceneIndexArray>  index_arrays;
         std::vector<DrawRange>        draw_ranges;
-        rstd::uint32_t                material_slot { 0 };
+        u32                           material_slot {};
         // Non-empty value redirects this submesh's pass output to the
         // named RT (instead of the SceneNode's default). Used by puppet
         // clipping-mask submeshes to write into a shared `_rt_puppet_mask`
@@ -1203,14 +1203,14 @@ private:
 };
 
 struct SceneAnimationKey {
-    std::int32_t frame { 0 };
-    float        value { 0.0f };
-    bool         front_enabled { false };
-    float        front_x { 0.0f };
-    float        front_y { 0.0f };
-    bool         back_enabled { false };
-    float        back_x { 0.0f };
-    float        back_y { 0.0f };
+    i32   frame {};
+    float value { 0.0f };
+    bool  front_enabled { false };
+    float front_x { 0.0f };
+    float front_y { 0.0f };
+    bool  back_enabled { false };
+    float back_x { 0.0f };
+    float back_y { 0.0f };
 };
 
 struct SceneAnimationCurve {
@@ -1218,7 +1218,7 @@ struct SceneAnimationCurve {
     Vec<SceneAnimationKey> c1;
     Vec<SceneAnimationKey> c2;
     float                  fps { 30.0f };
-    std::int32_t           length { 0 };
+    i32                    length {};
     String                 mode;
     bool                   wraploop { false };
     bool                   relative { false };
@@ -2407,11 +2407,11 @@ private:
     HashMap<rstd::uint64_t, RenderItemId>      m_render_item_ids;
     HashMap<String, RenderTextureDescId>       m_texture_desc_ids;
     HashMap<String, RenderTargetDescId>        m_render_target_desc_ids;
-    HashMap<rstd::int32_t, Vec<RenderItemId>>  m_source_layer_items;
+    HashMap<i32, Vec<RenderItemId>>            m_source_layer_items;
     HashMap<rstd::uint64_t, Vec<RenderItemId>> m_material_render_items;
     HashMap<rstd::uint64_t, Vec<RenderItemId>> m_mesh_render_items;
     Vec<RenderLinkSourceRecord>                m_link_sources;
-    HashMap<rstd::int32_t, u32>                m_link_source_ids;
+    HashMap<i32, u32>                          m_link_source_ids;
     BTreeSet<i32>                              m_linked_layer_ids;
 };
 
@@ -2609,10 +2609,10 @@ public:
     auto Register(Box<dyn<UniformSource>> source) -> UniformSourceId {
         return m_uniforms.Register(rstd::move(source));
     }
-    bool AttachGlobal(UniformSourceId source, rstd::int32_t priority = 0) {
+    bool AttachGlobal(UniformSourceId source, i32 priority = i32()) {
         return m_uniforms.AttachGlobal(source, priority);
     }
-    bool AttachNode(SceneNodeId node, UniformSourceId source, rstd::int32_t priority = 0) {
+    bool AttachNode(SceneNodeId node, UniformSourceId source, i32 priority = i32()) {
         return m_uniforms.AttachNode(node, source, priority);
     }
     auto Resolve(UniformSourceId source) const -> Option<ref<dyn<UniformSource>>> {

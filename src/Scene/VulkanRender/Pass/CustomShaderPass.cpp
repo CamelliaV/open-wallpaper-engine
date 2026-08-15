@@ -47,10 +47,11 @@ owe::SceneMaterial* ResolvePassMaterial(const CustomShaderPass::Desc& desc) {
     const auto& mesh          = *(*desc.node)->MeshShared();
     const auto  submesh_index = desc.submesh_index.to_primitive();
     if (submesh_index >= mesh.Submeshes().size()) return nullptr;
-    const auto& submesh = mesh.Submeshes()[submesh_index];
-    const auto& slots   = mesh.MaterialSlots();
-    if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return nullptr;
-    return slots[submesh.material_slot].get();
+    const auto& submesh       = mesh.Submeshes()[submesh_index];
+    const auto& slots         = mesh.MaterialSlots();
+    const auto  material_slot = submesh.material_slot.to_primitive();
+    if (material_slot >= slots.size() || ! slots[material_slot]) return nullptr;
+    return slots[material_slot].get();
 }
 
 } // namespace
@@ -422,8 +423,9 @@ Option<owe::RenderItemId> CustomShaderPass::renderItemId() const {
     return Some<owe::RenderItemId>(m_desc.render_item);
 }
 
-std::optional<PipelineCacheKey> CustomShaderPass::pipelineCacheKey() const {
-    return m_desc.pipeline_cache_key;
+Option<PipelineCacheKey> CustomShaderPass::pipelineCacheKey() const {
+    if (m_desc.pipeline_cache_key.is_none()) return None();
+    return Some<PipelineCacheKey>(*m_desc.pipeline_cache_key);
 }
 
 bool CustomShaderPass::pipelineCacheHit() const { return m_desc.pipeline_cache_hit; }
@@ -432,8 +434,9 @@ u64 CustomShaderPass::pipelineCacheObservedCount() const {
     return m_desc.pipeline_cache_observed_count;
 }
 
-std::optional<RenderPassCacheKey> CustomShaderPass::renderPassCacheKey() const {
-    return m_desc.render_pass_cache_key;
+Option<RenderPassCacheKey> CustomShaderPass::renderPassCacheKey() const {
+    if (m_desc.render_pass_cache_key.is_none()) return None();
+    return Some<RenderPassCacheKey>(*m_desc.render_pass_cache_key);
 }
 
 bool CustomShaderPass::renderPassCacheHit() const { return m_desc.render_pass_cache_hit; }
@@ -442,8 +445,9 @@ u64 CustomShaderPass::renderPassCacheObservedCount() const {
     return m_desc.render_pass_cache_observed_count;
 }
 
-std::optional<FramebufferCacheKey> CustomShaderPass::framebufferCacheKey() const {
-    return m_desc.framebuffer_cache_key;
+Option<FramebufferCacheKey> CustomShaderPass::framebufferCacheKey() const {
+    if (m_desc.framebuffer_cache_key.is_none()) return None();
+    return Some<FramebufferCacheKey>(*m_desc.framebuffer_cache_key);
 }
 
 bool CustomShaderPass::framebufferCacheHit() const { return m_desc.framebuffer_cache_hit; }
@@ -513,11 +517,12 @@ CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& rend
     auto&             mesh          = *(*m_desc.node)->Mesh();
     const std::size_t submesh_index = m_desc.submesh_index.to_primitive();
     if (submesh_index >= mesh.Submeshes().size()) return result;
-    const auto& submesh = mesh.Submeshes()[submesh_index];
-    const auto& slots   = mesh.MaterialSlots();
-    if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return result;
+    const auto& submesh       = mesh.Submeshes()[submesh_index];
+    const auto& slots         = mesh.MaterialSlots();
+    const auto  material_slot = submesh.material_slot.to_primitive();
+    if (material_slot >= slots.size() || ! slots[material_slot]) return result;
 
-    const auto& textures = slots[submesh.material_slot]->textures;
+    const auto& textures = slots[material_slot]->textures;
     if (textures.size() != m_desc.texture_bindings.size()) {
         result.requires_graph_rebuild = true;
         return result;
@@ -954,8 +959,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
             .has_color_attachment = ! m_desc.depth_only,
             .has_depth_attachment = has_depth_attachment,
         };
-        m_desc.pipeline_cache_key.reset();
-        m_desc.render_pass_cache_key.reset();
+        m_desc.pipeline_cache_key               = None();
+        m_desc.render_pass_cache_key            = None();
         m_desc.pipeline_cache_hit               = false;
         m_desc.pipeline_cache_observed_count    = u64();
         m_desc.render_pass_cache_hit            = false;
@@ -969,8 +974,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
             return;
         }
         auto pipeline                           = rstd::move(prepared).unwrap_unchecked();
-        m_desc.pipeline_cache_key               = rstd::move(pipeline.cache_key);
-        m_desc.render_pass_cache_key            = rstd::move(pipeline.render_pass_key);
+        m_desc.pipeline_cache_key               = Some(rstd::move(pipeline.cache_key));
+        m_desc.render_pass_cache_key            = Some(rstd::move(pipeline.render_pass_key));
         m_desc.pipeline_cache_hit               = pipeline.cache_hit;
         m_desc.pipeline_cache_observed_count    = pipeline.cache_observed_count;
         m_desc.render_pass_cache_hit            = pipeline.render_pass_cache_hit;
@@ -996,7 +1001,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
             attachments.push_back(MakeFramebufferAttachment(*depth_attachment_request, vk_depth));
         }
 
-        m_desc.framebuffer_cache_key.reset();
+        m_desc.framebuffer_cache_key            = None();
         m_desc.framebuffer_cache_hit            = false;
         m_desc.framebuffer_cache_observed_count = u64();
         if (m_desc.framebuffer_use.is_none() || m_desc.render_pass_use.is_none()) return;
@@ -1011,7 +1016,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
             return;
         }
         auto framebuffer                        = rstd::move(prepared).unwrap_unchecked();
-        m_desc.framebuffer_cache_key            = rstd::move(framebuffer.cache_key);
+        m_desc.framebuffer_cache_key            = Some(rstd::move(framebuffer.cache_key));
         m_desc.framebuffer_cache_hit            = framebuffer.cache_hit;
         m_desc.framebuffer_cache_observed_count = framebuffer.cache_observed_count;
     }
@@ -1326,8 +1331,11 @@ void CustomShaderPass::recordRenderScopeDraw(PassRecordContext& context) {
             // Per-part drawing — preserves the file's z-order so later parts
             // overdraw earlier ones (eyelid over pupil during blink).
             for (const auto& r : ranges) {
-                cmd.DrawIndexed(
-                    r.index_count, m_desc.instance_count.to_primitive(), r.first_index, 0, 0);
+                cmd.DrawIndexed(r.index_count.to_primitive(),
+                                m_desc.instance_count.to_primitive(),
+                                r.first_index.to_primitive(),
+                                0,
+                                0);
             }
         }
     } else {
@@ -1349,9 +1357,9 @@ void CustomShaderPass::record(PassRecordContext& context) {
 
 void CustomShaderPass::destory(const Device&) {
     m_desc.descriptor_bindings.clear();
-    m_desc.pipeline_cache_key.reset();
-    m_desc.render_pass_cache_key.reset();
-    m_desc.framebuffer_cache_key.reset();
+    m_desc.pipeline_cache_key               = None();
+    m_desc.render_pass_cache_key            = None();
+    m_desc.framebuffer_cache_key            = None();
     m_desc.pipeline_cache_hit               = false;
     m_desc.pipeline_cache_observed_count    = u64();
     m_desc.render_pass_cache_hit            = false;

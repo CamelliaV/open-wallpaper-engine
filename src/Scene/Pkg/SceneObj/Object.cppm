@@ -20,7 +20,7 @@ export namespace owe::wpscene
 struct ContainerObject {
     bool FromJson(const owe::Json&);
 
-    std::int32_t         id { 0 };
+    i32                  id { 0 };
     std::string          name;
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
@@ -29,9 +29,9 @@ struct ContainerObject {
     bool                 visible { true };
     bool                 solid { false };
     bool                 disable_propagation { false };
-    std::uint32_t        parent { 0 };
+    u32                  parent { 0 };
     std::string          attachment;
-    Vec<std::int32_t>    dependencies;
+    Vec<i32>             dependencies;
     owe::Json            instance;
     VisibleUserBinding   visible_user;
     FieldBindings        field_bindings;

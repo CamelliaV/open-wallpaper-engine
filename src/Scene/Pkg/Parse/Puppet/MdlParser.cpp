@@ -1181,7 +1181,7 @@ void MdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const Mdl::Mesh& src
         submesh.draw_ranges.reserve(src.parts.len().to_primitive());
         for (const auto& p : src.parts) {
             if (p.size == 0) continue;
-            submesh.draw_ranges.push_back({ p.start, p.size });
+            submesh.draw_ranges.push_back({ u32(p.start), u32(p.size) });
         }
     }
 }
@@ -1197,7 +1197,7 @@ void MdlParser::GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const Mdl::Me
         if (idx >= src.parts.len().to_primitive()) continue;
         const auto& p = src.parts[usize(idx)];
         if (p.size == 0) continue;
-        ranges.push_back({ p.start, p.size });
+        ranges.push_back({ u32(p.start), u32(p.size) });
     }
     submesh.draw_ranges = std::move(ranges);
 }
@@ -1209,8 +1209,8 @@ void MdlParser::AddPuppetShaderInfo(ShaderInfo& info, const Mdl& mdl) {
 }
 
 void MdlParser::AddPuppetMatInfo(wpscene::Material& mat, const Mdl& mdl) {
-    mat.combos[rstd::cppstd::to_string(WE_CB_SKINNING)] = 1;
+    mat.combos[rstd::cppstd::to_string(WE_CB_SKINNING)] = i32(1);
     mat.combos[rstd::cppstd::to_string(WE_CB_BONECOUNT)] =
-        static_cast<int>((*mdl.puppet)->bones.len().to_primitive());
+        rstd::as_cast<i32>((*mdl.puppet)->bones.len());
     mat.use_puppet = true;
 }

@@ -43,7 +43,7 @@ bool CanStartNumberToken(std::string_view source, std::size_t pos) {
     return true;
 }
 
-std::optional<std::string> NormalizeAnnotationNumbers(std::string_view source) {
+Option<std::string> NormalizeAnnotationNumbers(std::string_view source) {
     std::string out;
     out.reserve(source.size());
 
@@ -93,8 +93,8 @@ std::optional<std::string> NormalizeAnnotationNumbers(std::string_view source) {
         ++i;
     }
 
-    if (! changed) return std::nullopt;
-    return out;
+    if (! changed) return None();
+    return Some(rstd::move(out));
 }
 
 bool ParseAnnotationJson(std::string_view source, Json& result) {
@@ -162,18 +162,18 @@ void HandleUniformLine(ShaderInfo* info, std::span<const ShaderTexInfo> texinfos
     if (is_tex) {
         wpscene::UniformTex wput;
         wput.FromJson(sv_json);
-        std::int32_t index  = 0;
-        auto         parsed = rstd::from_str<i32>(rstd::cppstd::as_str(name.substr(9)).unwrap());
+        i32  index {};
+        auto parsed = rstd::from_str<i32>(rstd::cppstd::as_str(name.substr(9)).unwrap());
         if (parsed.is_ok()) {
-            index = rstd::move(parsed).unwrap().to_primitive();
+            index = rstd::move(parsed).unwrap();
         } else {
             rstd_error("invalid shader texture index: {}", name);
         }
         if (! wput.default_.is_empty()) {
             info->defTexs.push_back({ index, rstd::cppstd::to_string(wput.default_.as_str()) });
         }
-        const bool        has_texture   = index >= 0 && static_cast<std::size_t>(index) < texcount;
-        const std::size_t texture_index = static_cast<std::size_t>(index);
+        const bool has_texture = index >= i32() && rstd::as_cast<usize>(index) < usize(texcount);
+        const std::size_t texture_index = rstd::as_cast<usize>(index).to_primitive();
         if (! wput.combo.is_empty()) {
             const bool enabled = has_texture && texinfos[texture_index].enabled;
             info->combos[rstd::cppstd::to_string(wput.combo.as_str())] = enabled ? "1" : "0";

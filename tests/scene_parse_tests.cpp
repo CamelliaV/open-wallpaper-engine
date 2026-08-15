@@ -37,13 +37,13 @@ TEST(FieldBindingJson, CompatibilityReaderPopulatesAnimationMetadata) {
     EXPECT_TRUE(tangent.enabled);
     EXPECT_FLOAT_EQ(tangent.x, 1.5f);
     EXPECT_FLOAT_EQ(tangent.y, -2.0f);
-    EXPECT_EQ(tangent.magic, 7);
+    EXPECT_EQ(tangent.magic, rstd::i32(7));
 }
 
 TEST(SceneObjectClone, MembersProvideCloneTraitImplementation) {
     owe::wpscene::AnimCurve curve;
     curve.relative = true;
-    curve.c0.push_back({ .frame = 3, .value = 1.5f });
+    curve.c0.push_back({ .frame = rstd::i32(3), .value = 1.5f });
 
     auto direct_curve = curve.clone();
     auto trait_curve  = rstd::as<rstd::clone::Clone>(curve).clone();
@@ -80,7 +80,7 @@ TEST(ObjectInstanceJson, AppliesMaterialBindingOverridesBySlot) {
     ASSERT_TRUE(material.usertextures[rstd::usize(1)].is_string());
     EXPECT_EQ(rstd::cppstd::to_string(*material.usertextures[rstd::usize(1)].as_str()),
               "replacement");
-    EXPECT_EQ(material.combos.at("version"), 2);
+    EXPECT_EQ(material.combos.at("version"), rstd::i32(2));
 }
 
 TEST(TextObjectJson, ReadsDirectUserValueBinding) {
@@ -146,15 +146,15 @@ TEST(SceneDocumentObjects, PreservesDeclarationOrderAndObjectKinds) {
             ]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
     ASSERT_EQ(document->objects.len(), rstd::usize(3));
-    EXPECT_EQ(document->objects[rstd::usize()].metadata.id, 10);
+    EXPECT_EQ(document->objects[rstd::usize()].metadata.id, rstd::i32(10));
     EXPECT_EQ(document->objects[rstd::usize()].metadata.kind,
               owe::wpscene::SceneObjectKind::Container);
-    EXPECT_EQ(document->objects[rstd::usize(1)].metadata.id, 11);
+    EXPECT_EQ(document->objects[rstd::usize(1)].metadata.id, rstd::i32(11));
     EXPECT_EQ(document->objects[rstd::usize(1)].metadata.kind,
               owe::wpscene::SceneObjectKind::Shape);
-    EXPECT_EQ(document->objects[rstd::usize(2)].metadata.id, 12);
+    EXPECT_EQ(document->objects[rstd::usize(2)].metadata.id, rstd::i32(12));
     EXPECT_EQ(document->objects[rstd::usize(2)].metadata.kind, owe::wpscene::SceneObjectKind::Text);
 }
 
@@ -162,7 +162,7 @@ TEST(SceneDocumentObjects, RejectsNonArrayObjectsAtTheCanonicalParseEntry) {
     auto document = owe::wpscene::ParseSceneDocumentJson(
         R"JSON({"camera": {}, "general": {}, "objects": {}})JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
     ASSERT_FALSE(document->objects_are_array);
 
     owe::fs::VFS                vfs;
@@ -188,16 +188,17 @@ TEST(SceneDocumentObjects, CapturesAuthoredAutoOrthoCanvas) {
             ]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
-    ASSERT_TRUE(document->metadata.canvas_extent.has_value());
-    EXPECT_EQ((*document->metadata.canvas_extent)[0], 1920u);
-    EXPECT_EQ((*document->metadata.canvas_extent)[1], 1080u);
+    ASSERT_TRUE(document.is_some());
+    ASSERT_TRUE(document->metadata.canvas_extent.is_some());
+    EXPECT_EQ((*document->metadata.canvas_extent)[0], rstd::u32(1920));
+    EXPECT_EQ((*document->metadata.canvas_extent)[1], rstd::u32(1080));
 }
 
 TEST(SceneObjectExpansion, AutoOrthoExtentUsesDecodedImageSize) {
     owe::wpscene::SceneMetadata metadata;
     metadata.general.orthogonalprojection.auto_ = true;
-    metadata.canvas_extent                      = std::array<std::uint32_t, 2> { 640, 480 };
+    metadata.canvas_extent =
+        rstd::Some(std::array<rstd::u32, 2> { rstd::u32(640), rstd::u32(480) });
 
     owe::wpscene::ImageObject image;
     image.size = { 1920.0f, 1080.0f };
@@ -205,8 +206,8 @@ TEST(SceneObjectExpansion, AutoOrthoExtentUsesDecodedImageSize) {
     objects.push(owe::SceneObjectVar::Image(rstd::move(image)));
 
     auto extent = owe::ResolveOrthoProjectionExtent(metadata, objects.as_slice());
-    EXPECT_EQ(extent[rstd::usize()], 1920);
-    EXPECT_EQ(extent[rstd::usize(1)], 1080);
+    EXPECT_EQ(extent[rstd::usize()], rstd::i32(1920));
+    EXPECT_EQ(extent[rstd::usize(1)], rstd::i32(1080));
 }
 
 TEST(SceneObjectExpansion, IgnoresContainerWithoutAuthoredId) {
@@ -220,7 +221,7 @@ TEST(SceneObjectExpansion, IgnoresContainerWithoutAuthoredId) {
             ]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     owe::fs::VFS vfs;
     auto         objects = owe::wpscene::DecodeSceneObjects(
@@ -229,7 +230,7 @@ TEST(SceneObjectExpansion, IgnoresContainerWithoutAuthoredId) {
 
     ASSERT_EQ(objects.len(), rstd::usize(1));
     ASSERT_TRUE(objects[rstd::usize()].is_Container());
-    EXPECT_EQ(objects[rstd::usize()].as_Container().value.id, 7);
+    EXPECT_EQ(objects[rstd::usize()].as_Container().value.id, rstd::i32(7));
 }
 
 TEST(SceneObjectExpansion, PreservesHiddenSourceReferencedByContainer) {
@@ -278,7 +279,7 @@ TEST(SceneObjectExpansion, ShapeOwnsItsWallpaperLayerIdentity) {
             }]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
     ASSERT_TRUE(assets.is_ok());
@@ -319,7 +320,7 @@ TEST(ImageColorBlendParsing, LinearDodgeUsesAdditiveAttachmentOwner) {
             }]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
     ASSERT_TRUE(assets.is_ok());
@@ -341,7 +342,7 @@ TEST(ImageColorBlendParsing, LinearDodgeUsesAdditiveAttachmentOwner) {
     ASSERT_NE(node->Mesh(), nullptr);
     ASSERT_NE(node->Mesh()->Material(), nullptr);
     EXPECT_EQ(node->Mesh()->Material()->blenmode, owe::BlendMode::Additive);
-    ASSERT_TRUE(node->Mesh()->Material()->customShader.variant.has_value());
+    ASSERT_TRUE(node->Mesh()->Material()->customShader.variant.is_some());
     EXPECT_EQ(node->Mesh()->Material()->customShader.variant->input_combos.at("SCENE_ORTHO"), "1");
     EXPECT_EQ(node->Mesh()->Material()->customShader.variant->input_combos.at("OWE_IMAGE_LAYER"),
               "1");
@@ -365,7 +366,7 @@ TEST(ImageColorBlendParsing, EffectLayerPreservesLinearDodgeAttachmentOwner) {
             }]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
     ASSERT_TRUE(assets.is_ok());
@@ -419,7 +420,7 @@ TEST(SceneLinkedSources, EffectSelfCompositeStaysInOwningLayer) {
             }]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
     ASSERT_TRUE(assets.is_ok());
@@ -473,7 +474,7 @@ TEST(SceneLightParsing, RecognizesPrefixedKindsAndFullConeAngles) {
             }]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
     ASSERT_TRUE(assets.is_ok());
@@ -526,7 +527,7 @@ TEST(SceneShadowParsing, RequiresRendererCapabilityBeforeRegisteringDerivedResou
             }]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
     ASSERT_TRUE(assets.is_ok());
@@ -571,7 +572,7 @@ TEST(ModelObjectJson, ReadsMaterialSkin) {
     owe::fs::VFS              vfs;
     owe::wpscene::ModelObject model;
     ASSERT_TRUE(model.FromJson(parsed.unwrap(), vfs));
-    EXPECT_EQ(model.skin, 2u);
+    EXPECT_EQ(model.skin, rstd::u32(2));
     EXPECT_TRUE(model.perspective);
 }
 
@@ -588,7 +589,7 @@ TEST(SceneCameraParsing, PerspectiveOverridePreservesTheOrthographicReferencePla
             "objects": []
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
     ASSERT_TRUE(assets.is_ok());

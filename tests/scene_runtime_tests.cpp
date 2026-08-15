@@ -465,7 +465,7 @@ TEST(SceneParserSoundScript, UserPropertyCanStartSilentSoundFromVolumeField) {
             ]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     owe::fs::VFS                vfs;
     wavsen::audio::SoundManager sound_manager;
@@ -510,7 +510,7 @@ TEST(SceneParserScript, DynamicObjectsUseSceneIdentity) {
             ]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
     ASSERT_TRUE(assets.is_ok());
@@ -569,7 +569,7 @@ TEST(SceneParserText, EmptyStaticTextPreservesLayerHierarchy) {
             ]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     owe::fs::VFS                vfs;
     wavsen::audio::SoundManager sound_manager;
@@ -614,7 +614,7 @@ TEST(SceneParserText, ScriptSceneExposesTextWritesWithoutSourceInspection) {
             ]
         })JSON",
         owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
+    ASSERT_TRUE(document.is_some());
 
     owe::fs::VFS                vfs;
     wavsen::audio::SoundManager sound_manager;
@@ -843,7 +843,7 @@ TEST(UniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     auto mesh   = std::make_shared<owe::SceneMesh>();
     mesh->AddMaterial(owe::SceneMaterial {});
     owe::SceneMesh::Submesh submesh;
-    submesh.material_slot = 0;
+    submesh.material_slot = u32();
     mesh->Submeshes().push_back(std::move(submesh));
     child->AddMesh(mesh);
     parent->AppendChild(child.clone());

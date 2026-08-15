@@ -448,11 +448,11 @@ TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
 TEST(SceneRenderGraph, OrdersShadowAtlasWriterBeforeReceiver) {
     owe::Scene scene;
     scene.RegisterRenderTarget(String::make("_rt_default"_str),
-                               owe::SceneRenderTarget { .width = 1280, .height = 720 });
+                               owe::SceneRenderTarget { .width = i32(1280), .height = i32(720) });
     scene.RegisterRenderTarget(String::make("_rt_shadowAtlas"_str),
                                owe::SceneRenderTarget {
-                                   .width  = 768,
-                                   .height = 256,
+                                   .width  = i32(768),
+                                   .height = i32(256),
                                    .kind   = owe::SceneRenderTargetKind::DepthSampled,
                                });
     auto viewports = Vec<owe::SceneShadowViewport>::make();
@@ -524,7 +524,7 @@ TEST(SceneRenderGraph, SharesOneLinkTargetForMultipleConsumers) {
     owe::Scene scene;
     scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });
     scene.RegisterRenderTarget(String::make("_rt_default"_str),
-                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+                               owe::SceneRenderTarget { .width = i32(1920), .height = i32(1080) });
 
     auto source  = rstd::sync::Arc<owe::SceneNode>::make();
     source->ID() = rstd::i32(7);
@@ -570,7 +570,7 @@ TEST(SceneRenderGraph, ReadsPreviousThenCurrentLinkedSurfaceVersion) {
     owe::Scene scene;
     scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });
     scene.RegisterRenderTarget(String::make("_rt_default"_str),
-                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+                               owe::SceneRenderTarget { .width = i32(1920), .height = i32(1080) });
 
     auto make_consumer = [](std::string name) {
         auto               node = Arc<owe::SceneNode>::make();
@@ -659,7 +659,7 @@ TEST(SceneRenderGraph, ElidesSceneOwnedVisibilityHiddenSubtreeAndRestoresIt) {
     owe::Scene scene;
     scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });
     scene.RegisterRenderTarget(String::make("_rt_default"_str),
-                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+                               owe::SceneRenderTarget { .width = i32(1920), .height = i32(1080) });
 
     auto parent             = Arc<owe::SceneNode>::make();
     parent->ID()            = rstd::i32(7);
@@ -696,7 +696,7 @@ TEST(SceneRenderGraph, PreservesLinkedSourceBelowVisibilityHiddenParent) {
     owe::Scene scene;
     scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });
     scene.RegisterRenderTarget(String::make("_rt_default"_str),
-                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+                               owe::SceneRenderTarget { .width = i32(1920), .height = i32(1080) });
 
     auto parent                    = Arc<owe::SceneNode>::make();
     parent->ID()                   = rstd::i32(7);

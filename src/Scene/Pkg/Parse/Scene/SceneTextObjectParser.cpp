@@ -40,10 +40,10 @@ struct SceneNodeArcHold {
     SceneNode* get() const { return node.as_ptr(); }
 };
 
-array<std::int32_t, 2> TextLayerExtent(const text::TextGeometry& geometry) {
+array<i32, 2> TextLayerExtent(const text::TextGeometry& geometry) {
     return {
-        std::max<std::int32_t>(1, static_cast<std::int32_t>(std::ceil(geometry.rt_width))),
-        std::max<std::int32_t>(1, static_cast<std::int32_t>(std::ceil(geometry.rt_height))),
+        std::max(i32(1), rstd::as_cast<i32>(std::ceil(geometry.rt_width))),
+        std::max(i32(1), rstd::as_cast<i32>(std::ceil(geometry.rt_height))),
     };
 }
 
@@ -54,35 +54,30 @@ std::uint32_t TextPointSizeToPx(float point_size) {
     return std::clamp<std::uint32_t>(px, 1, 1024);
 }
 
-array<std::int32_t, 2> TextEffectFboExtent(const text::TextGeometry& geometry, std::uint32_t scale,
-                                           std::uint32_t fit) {
-    if (fit > 0) {
+array<i32, 2> TextEffectFboExtent(const text::TextGeometry& geometry, u32 scale, u32 fit) {
+    if (fit > u32()) {
         const float max_size = std::max(geometry.effect_frame_width, geometry.effect_frame_height);
         if (max_size > 0.0f) {
-            const float fit_scale = static_cast<float>(fit) / max_size;
+            const float fit_scale = rstd::as_cast<float>(fit) / max_size;
             return {
-                std::max<std::int32_t>(
-                    1,
-                    static_cast<std::int32_t>(std::round(geometry.effect_frame_width * fit_scale))),
-                std::max<std::int32_t>(1,
-                                       static_cast<std::int32_t>(
-                                           std::round(geometry.effect_frame_height * fit_scale))),
+                std::max(i32(1),
+                         rstd::as_cast<i32>(std::round(geometry.effect_frame_width * fit_scale))),
+                std::max(i32(1),
+                         rstd::as_cast<i32>(std::round(geometry.effect_frame_height * fit_scale))),
             };
         }
     }
-    const float fbo_scale = std::max(1.0f, static_cast<float>(scale));
+    const float fbo_scale = std::max(1.0f, rstd::as_cast<float>(scale));
     return {
-        std::max<std::int32_t>(
-            1, static_cast<std::int32_t>(std::round(geometry.effect_frame_width / fbo_scale))),
-        std::max<std::int32_t>(
-            1, static_cast<std::int32_t>(std::round(geometry.effect_frame_height / fbo_scale))),
+        std::max(i32(1), rstd::as_cast<i32>(std::round(geometry.effect_frame_width / fbo_scale))),
+        std::max(i32(1), rstd::as_cast<i32>(std::round(geometry.effect_frame_height / fbo_scale))),
     };
 }
 
 struct TextRuntimeFbo {
-    std::string   name;
-    std::uint32_t scale { 1 };
-    std::uint32_t fit { 0 };
+    std::string name;
+    u32         scale { 1 };
+    u32         fit {};
 };
 
 struct TextRuntimeEffectNode {
@@ -100,8 +95,8 @@ struct TextRuntimeTargets {
     std::string                composite;
     std::string                effect_final;
     bool                       has_effect { false };
-    std::int32_t               layer_w { 1 };
-    std::int32_t               layer_h { 1 };
+    i32                        layer_w { 1 };
+    i32                        layer_h { 1 };
     Vec<TextRuntimeFbo>        fbos;
     Vec<TextRuntimeEffectNode> effect_nodes;
 
@@ -110,20 +105,20 @@ struct TextRuntimeTargets {
 
         bool changed          = false;
         auto [next_w, next_h] = TextLayerExtent(geometry);
-        changed |= scene->ResizeRenderTarget(
-            rstd::cppstd::as_str(composite).unwrap(), i32(next_w), i32(next_h));
+        changed |=
+            scene->ResizeRenderTarget(rstd::cppstd::as_str(composite).unwrap(), next_w, next_h);
         if (has_effect) {
             changed |= scene->ResizeRenderTarget(
-                rstd::cppstd::as_str(effect_final).unwrap(), i32(next_w), i32(next_h));
+                rstd::cppstd::as_str(effect_final).unwrap(), next_w, next_h);
         }
 
         auto camera = scene->CameraMut(rstd::cppstd::as_str(camera_key).unwrap());
         if (camera.is_some()) {
             auto& value = **camera;
-            if (value.Width() != static_cast<double>(next_w) ||
-                value.Height() != static_cast<double>(next_h)) {
-                value.SetWidth(next_w);
-                value.SetHeight(next_h);
+            if (value.Width() != rstd::as_cast<double>(next_w) ||
+                value.Height() != rstd::as_cast<double>(next_h)) {
+                value.SetWidth(rstd::as_cast<double>(next_w));
+                value.SetHeight(rstd::as_cast<double>(next_h));
                 value.Update();
                 changed = true;
             }
@@ -131,8 +126,7 @@ struct TextRuntimeTargets {
 
         for (const auto& fbo : fbos) {
             auto [w, h] = TextEffectFboExtent(geometry, fbo.scale, fbo.fit);
-            changed |=
-                scene->ResizeRenderTarget(rstd::cppstd::as_str(fbo.name).unwrap(), i32(w), i32(h));
+            changed |= scene->ResizeRenderTarget(rstd::cppstd::as_str(fbo.name).unwrap(), w, h);
         }
 
         const array<float, 2> effect_size {
@@ -184,8 +178,7 @@ auto UserPropertyValue(Option<ref<rstd::json::Map>> user_props, std::string_view
 
 void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
     if (! obj.visible) {
-        context.scene->MarkLayerVisibilityElidable(
-            WallpaperLayerId { .value = static_cast<i32>(obj.id) });
+        context.scene->MarkLayerVisibilityElidable(WallpaperLayerId { .value = obj.id });
     }
     MarkHiddenLinkSource(context, obj.id);
 
@@ -219,7 +212,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             break;
         }
     }
-    const bool linked_source        = context.IsLinkedSource(static_cast<std::int32_t>(obj.id));
+    const bool linked_source        = context.IsLinkedSource(obj.id);
     const auto text_render_mode     = ResolveTextRenderMode(TextSurfaceRequirements {
         .has_effect        = has_text_effect,
         .copy_background   = obj.copybackground,
@@ -253,7 +246,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
                                           Vector3f(obj.scale.data()),
                                           Vector3f(obj.angles.data()),
                                           obj.name);
-        node->ID() = i32(obj.id);
+        node->ID() = obj.id;
         node->SetSize({ obj.size[0], obj.size[1] });
         node->SetReflected(obj.reflected);
         AssignNodeFieldAnimations(*node.as_ptr(), obj.field_bindings);
@@ -439,7 +432,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
                                     obj.backgroundcolor[2] };
     style.background_brightness = obj.backgroundbrightness;
     style.halign                = obj.horizontalalign.empty() ? obj.alignment : obj.horizontalalign;
-    style.padding               = static_cast<float>(obj.padding);
+    style.padding               = rstd::as_cast<float>(obj.padding);
 
     auto align_or_default = [](std::string      value,
                                std::string_view fallback,
@@ -509,7 +502,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             ? sp_node.clone()
             : Arc<SceneNode>::make(Vector3f::Zero(), Vector3f::Ones(), Vector3f::Zero(), obj.name);
     layer_node->SetReflected(obj.reflected);
-    layer_node->ID() = i32(obj.id);
+    layer_node->ID() = obj.id;
 
     const float                    object_w = obj.size[0] > 0.0f ? obj.size[0] : text_bbox_w;
     const float                    object_h = obj.size[1] > 0.0f ? obj.size[1] : text_bbox_h;
@@ -526,7 +519,7 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
     auto&      scene                              = *context.scene;
     const auto text_node_id                       = scene.RegisterNode(
         *layer_node,
-        obj.id >= 0 ? Some(WallpaperLayerId { .value = i32(obj.id) }) : None<WallpaperLayerId>());
+        obj.id >= i32() ? Some(WallpaperLayerId { .value = obj.id }) : None<WallpaperLayerId>());
     scene.RegisterNode(*sp_node);
     std::shared_ptr<TextRuntimeTargets> runtime_targets;
     std::string                         link_output;
@@ -558,7 +551,10 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
         // view matrix is identity; ortho extents = bbox so glyph pixel
         // coords (centered around 0) map directly to [-1, +1] NDC.
         auto text_camera = Arc<SceneCamera>::make(
-            SceneCamera::MakeOrthographic(initial_layer_w, initial_layer_h, -1.0, 1.0));
+            SceneCamera::MakeOrthographic(rstd::as_cast<double>(initial_layer_w),
+                                          rstd::as_cast<double>(initial_layer_h),
+                                          -1.0,
+                                          1.0));
         text_camera->AttatchNode(sp_node.as_ptr());
         scene.RegisterCamera(String::make(rstd::cppstd::as_str(addr).unwrap()),
                              text_camera.clone());
@@ -583,11 +579,10 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
         layer_node->CopyTrans(*sp_node.as_ptr());
         layer_node->SetSize({ initial_geometry.draw_width, initial_geometry.draw_height });
         if (linked_source) {
-            const auto link_source = WallpaperLayerId { .value = static_cast<i32>(obj.id) };
-            const auto link_width =
-                rstd::cmp::max(i32(1), i32(static_cast<std::int32_t>(std::ceil(object_w))));
+            const auto link_source = WallpaperLayerId { .value = obj.id };
+            const auto link_width = rstd::cmp::max(i32(1), rstd::as_cast<i32>(std::ceil(object_w)));
             const auto link_height =
-                rstd::cmp::max(i32(1), i32(static_cast<std::int32_t>(std::ceil(object_h))));
+                rstd::cmp::max(i32(1), rstd::as_cast<i32>(std::ceil(object_h)));
             scene.RegisterLayerLinkSource(
                 link_source, *sp_node.as_ptr(), { link_width, link_height });
             link_output = scene.EnsureLinkRenderTarget(link_source, *sp_node.as_ptr());
@@ -595,8 +590,8 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
 
         auto layer = std::make_shared<SceneNodeLayer>(has_text_effect ? layer_node.as_ptr()
                                                                       : sp_node.as_ptr(),
-                                                      static_cast<float>(initial_layer_w),
-                                                      static_cast<float>(initial_layer_h),
+                                                      rstd::as_cast<float>(initial_layer_w),
+                                                      rstd::as_cast<float>(initial_layer_h),
                                                       composite);
         sp_node->AttachLayer(layer);
 
@@ -908,8 +903,8 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
 
         auto compose_mesh = std::make_shared<SceneMesh>(/*dynamic=*/wants_dynamic_text);
         GenCardMesh(*compose_mesh,
-                    { static_cast<float>(runtime_targets->layer_w),
-                      static_cast<float>(runtime_targets->layer_h) });
+                    { rstd::as_cast<float>(runtime_targets->layer_w),
+                      rstd::as_cast<float>(runtime_targets->layer_h) });
         auto loaded = load_passthrough_material(has_text_effect ? effect_final : composite);
         if (loaded.is_none()) return;
         compose_sv                           = std::move(loaded->sv);
@@ -981,14 +976,16 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
             cx - hx, cy - hy, 0.0f, cx - hx, cy + hy, 0.0f,
             cx + hx, cy - hy, 0.0f, cx + hx, cy + hy, 0.0f,
         };
-        const float u_half =
-            0.5f * std::min(1.0f, geometry.uv_source_width / float(runtime_targets->layer_w));
-        const float v_half =
-            0.5f * std::min(1.0f, geometry.uv_source_height / float(runtime_targets->layer_h));
-        const float                 u_l = 0.5f - u_half;
-        const float                 u_r = 0.5f + u_half;
-        const float                 v_t = 0.5f - v_half;
-        const float                 v_b = 0.5f + v_half;
+        const float u_half = 0.5f * std::min(1.0f,
+                                             geometry.uv_source_width /
+                                                 rstd::as_cast<float>(runtime_targets->layer_w));
+        const float v_half = 0.5f * std::min(1.0f,
+                                             geometry.uv_source_height /
+                                                 rstd::as_cast<float>(runtime_targets->layer_h));
+        const float u_l    = 0.5f - u_half;
+        const float u_r    = 0.5f + u_half;
+        const float v_t    = 0.5f - v_half;
+        const float v_b    = 0.5f + v_half;
         const rstd::array<float, 8> uv {
             u_l, v_b, u_l, v_t, u_r, v_b, u_r, v_t,
         };

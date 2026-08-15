@@ -104,7 +104,7 @@ owe::FrameSurfaceAcquireResult BridgeExSwapchain::acquireRenderTarget() {
                  .error_code = rstd::i32(-EINVAL) };
     }
 
-    m_pending_identity = acquired.identity;
+    m_pending_identity = rstd::Some(acquired.identity);
     auto completion    = MakeCompletionCapability(lease.identity);
     return { .status     = owe::FrameSurfaceAcquireStatus::Acquired,
              .lease      = std::move(lease),
@@ -113,7 +113,7 @@ owe::FrameSurfaceAcquireResult BridgeExSwapchain::acquireRenderTarget() {
 
 owe::FrameSurfaceCompletionResult
 BridgeExSwapchain::CompleteRendered(owe::FrameSurfaceIdentity identity, int producer_sync_fd) {
-    if (! m_pending_identity.has_value()) {
+    if (m_pending_identity.is_none()) {
         if (producer_sync_fd >= 0) ::close(producer_sync_fd);
         return { .status = owe::FrameSurfaceCompletionStatus::NotPending, .identity = identity };
     }
@@ -123,8 +123,8 @@ BridgeExSwapchain::CompleteRendered(owe::FrameSurfaceIdentity identity, int prod
     }
 
     auto core_identity = *m_pending_identity;
-    m_pending_identity.reset();
-    auto result = m_core.submitSlot(core_identity, producer_sync_fd);
+    m_pending_identity = rstd::None();
+    auto result        = m_core.submitSlot(core_identity, producer_sync_fd);
     return { .status     = ToFrameCompletionStatus(result.status),
              .identity   = identity,
              .error_code = rstd::i32(result.error_code) };
@@ -132,7 +132,7 @@ BridgeExSwapchain::CompleteRendered(owe::FrameSurfaceIdentity identity, int prod
 
 owe::FrameSurfaceCompletionResult
 BridgeExSwapchain::AbortRenderTarget(owe::FrameSurfaceIdentity identity) {
-    if (! m_pending_identity.has_value()) {
+    if (m_pending_identity.is_none()) {
         return { .status = owe::FrameSurfaceCompletionStatus::NotPending, .identity = identity };
     }
     if (ToFrameIdentity(*m_pending_identity) != identity) {
@@ -140,8 +140,8 @@ BridgeExSwapchain::AbortRenderTarget(owe::FrameSurfaceIdentity identity) {
     }
 
     auto core_identity = *m_pending_identity;
-    m_pending_identity.reset();
-    auto result = m_core.abortSlot(core_identity);
+    m_pending_identity = rstd::None();
+    auto result        = m_core.abortSlot(core_identity);
     return { .status     = ToFrameCompletionStatus(result.status),
              .identity   = identity,
              .error_code = rstd::i32(result.error_code) };

@@ -212,7 +212,7 @@ SceneObjectMetadata parse_object_metadata(const owe::Json& obj, std::size_t raw_
 
     std::array<float, 2> size {};
     if (owe::GetJsonValue(obj, "size", size, false) && size[0] > 0.0f && size[1] > 0.0f) {
-        metadata.size = size;
+        metadata.size = Some(size);
     }
     return metadata;
 }
@@ -239,38 +239,40 @@ Vec<SceneObjectRecord> parse_object_records(const owe::Json& root, bool& objects
     return objects;
 }
 
-std::optional<std::array<uint32_t, 2>> image_extent(const SceneObjectMetadata& obj) {
-    if (obj.kind != SceneObjectKind::Image || ! obj.size) return std::nullopt;
-    return std::array<uint32_t, 2> { static_cast<uint32_t>((*obj.size)[0]),
-                                     static_cast<uint32_t>((*obj.size)[1]) };
+Option<std::array<u32, 2>> image_extent(const SceneObjectMetadata& obj) {
+    if (obj.kind != SceneObjectKind::Image || obj.size.is_none()) return None();
+    return Some(std::array<u32, 2> {
+        rstd::as_cast<u32>((*obj.size)[0]),
+        rstd::as_cast<u32>((*obj.size)[1]),
+    });
 }
 
-std::optional<std::array<uint32_t, 2>> largest_image_extent(const Vec<SceneObjectRecord>& objects) {
-    std::optional<std::array<uint32_t, 2>> best;
-    uint64_t                               best_area = 0;
+Option<std::array<u32, 2>> largest_image_extent(const Vec<SceneObjectRecord>& objects) {
+    Option<std::array<u32, 2>> best;
+    uint64_t                   best_area = 0;
     for (const auto& record : objects) {
         auto extent = image_extent(record.metadata);
-        if (! extent) continue;
-        const uint64_t area =
-            static_cast<uint64_t>((*extent)[0]) * static_cast<uint64_t>((*extent)[1]);
+        if (extent.is_none()) continue;
+        const uint64_t area = static_cast<uint64_t>((*extent)[0].to_primitive()) *
+                              static_cast<uint64_t>((*extent)[1].to_primitive());
         if (area > best_area) {
-            best      = *extent;
+            best      = Some(*extent);
             best_area = area;
         }
     }
     return best;
 }
 
-std::optional<std::array<uint32_t, 2>> scene_canvas_extent(const SceneMetadata&          metadata,
-                                                           const Vec<SceneObjectRecord>& objects) {
+Option<std::array<u32, 2>> scene_canvas_extent(const SceneMetadata&          metadata,
+                                               const Vec<SceneObjectRecord>& objects) {
     const auto& general = metadata.general;
-    if (! general.isOrtho) return std::nullopt;
+    if (! general.isOrtho) return None();
 
     const auto& ortho = general.orthogonalprojection;
     if (! ortho.auto_) {
-        if (ortho.width <= 0 || ortho.height <= 0) return std::nullopt;
-        return std::array<uint32_t, 2> { static_cast<uint32_t>(ortho.width),
-                                         static_cast<uint32_t>(ortho.height) };
+        if (ortho.width <= i32() || ortho.height <= i32()) return None();
+        return Some(std::array<u32, 2> { rstd::as_cast<u32>(ortho.width),
+                                         rstd::as_cast<u32>(ortho.height) });
     }
     return largest_image_extent(objects);
 }
@@ -319,38 +321,37 @@ Vec<SceneObjectRecord> ParseSceneObjectRecords(const owe::Json& root, bool& obje
     return parse_object_records(root, objects_are_array);
 }
 
-std::optional<SceneDocument> ParseSceneDocumentJson(std::string_view buf,
-                                                    SceneVersion     pkg_version) {
+Option<SceneDocument> ParseSceneDocumentJson(std::string_view buf, SceneVersion pkg_version) {
     auto parsed = owe::ParseJson(buf);
     if (parsed.is_err()) {
         rstd_error("Can't parse scene json: {}", parsed.unwrap_err());
-        return std::nullopt;
+        return None();
     }
     return ParseSceneDocumentValue(parsed.unwrap(), pkg_version);
 }
 
-std::optional<SceneDocument> ParseSceneDocumentValue(owe::Json root, SceneVersion pkg_version) {
+Option<SceneDocument> ParseSceneDocumentValue(owe::Json root, SceneVersion pkg_version) {
     SceneDocument doc;
-    if (! doc.metadata.FromJson(root, pkg_version)) return std::nullopt;
+    if (! doc.metadata.FromJson(root, pkg_version)) return None();
     doc.objects                = ParseSceneObjectRecords(root, doc.objects_are_array);
     doc.metadata.canvas_extent = scene_canvas_extent(doc.metadata, doc.objects);
-    return doc;
+    return Some(rstd::move(doc));
 }
 
-std::optional<SceneDocument> LoadSceneDocumentFromVfs(fs::VFS& vfs, std::string_view scene_path,
-                                                      SceneVersion pkg_version) {
+Option<SceneDocument> LoadSceneDocumentFromVfs(fs::VFS& vfs, std::string_view scene_path,
+                                               SceneVersion pkg_version) {
     auto f = fs::OpenBinary(vfs, scene_path);
-    if (f.is_err()) return std::nullopt;
+    if (f.is_err()) return None();
     return ParseSceneDocumentJson(f->ReadAllStr(), pkg_version);
 }
 
-std::optional<SceneDocument> LoadSceneDocumentFromPkg(std::string_view pkg_path) {
-    if (pkg_path.empty()) return std::nullopt;
+Option<SceneDocument> LoadSceneDocumentFromPkg(std::string_view pkg_path) {
+    if (pkg_path.empty()) return None();
     auto pkg = fs::WPPkgFs::open(fs::ToPath(pkg_path));
-    if (pkg.is_err()) return std::nullopt;
+    if (pkg.is_err()) return None();
 
     auto scene_source = pkg->open_read("/scene.json"_str);
-    if (scene_source.is_err()) return std::nullopt;
+    if (scene_source.is_err()) return None();
     auto scene_file = fs::BinaryReader(rstd::move(scene_source).unwrap_unchecked());
 
     auto       stamp       = pkg->pkg_version_stamp();
@@ -359,8 +360,8 @@ std::optional<SceneDocument> LoadSceneDocumentFromPkg(std::string_view pkg_path)
     return ParseSceneDocumentJson(scene_file.ReadAllStr(), pkg_version);
 }
 
-std::optional<SceneDocument> LoadSceneDocumentFromSource(std::string_view source_path) {
-    if (source_path.empty()) return std::nullopt;
+Option<SceneDocument> LoadSceneDocumentFromSource(std::string_view source_path) {
+    if (source_path.empty()) return None();
 
     std::filesystem::path path { std::string(source_path) };
     auto                  ext = path.extension().string();
@@ -369,10 +370,10 @@ std::optional<SceneDocument> LoadSceneDocumentFromSource(std::string_view source
     }
 
     if (ext == ".pkg") return LoadSceneDocumentFromPkg(source_path);
-    if (ext != ".json") return std::nullopt;
+    if (ext != ".json") return None();
 
     auto scene_file = fs::OpenPhysicalBinary(source_path);
-    if (scene_file.is_err()) return std::nullopt;
+    if (scene_file.is_err()) return None();
     return ParseSceneDocumentJson(scene_file->ReadAllStr(), kSceneVersionUnknown);
 }
 

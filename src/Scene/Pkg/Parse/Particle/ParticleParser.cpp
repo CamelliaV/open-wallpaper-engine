@@ -445,7 +445,7 @@ auto ParticleSpawnInstruction::SequenceCount() const -> Option<u32> {
         RSTD_CASE(TurbulentVelocityRandom) { return None(); }
         RSTD_CASE(MapSequenceAroundControlPoint) { return None(); }
         RSTD_CASE(MapSequenceBetweenControlPoints, instruction) {
-            return Some(u32(instruction.config.count.to_primitive()));
+            return Some(rstd::as_cast<u32>(instruction.config.count));
         }
         RSTD_CASE(Override) { return None(); }
     }

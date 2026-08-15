@@ -156,7 +156,7 @@ std::shared_ptr<owe::SceneMesh> MakeUniformMesh(std::shared_ptr<owe::SceneShader
     material.customShader.shader = std::move(shader);
     mesh->AddMaterial(std::move(material));
     owe::SceneMesh::Submesh submesh;
-    submesh.material_slot = 0;
+    submesh.material_slot = u32();
     mesh->Submeshes().push_back(std::move(submesh));
     return mesh;
 }
@@ -659,8 +659,8 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
     scene.RebuildResourceIndex();
     auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
     ASSERT_TRUE(node_id.is_some());
-    ASSERT_TRUE(attachments->AttachNode(*node_id, high_priority, 10));
-    ASSERT_TRUE(attachments->AttachNode(*node_id, low_priority, -10));
+    ASSERT_TRUE(attachments->AttachNode(*node_id, high_priority, i32(10)));
+    ASSERT_TRUE(attachments->AttachNode(*node_id, low_priority, i32(-10)));
     auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, rstd::u32());
     ASSERT_TRUE(draw_id.is_some());
 
@@ -873,8 +873,8 @@ TEST(ResourcePlan, UpdatesTextureRequestByStableUse) {
 
 TEST(FramePassResources, DeclaresTargetUsesOutsideTheRenderGraphPlan) {
     owe::SceneRenderTarget render_target {
-        .width        = 1920,
-        .height       = 1080,
+        .width        = i32(1920),
+        .height       = i32(1080),
         .sample_count = 4,
     };
     auto target = owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", render_target);
@@ -935,8 +935,8 @@ TEST(FramePassResources, DeclaresTargetUsesOutsideTheRenderGraphPlan) {
 
 TEST(FramePassResources, ClearsStaleUsesBeforeFramePassInjection) {
     owe::SceneRenderTarget render_target {
-        .width        = 1920,
-        .height       = 1080,
+        .width        = i32(1920),
+        .height       = i32(1080),
         .sample_count = 4,
     };
     auto target = owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", render_target);
@@ -1086,8 +1086,8 @@ TEST(TextureRequest, ResolvesImportedTextureNameFromSnapshotCatalog) {
 
 TEST(TextureRequest, BuildsRenderTargetCacheKey) {
     owe::SceneRenderTarget rt {
-        .width        = 256,
-        .height       = 128,
+        .width        = i32(256),
+        .height       = i32(128),
         .allowReuse   = false,
         .mipmap_level = 3,
     };
@@ -1115,8 +1115,8 @@ TEST(TextureRequest, BuildsRenderTargetCacheKey) {
 
 TEST(TextureRequest, DetectsRequestChanges) {
     owe::SceneRenderTarget rt {
-        .width        = 256,
-        .height       = 128,
+        .width        = i32(256),
+        .height       = i32(128),
         .allowReuse   = false,
         .mipmap_level = 3,
     };
@@ -1126,7 +1126,7 @@ TEST(TextureRequest, DetectsRequestChanges) {
 
     EXPECT_TRUE(owe::vulkan::SameTextureRequest(a, b));
 
-    rt.width     = 512;
+    rt.width     = i32(512);
     auto resized = owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", rt);
     EXPECT_FALSE(owe::vulkan::SameTextureRequest(a, resized));
 
@@ -1140,8 +1140,8 @@ TEST(TextureRequest, DetectsRequestChanges) {
 
 TEST(TextureRequest, BuildsMsaaAndDepthCacheKeys) {
     owe::SceneRenderTarget rt {
-        .width        = 512,
-        .height       = 256,
+        .width        = i32(512),
+        .height       = i32(256),
         .allowReuse   = false,
         .mipmap_level = 2,
         .sample_count = 4,
@@ -1167,8 +1167,8 @@ TEST(TextureRequest, BuildsMsaaAndDepthCacheKeys) {
 
 TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
     owe::SceneRenderTarget rt {
-        .width        = 512,
-        .height       = 256,
+        .width        = i32(512),
+        .height       = i32(256),
         .allowReuse   = false,
         .mipmap_level = 2,
         .sample_count = 4,
@@ -1852,8 +1852,8 @@ TEST(FramebufferCacheDiagnostics, RecordsStableFramebufferKeys) {
 
 TEST(FramebufferAttachmentIdentity, TracksTextureGeneration) {
     owe::SceneRenderTarget rt {
-        .width      = 320,
-        .height     = 180,
+        .width      = i32(320),
+        .height     = i32(180),
         .allowReuse = true,
     };
     auto request = owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", rt);

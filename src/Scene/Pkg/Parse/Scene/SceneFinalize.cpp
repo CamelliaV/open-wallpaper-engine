@@ -66,9 +66,9 @@ bool RegisterUniformNodeSources(Scene& scene, const Arc<UniformSceneState>& unif
         registrar->Register(Box<dyn<UniformSource>>::make(ColorUniformSource { node.clone() }));
     const auto texture =
         registrar->Register(Box<dyn<UniformSource>>::make(TextureUniformSource {}));
-    (void)writer->AttachNode(*node_id, transform, 0);
-    (void)writer->AttachNode(*node_id, color, 0);
-    (void)writer->AttachNode(*node_id, texture, 0);
+    (void)writer->AttachNode(*node_id, transform, i32());
+    (void)writer->AttachNode(*node_id, color, i32());
+    (void)writer->AttachNode(*node_id, texture, i32());
     return true;
 }
 
@@ -80,7 +80,7 @@ bool RegisterParticleTrailUniformSource(Scene& scene, const Arc<SceneNode>& node
     auto       writer    = dyn<UniformAttachmentWriter>::from_ref(scene);
     const auto source    = registrar->Register(
         Box<dyn<UniformSource>>::make(ParticleTrailUniformSource { state.clone() }));
-    (void)writer->AttachNode(*node_id, source, 10);
+    (void)writer->AttachNode(*node_id, source, i32(10));
     return true;
 }
 
@@ -120,7 +120,7 @@ void FinalizeUniformSources(SceneParseContext& context) {
         Box<dyn<UniformSource>>::make(FrameUniformSource { context.uniform_state.clone() }));
     const auto audio_source = registrar->Register(
         Box<dyn<UniformSource>>::make(AudioUniformSource { context.uniform_state.clone() }));
-    (void)writer->AttachGlobal(frame_source, 0);
+    (void)writer->AttachGlobal(frame_source, i32());
 
     auto frame_sources = Vec<UniformSourceAttachment>::make();
     frame_sources.push(UniformSourceAttachment { .source = frame_source });
@@ -177,7 +177,7 @@ void FinalizeUniformSources(SceneParseContext& context) {
         state->effect_projection = draft.effect_projection;
         const auto source        = registrar->Register(
             Box<dyn<UniformSource>>::make(text::TextUniformSource { rstd::move(state) }));
-        (void)writer->AttachNode(*node_id, source, 0);
+        (void)writer->AttachNode(*node_id, source, i32());
     }
 
     for (auto& entry : context.uniform_configs) {
@@ -203,9 +203,9 @@ void FinalizeUniformSources(SceneParseContext& context) {
             auto registered = registrar->Register(
                 Box<dyn<UniformSource>>::make(PuppetUniformSource { layer.clone() }));
             (void)puppet_sources.insert(key, registered);
-            (void)writer->AttachNode(*node_id, registered, 10);
+            (void)writer->AttachNode(*node_id, registered, i32(10));
         } else {
-            (void)writer->AttachNode(*node_id, **source, 10);
+            (void)writer->AttachNode(*node_id, **source, i32(10));
         }
     });
 
@@ -268,12 +268,12 @@ void FinalizeUniformSources(SceneParseContext& context) {
                         }
 
                         auto particle    = (**prototype).Clone();
-                        particle.id      = -1;
+                        particle.id      = i32(-1);
                         particle.name    = rstd::cppstd::to_string(asset);
                         particle.origin  = { 0.0f, 0.0f, 0.0f };
                         particle.scale   = { 1.0f, 1.0f, 1.0f };
                         particle.angles  = { 0.0f, 0.0f, 0.0f };
-                        particle.parent  = 0;
+                        particle.parent  = u32();
                         particle.visible = true;
                         ParticleObjectParseServices particle_services {
                             .scene                  = scene_ptr,
@@ -328,8 +328,8 @@ Box<Scene> FinalizeScene(SceneParseContext& context) {
         auto&                             ref         = **found;
         SceneNode*                        parent_node = context.scene->RootMut().as_raw_ptr();
         const SceneParseContext::NodeRef* parent_ref  = nullptr;
-        if (ref.parent_id != 0) {
-            auto parent = context.node_id_map.get(static_cast<std::int32_t>(ref.parent_id));
+        if (ref.parent_id != u32()) {
+            auto parent = context.node_id_map.get(rstd::as_cast<i32>(ref.parent_id));
             if (parent.is_none() || (**parent).node.is_none()) {
                 missing_parent++;
                 continue;

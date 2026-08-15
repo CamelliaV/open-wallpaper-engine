@@ -305,16 +305,16 @@ public:
     prepareResourceStates(rstd::mut_ref<rstd::dyn<resource_registry::TextureStatePreparer>>) {
         return true;
     }
-    virtual Option<RenderItemId>              renderItemId() const { return None(); }
-    virtual std::optional<PipelineCacheKey>   pipelineCacheKey() const { return std::nullopt; }
-    virtual bool                              pipelineCacheHit() const { return false; }
-    virtual u64                               pipelineCacheObservedCount() const { return u64(); }
-    virtual std::optional<RenderPassCacheKey> renderPassCacheKey() const { return std::nullopt; }
-    virtual bool                              renderPassCacheHit() const { return false; }
-    virtual u64                               renderPassCacheObservedCount() const { return u64(); }
-    virtual std::optional<FramebufferCacheKey> framebufferCacheKey() const { return std::nullopt; }
-    virtual bool                               framebufferCacheHit() const { return false; }
-    virtual u64 framebufferCacheObservedCount() const { return u64(); }
+    virtual Option<RenderItemId>        renderItemId() const { return None(); }
+    virtual Option<PipelineCacheKey>    pipelineCacheKey() const { return None(); }
+    virtual bool                        pipelineCacheHit() const { return false; }
+    virtual u64                         pipelineCacheObservedCount() const { return u64(); }
+    virtual Option<RenderPassCacheKey>  renderPassCacheKey() const { return None(); }
+    virtual bool                        renderPassCacheHit() const { return false; }
+    virtual u64                         renderPassCacheObservedCount() const { return u64(); }
+    virtual Option<FramebufferCacheKey> framebufferCacheKey() const { return None(); }
+    virtual bool                        framebufferCacheHit() const { return false; }
+    virtual u64                         framebufferCacheObservedCount() const { return u64(); }
     virtual std::vector<PassTextureRequestDiagnostic> textureRequestDiagnostics() const {
         return {};
     }

@@ -45,7 +45,9 @@ void ParseCamera(SceneParseContext& context, const wpscene::SceneMetadata& sc) {
     auto     projection_extent = scene.OrthographicProjectionExtent();
     auto     global_camera     = Arc<SceneCamera>::make(SceneCamera::MakeOrthographic(
         projection_extent[usize()], projection_extent[usize(1)], -5000.0, 5000.0));
-    Vector3f cori { (float)context.ortho_w / 2.0f, (float)context.ortho_h / 2.0f, 0 },
+    Vector3f cori { rstd::as_cast<float>(context.ortho_w) / 2.0f,
+                    rstd::as_cast<float>(context.ortho_h) / 2.0f,
+                    0 },
         cscale { 1.0f, 1.0f, 1.0f }, cangle(Vector3f::Zero());
 
     context.global_camera_node = Some(Arc<SceneNode>::make(cori, cscale, cangle));
@@ -66,11 +68,11 @@ void ParseCamera(SceneParseContext& context, const wpscene::SceneMetadata& sc) {
     // WE's perspective camera inside an orthographic scene uses reverse-Z over 5..15000.
     const double perspective_near   = general.isOrtho ? 15000.0 : general.nearz;
     const double perspective_far    = general.isOrtho ? 5.0 : general.farz;
-    auto         perspective_camera = Arc<SceneCamera>::make(
-        SceneCamera::MakePerspective(static_cast<double>(context.ortho_w) / context.ortho_h,
-                                     perspective_near,
-                                     perspective_far,
-                                     perspective_fov));
+    auto         perspective_camera = Arc<SceneCamera>::make(SceneCamera::MakePerspective(
+        rstd::as_cast<double>(context.ortho_w) / rstd::as_cast<double>(context.ortho_h),
+        perspective_near,
+        perspective_far,
+        perspective_fov));
 
     Vector3f cperori                       = cori;
     cperori[2]                             = static_cast<float>(perspective_distance);
@@ -96,7 +98,8 @@ void ParseCamera(SceneParseContext& context, const wpscene::SceneMetadata& sc) {
         perspective_camera->SetLookAt(eye, center, up);
         perspective_camera->SetFov(
             general.perspectiveoverridefov > 0.0f ? general.perspectiveoverridefov : general.fov);
-        perspective_camera->SetAspect((double)context.ortho_w / (double)context.ortho_h);
+        perspective_camera->SetAspect(rstd::as_cast<double>(context.ortho_w) /
+                                      rstd::as_cast<double>(context.ortho_h));
         (void)scene.SetActiveCamera("global_perspective"_str);
         LoadRootCameraPaths(context, sc);
     }
@@ -149,7 +152,8 @@ void ParseCameraObj(SceneParseContext& context, wpscene::CameraObject& cam) {
     if (cam.visible) camera_owner->AttatchNode(node.as_ptr());
     if (use_perspective) {
         if (cam.fov > 0.0f) camera_owner->SetFov(cam.fov);
-        camera_owner->SetAspect((double)context.ortho_w / (double)context.ortho_h);
+        camera_owner->SetAspect(rstd::as_cast<double>(context.ortho_w) /
+                                rstd::as_cast<double>(context.ortho_h));
         (void)scene.SetActiveCamera(rstd::cppstd::as_str(camera_name).unwrap());
     }
 
@@ -193,7 +197,7 @@ void ParseCameraObj(SceneParseContext& context, wpscene::CameraObject& cam) {
 }
 
 void InitContext(SceneParseContext& context, fs::VFS& vfs, const wpscene::SceneMetadata& sc,
-                 array<std::int32_t, 2> ortho_extent) {
+                 array<i32, 2> ortho_extent) {
     context.vfs = &vfs;
     auto& scene = *context.scene;
     scene.SetImageParser(Box<dyn<IImageParser>>::make(TexImageParser(&vfs)));
@@ -373,14 +377,13 @@ void ParseModelObjImpl(SceneParseContext& context, wpscene::ModelObject& model_o
                                       Vector3f(model_obj.scale.data()),
                                       Vector3f(model_obj.angles.data()),
                                       model_obj.name);
-    node->ID() = i32(model_obj.id);
+    node->ID() = model_obj.id;
     node->SetPerspective(model_obj.perspective);
     node->SetReflected(model_obj.reflected);
     node->shadow.cast = context.shader_environment.directional_shadow && model_obj.castshadow;
     if (! model_obj.visible) {
         node->SetVisible(false);
-        context.scene->MarkLayerVisibilityElidable(
-            WallpaperLayerId { .value = static_cast<i32>(model_obj.id) });
+        context.scene->MarkLayerVisibilityElidable(WallpaperLayerId { .value = model_obj.id });
     }
     MarkHiddenLinkSource(context, model_obj.id);
     if (! model_obj.visible_user.empty())
@@ -394,8 +397,8 @@ void ParseModelObjImpl(SceneParseContext& context, wpscene::ModelObject& model_o
     svData.use_camera_eye_position   = true;
     if (context.orthographic_scene) {
         svData.eye_position_override = Some(array<float, 3> {
-            static_cast<float>(context.ortho_w) * 0.5f,
-            static_cast<float>(context.ortho_h) * 0.5f,
+            static_cast<float>(context.ortho_w.to_primitive()) * 0.5f,
+            static_cast<float>(context.ortho_h.to_primitive()) * 0.5f,
             2000.0f,
         });
     }
@@ -411,7 +414,7 @@ void ParseModelObjImpl(SceneParseContext& context, wpscene::ModelObject& model_o
         if (mdl_mesh.positions.is_empty()) continue;
 
         if (mdl_mesh.mat_json_files.is_empty()) continue;
-        usize skin_index(model_obj.skin);
+        auto skin_index = rstd::as_cast<usize>(model_obj.skin);
         if (skin_index >= mdl_mesh.mat_json_files.len()) {
             rstd_error("model '{}' skin {} exceeds {} material variants; using skin 0",
                        model_obj.name,
@@ -498,8 +501,8 @@ void ParseModelObjImpl(SceneParseContext& context, wpscene::ModelObject& model_o
             }
         }
 
-        const uint32_t material_slot  = static_cast<uint32_t>(mesh->MaterialSlots().size());
-        const auto     texcoord_scale = Texture0UvScale(scene_mat);
+        const auto material_slot  = rstd::as_cast<u32>(usize(mesh->MaterialSlots().size()));
+        const auto texcoord_scale = Texture0UvScale(scene_mat);
         mesh->AddMaterial(std::move(scene_mat));
         RegisterMaterialBindings(*context.scene, mesh->MaterialSlots().back(), *wpmat, shader_info);
         WireMaterialShaderValueScripts(
@@ -521,7 +524,7 @@ void ParseModelObjImpl(SceneParseContext& context, wpscene::ModelObject& model_o
     SetUniformConfig(context, node, rstd::move(svData));
     AssignNodeFieldAnimations(*node.as_ptr(), model_obj.field_bindings);
     WireFieldScripts(context, node, model_obj.field_bindings);
-    if (model_obj.skin == 0) {
+    if (model_obj.skin == u32()) {
         (void)context.dynamic_model_prototypes.insert(
             String::make(rstd::cppstd::as_str(model_obj.model).unwrap()), node.clone());
     }
@@ -562,12 +565,12 @@ void IndexSceneDocument(SceneParseContext& context, ref<wpscene::SceneDocument> 
             metadata.id, static_cast<std::uint64_t>(context.node_id_order.len().to_primitive()));
         context.node_id_order.emplace_back(metadata.id);
         (void)context.object_parent_ids.insert(metadata.id, metadata.parent);
-        if (metadata.solid) context.solid_layer_ids.insert(metadata.id);
+        if (metadata.solid) context.solid_layer_ids.insert(i32(metadata.id));
     }
 }
 
 SceneParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::SceneMetadata& sc,
-                               array<std::int32_t, 2>       ortho_extent,
+                               array<i32, 2>                ortho_extent,
                                Option<ref<rstd::json::Map>> user_properties,
                                Option<rstd::path::PathBuf>  shader_cache_dir,
                                GeometryShaderLimits geometry_limits, bool directional_shadow) {
@@ -579,7 +582,7 @@ SceneParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::S
     context.shader_cache           = Arc<ShaderCache>::make(rstd::move(shader_cache_dir));
     context.geometry_shader_limits = geometry_limits;
     context.shader_environment.directional_shadow =
-        directional_shadow && sc.general.lightconfig.directionalshadow > 0;
+        directional_shadow && sc.general.lightconfig.directionalshadow > u32();
 
     context.scene->RegisterRenderTarget(String::make(SpecTex_Default),
                                         SceneRenderTarget {
@@ -602,8 +605,8 @@ SceneParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::S
         context.scene->RegisterRenderTarget(
             String::make(WE_SHADOW_ATLAS_PREFIX),
             SceneRenderTarget {
-                .width             = 768,
-                .height            = 256,
+                .width             = i32(768),
+                .height            = i32(256),
                 .kind              = SceneRenderTargetKind::DepthSampled,
                 .depth_clear_value = 0.0f,
                 .sample =
@@ -624,7 +627,7 @@ SceneParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::S
                 .y              = f32(256.0f),
                 .width          = f32(256.0f),
                 .height         = f32(-256.0f),
-                .scissor_x      = i32(256 * static_cast<std::int32_t>(index.to_primitive())),
+                .scissor_x      = i32(256) * rstd::as_cast<i32>(index),
                 .scissor_y      = i32(),
                 .scissor_width  = u32(256),
                 .scissor_height = u32(256),

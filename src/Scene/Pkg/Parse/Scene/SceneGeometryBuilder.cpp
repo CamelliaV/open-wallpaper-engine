@@ -91,18 +91,18 @@ void GenDirectDrawQuadMesh(SceneMesh& mesh, float edge, const DirectDrawQuad& po
     mesh.AddIndexArray(SceneIndexArray(indices.as_slice()));
 }
 
-void SetParticleMesh(SceneMesh& mesh, uint32_t count, bool thick_format) {
+void SetParticleMesh(SceneMesh& mesh, u32 count, bool thick_format) {
     auto specs =
         thick_format
             ? MakeAttrSet(
                   { VAttr::Position, VAttr::TexCoordVec4, VAttr::Color, VAttr::TexCoordVec4C1 })
             : MakeAttrSet({ VAttr::Position, VAttr::TexCoordVec4, VAttr::Color });
     mesh.SetPrimitive(MeshPrimitive::POINT);
-    mesh.AddVertexArray(SceneVertexArray(rstd::move(specs), usize(count)));
+    mesh.AddVertexArray(SceneVertexArray(rstd::move(specs), rstd::as_cast<usize>(count)));
     mesh.GetVertexArray(usize(0)).SetOption(as_string_view(WE_CB_THICK_FORMAT), thick_format);
 }
 
-void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
+void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, u32 count,
                          bool thick_format, bool trail_renderer) {
     (void)particle;
     auto specs = thick_format ? MakeAttrSet({ VAttr::PositionVec4,
@@ -117,7 +117,7 @@ void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uin
                                               VAttr::TexCoordVec3C2,
                                               VAttr::Color });
     mesh.SetPrimitive(MeshPrimitive::POINT);
-    mesh.AddVertexArray(SceneVertexArray(rstd::move(specs), usize(count)));
+    mesh.AddVertexArray(SceneVertexArray(rstd::move(specs), rstd::as_cast<usize>(count)));
     mesh.GetVertexArray(usize(0)).SetOption(trail_renderer ? as_string_view(WE_PRENDER_ROPE_TRAIL)
                                                            : as_string_view(WE_PRENDER_ROPE),
                                             true);

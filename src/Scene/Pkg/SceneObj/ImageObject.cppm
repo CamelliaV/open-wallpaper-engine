@@ -34,8 +34,8 @@ public:
     bool        FromJson(const owe::Json&);
     std::string name;
     std::string format;
-    uint32_t    scale { 1 };
-    uint32_t    fit { 0 };
+    u32         scale { 1 };
+    u32         fit { 0 };
     bool        unique { false };
 };
 
@@ -43,12 +43,12 @@ public:
 // (compiled-shader id + textures + combos).
 class ObjectInstance {
 public:
-    bool                                          FromJson(const owe::Json&);
-    void                                          ApplyTo(Material&) const;
-    bool                                          present { false };
-    std::uint32_t                                 id { 0 };
-    std::unordered_map<std::string, std::int32_t> combos;
-    std::vector<std::string>                      textures;
+    bool                                 FromJson(const owe::Json&);
+    void                                 ApplyTo(Material&) const;
+    bool                                 present { false };
+    u32                                  id { 0 };
+    std::unordered_map<std::string, i32> combos;
+    std::vector<std::string>             textures;
     // usertextures elements are polymorphic: bare property-name strings
     // (PKGV0022+) and `{name, type}` system bindings (PKGV0018+). Stored
     // as raw json so both shapes are preserved.
@@ -60,13 +60,13 @@ public:
     bool                       FromJson(const owe::Json&, fs::VFS& vfs);               // legacy
     bool                       FromJson(const owe::Json&, fs::VFS& vfs, SceneVersion); // canonical
     bool                       FromFileJson(const owe::Json&, fs::VFS& vfs);
-    int32_t                    id;
+    i32                        id;
     std::string                name;
     std::string                username; // PKGV0001+; per-instance label override
     bool                       visible { true };
     VisibleUserBinding         visible_user;
     std::string                visible_user_key;
-    int32_t                    version;
+    i32                        version;
     std::vector<Material>      materials;
     std::vector<MaterialPass>  passes;
     std::vector<EffectCommand> commands;
@@ -81,7 +81,7 @@ public:
     bool        FromJson(const owe::Json&, fs::VFS&);               // legacy
     bool        FromJson(const owe::Json&, fs::VFS&, SceneVersion); // canonical
     bool        FromAsset(rstd::ref<rstd::str>, rstd::array<float, 2>, fs::VFS&, SceneVersion);
-    int32_t     id { 0 };
+    i32         id { 0 };
     std::string name;
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3>     scale { 1.0f, 1.0f, 1.0f };
@@ -89,7 +89,7 @@ public:
     std::array<float, 2>     size { 2.0f, 2.0f };
     std::array<float, 2>     parallaxDepth { 0.0f, 0.0f };
     std::array<float, 3>     color { 1.0f, 1.0f, 1.0f };
-    int32_t                  colorBlendMode { 0 };
+    i32                      colorBlendMode { 0 };
     float                    alpha { 1.0f };
     float                    brightness { 1.0f };
     bool                     fullscreen { false };
@@ -104,12 +104,12 @@ public:
     Config                   config;
 
     // Common cross-kind metadata (PKGV0001+ unless noted).
-    bool                      locktransforms { false };
-    bool                      muteineditor { false };
-    bool                      nointerpolation { false }; // PKGV0021+
-    std::uint32_t             parent { 0 };              // PKGV0019+; 0 = no parent
-    std::vector<std::int32_t> dependencies;              // PKGV0001+; referenced object ids
-    ObjectInstance            instance;                  // PKGV0018+; instance binding
+    bool             locktransforms { false };
+    bool             muteineditor { false };
+    bool             nointerpolation { false }; // PKGV0021+
+    u32              parent { 0 };              // PKGV0019+; 0 = no parent
+    std::vector<i32> dependencies;              // PKGV0001+; referenced object ids
+    ObjectInstance   instance;                  // PKGV0018+; instance binding
 
     // Image-kind specifics (gates listed for reference; reads are unconditional via _NOWARN).
     bool                 perspective { false }; // PKGV0002+
@@ -152,7 +152,7 @@ class ShapeObject {
 public:
     bool FromJson(const owe::Json&, fs::VFS&, SceneVersion);
 
-    int32_t                  id { 0 };
+    i32                      id { 0 };
     std::string              name;
     std::string              shape;
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
@@ -161,16 +161,16 @@ public:
     bool                     visible { true };
     std::vector<ImageEffect> effects;
 
-    bool                      locktransforms { false };
-    bool                      muteineditor { false };
-    bool                      nointerpolation { false };
-    bool                      reflected { true };
-    bool                      castshadow { false };
-    bool                      disablepropagation { false };
-    std::uint32_t             parent { 0 };
-    std::string               attachment;
-    std::vector<std::int32_t> dependencies;
-    FieldBindings             field_bindings;
+    bool             locktransforms { false };
+    bool             muteineditor { false };
+    bool             nointerpolation { false };
+    bool             reflected { true };
+    bool             castshadow { false };
+    bool             disablepropagation { false };
+    u32              parent { 0 };
+    std::string      attachment;
+    std::vector<i32> dependencies;
+    FieldBindings    field_bindings;
 
     VisibleUserBinding visible_user;
     std::string        visible_user_key;
@@ -178,12 +178,12 @@ public:
 
 class ImageAssetInfo {
 public:
-    std::optional<std::array<float, 2>> size;
-    std::string                         first_texture;
-    bool                                solid_layer { false };
+    Option<std::array<float, 2>> size;
+    std::string                  first_texture;
+    bool                         solid_layer { false };
 };
 
-std::optional<ImageAssetInfo> LoadImageAssetInfo(fs::VFS& vfs, std::string_view image);
+Option<ImageAssetInfo> LoadImageAssetInfo(fs::VFS& vfs, std::string_view image);
 
 } // namespace wpscene
 } // namespace owe

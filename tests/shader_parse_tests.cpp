@@ -51,7 +51,7 @@ void main(){}
 )";
     auto              info = Parse(src);
     ASSERT_EQ(info.defTexs.size(), 1u);
-    EXPECT_EQ(info.defTexs[0].first, 6);
+    EXPECT_EQ(info.defTexs[0].first, i32(6));
     EXPECT_EQ(info.defTexs[0].second, "_rt_shadowAtlas");
 }
 
@@ -205,7 +205,7 @@ void main(){}
 )";
     auto              info = Parse(src);
     ASSERT_EQ(info.defTexs.size(), 1u);
-    EXPECT_EQ(info.defTexs[0].first, 0);
+    EXPECT_EQ(info.defTexs[0].first, i32());
     EXPECT_EQ(info.defTexs[0].second, "util/white");
     EXPECT_EQ(info.alias.at("albedo"), "g_Texture0");
 }

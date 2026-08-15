@@ -29,9 +29,9 @@ struct SceneParseError {
 };
 
 struct SceneParseCapabilities {
-    bool          directional_shadow { false };
-    std::uint32_t max_geometry_output_vertices { 256 };
-    std::uint32_t max_geometry_total_output_components { 1024 };
+    bool directional_shadow { false };
+    u32  max_geometry_output_vertices { 256 };
+    u32  max_geometry_total_output_components { 1024 };
 };
 
 struct SceneParseOptions {

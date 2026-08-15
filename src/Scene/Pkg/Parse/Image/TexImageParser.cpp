@@ -169,14 +169,14 @@ void SetHeaderPow2(ImageHeader& header, std::int32_t mip_0_w, std::int32_t mip_0
     header.mipmap_larger = mip_0_w * mip_0_h > header.mapWidth * header.mapHeight;
 }
 
-std::optional<uint8_t> HexValue(char c) {
-    if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
-    if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
-    if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(c - 'A' + 10);
-    return std::nullopt;
+Option<uint8_t> HexValue(char c) {
+    if (c >= '0' && c <= '9') return Some(static_cast<uint8_t>(c - '0'));
+    if (c >= 'a' && c <= 'f') return Some(static_cast<uint8_t>(c - 'a' + 10));
+    if (c >= 'A' && c <= 'F') return Some(static_cast<uint8_t>(c - 'A' + 10));
+    return None();
 }
 
-std::optional<std::string> PercentDecode(std::string_view raw) {
+Option<std::string> PercentDecode(std::string_view raw) {
     std::string out;
     out.reserve(raw.size());
     for (std::size_t i = 0; i < raw.size();) {
@@ -184,17 +184,17 @@ std::optional<std::string> PercentDecode(std::string_view raw) {
             out.push_back(raw[i++]);
             continue;
         }
-        if (i + 2 >= raw.size()) return std::nullopt;
+        if (i + 2 >= raw.size()) return None();
         auto hi = HexValue(raw[i + 1]);
         auto lo = HexValue(raw[i + 2]);
-        if (! hi || ! lo) return std::nullopt;
+        if (hi.is_none() || lo.is_none()) return None();
         out.push_back(static_cast<char>((*hi << 4) | *lo));
         i += 3;
     }
-    return out;
+    return Some(rstd::move(out));
 }
 
-std::optional<std::string> ResolveExternalImagePath(std::string_view name) {
+Option<std::string> ResolveExternalImagePath(std::string_view name) {
     std::string path;
     if (name.starts_with("file://localhost/")) {
         path = "/" + std::string(name.substr(std::string_view("file://localhost/").size()));
@@ -203,12 +203,12 @@ std::optional<std::string> ResolveExternalImagePath(std::string_view name) {
     } else if (! name.empty() && name[0] == '/') {
         path = std::string(name);
     } else {
-        return std::nullopt;
+        return None();
     }
-    auto            decoded = PercentDecode(path).value_or(path);
+    auto            decoded = PercentDecode(path).unwrap_or(path);
     std::error_code ec;
-    if (! std::filesystem::is_regular_file(decoded, ec)) return std::nullopt;
-    return decoded;
+    if (! std::filesystem::is_regular_file(decoded, ec)) return None();
+    return Some(rstd::move(decoded));
 }
 
 ImageHeader MakeExternalImageHeader(int width, int height) {

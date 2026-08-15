@@ -53,16 +53,15 @@ ParticleRenderDesc DescribeParticleRender(const wpscene::ParticleRender& render)
 bool ShaderComboEnabled(const wpscene::Material& material, const ShaderInfo& info,
                         std::string_view name) {
     auto material_combo = material.combos.find(std::string(name));
-    if (material_combo != material.combos.end()) return material_combo->second != 0;
+    if (material_combo != material.combos.end()) return material_combo->second != i32();
 
     auto combo = info.combos.find(std::string(name));
     return combo != info.combos.end() && combo->second != "0";
 }
 
-std::int32_t LimitRopeSubdivision(std::int32_t                       requested,
-                                  const ParticleObjectParseServices& services,
-                                  const wpscene::Material& material, const ShaderInfo& info) {
-    if (requested <= 0) return 0;
+i32 LimitRopeSubdivision(i32 requested, const ParticleObjectParseServices& services,
+                         const wpscene::Material& material, const ShaderInfo& info) {
+    if (requested <= i32()) return i32();
 
     const bool lighting     = ShaderComboEnabled(material, info, "LIGHTING");
     const bool refract      = ShaderComboEnabled(material, info, "REFRACT");
@@ -73,17 +72,17 @@ std::int32_t LimitRopeSubdivision(std::int32_t                       requested,
                               (fog && services.shader_environment.fog_height);
 
     // genericropeparticle always emits position (4), UV (2), and color (4).
-    std::uint32_t output_components = 10;
-    if (fog_distance || fog_height || lighting) output_components += 4;
-    if (lighting) output_components += 6;
-    if (refract) output_components += 7;
+    u32 output_components { 10 };
+    if (fog_distance || fog_height || lighting) output_components += u32(4);
+    if (lighting) output_components += u32(6);
+    if (refract) output_components += u32(7);
 
     const auto& limits                 = services.geometry_shader_limits;
     const auto  vertices_by_components = limits.max_total_output_components / output_components;
     const auto  max_vertices    = std::min(limits.max_output_vertices, vertices_by_components);
-    const auto  max_subdivision = max_vertices > 4 ? (max_vertices - 4) / 2 : 0;
+    const auto  max_subdivision = max_vertices > u32(4) ? (max_vertices - u32(4)) / u32(2) : u32();
     const auto  limited =
-        static_cast<std::int32_t>(std::min(static_cast<std::uint32_t>(requested), max_subdivision));
+        rstd::as_cast<i32>(std::min(rstd::as_cast<u32>(requested), max_subdivision));
     if (limited != requested) {
         rstd_warn("rope subdivision reduced from {} to {} for geometry shader limits",
                   requested,
@@ -148,7 +147,7 @@ void ApplyParticleOverride(wpscene::ParticleInstanceoverride& state, ref<str> fi
         write_vec3(state.controlpointangle[index->to_primitive()], 1.0f);
     } else if (auto index = parse_index("controlpoint"_str); index.is_some()) {
         std::array<float, 3> point {};
-        if (write_vec3(point, 1.0f)) state.controlpoint[index->to_primitive()] = point;
+        if (write_vec3(point, 1.0f)) state.controlpoint[index->to_primitive()] = Some(point);
     }
 }
 
@@ -352,11 +351,10 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
                                                    Vector3f(wppartobj.angles.data()),
                                                    wppartobj.name));
         auto& spNode   = *spNodeOpt;
-        spNode->ID()   = i32(wppartobj.id);
+        spNode->ID()   = wppartobj.id;
         if (! wppartobj.visible) {
             spNode->SetVisible(false);
-            services.scene->MarkLayerVisibilityElidable(
-                WallpaperLayerId { .value = static_cast<i32>(wppartobj.id) });
+            services.scene->MarkLayerVisibilityElidable(WallpaperLayerId { .value = wppartobj.id });
         }
         if (! wppartobj.visible_user.empty())
             spNode->SetVisibleUserBinding(ToSceneUserVisibilityBinding(wppartobj.visible_user));
@@ -422,18 +420,17 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
     shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_VIEWUP)]    = std::array { 0.0f, 1.0f, 0.0f };
     shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_VIEWRIGHT)] = std::array { 1.0f, 0.0f, 0.0f };
     shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_EYEPOSITION)] = std::array {
-        static_cast<float>(services.ortho_w) / 2.0f,
-        static_cast<float>(services.ortho_h) / 2.0f,
+        rstd::as_cast<float>(services.ortho_w) / 2.0f,
+        rstd::as_cast<float>(services.ortho_h) / 2.0f,
         1000.0f,
     };
 
-    std::uint32_t maxcount = particle_obj.maxcount;
-    maxcount               = std::min(maxcount, 20000u);
+    u32 maxcount = std::min(particle_obj.maxcount, u32(20000));
 
     Option<Arc<ParticleTrailUniformState>> trail_uniform_state;
     if (hastrail) {
         double          in_SegmentUVTimeOffset = 0.0;
-        double          in_SegmentMaxCount     = maxcount - 1.0;
+        double          in_SegmentMaxCount     = rstd::as_cast<double>(maxcount) - 1.0;
         array<float, 4> render_var {
             (float)wppartRenderer.length,
             (float)wppartRenderer.maxlength,
@@ -450,9 +447,9 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
             shaderInfo.combos[rstd::cppstd::to_string(WE_CB_THICK_FORMAT)] = "1";
     }
     if (rope_shader) {
-        std::int32_t subdiv = static_cast<std::int32_t>(std::round(wppartRenderer.subdivision));
-        subdiv = LimitRopeSubdivision(subdiv, services, particle_obj.material, shaderInfo);
-        shaderInfo.combos["TRAILSUBDIVISION"] = std::to_string(subdiv);
+        i32 subdiv = rstd::as_cast<i32>(std::round(wppartRenderer.subdivision));
+        subdiv     = LimitRopeSubdivision(subdiv, services, particle_obj.material, shaderInfo);
+        shaderInfo.combos["TRAILSUBDIVISION"] = std::to_string(subdiv.to_primitive());
     }
 
     auto animationmode = ToAnimMode(particle_obj.animationmode);
@@ -515,7 +512,7 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
     auto particleSub = Box<ParticleSubSystem>::make(
         *services.scene,
         spMesh,
-        u32(maxcount),
+        maxcount,
         f64(modifiers.Rate()),
         max_instance_count,
         f64(child_data.probability),
@@ -537,7 +534,7 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
             rstd_error("particle mesh capacity overflow for '{}'", spNode->Name());
             return;
         }
-        auto mesh_maxcount = mesh_capacity->to_primitive();
+        auto mesh_maxcount = *mesh_capacity;
         if (rope_shader) {
             if (render_rope_trail) {
                 auto capacity = mesh_capacity->checked_mul(u32(trail_length));
@@ -545,7 +542,7 @@ void BuildParticleObjectNode(ParticleObjectParseServices& services,
                     rstd_error("particle rope capacity overflow for '{}'", spNode->Name());
                     return;
                 }
-                mesh_maxcount = capacity->to_primitive();
+                mesh_maxcount = *capacity;
             }
             SetRopeParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format, render_rope_trail);
         } else {

@@ -167,8 +167,8 @@ inline unsigned TextureSampleCountValue(VkSampleCountFlagBits sample_count) {
 inline TextureDefinition RenderTargetTextureDefinition(owe::SceneRenderTarget rt) {
     const bool depth_sampled = rt.kind == owe::SceneRenderTargetKind::DepthSampled;
     return TextureDefinition {
-        .width      = i32(rt.PhysicalWidth()),
-        .height     = i32(rt.PhysicalHeight()),
+        .width      = rt.PhysicalWidth(),
+        .height     = rt.PhysicalHeight(),
         .usage      = depth_sampled ? TextureUsage::DepthAttachment | TextureUsage::Sampled
                                     : TextureUsage::Color,
         .format     = depth_sampled ? owe::TextureFormat::D32F : owe::TextureFormat::RGBA8,
@@ -180,8 +180,8 @@ inline TextureDefinition RenderTargetTextureDefinition(owe::SceneRenderTarget rt
 inline TextureDefinition RenderTargetTextureDefinitionNoMip(owe::SceneRenderTarget rt) {
     const bool depth_sampled = rt.kind == owe::SceneRenderTargetKind::DepthSampled;
     return TextureDefinition {
-        .width  = i32(rt.PhysicalWidth()),
-        .height = i32(rt.PhysicalHeight()),
+        .width  = rt.PhysicalWidth(),
+        .height = rt.PhysicalHeight(),
         .usage  = depth_sampled ? TextureUsage::DepthAttachment | TextureUsage::Sampled
                                 : TextureUsage::Color,
         .format = depth_sampled ? owe::TextureFormat::D32F : owe::TextureFormat::RGBA8,
@@ -198,8 +198,8 @@ inline TextureDefinition MsaaTextureDefinition(owe::SceneRenderTarget rt,
 
 inline TextureDefinition DepthTextureDefinition(owe::SceneRenderTarget rt) {
     return TextureDefinition {
-        .width      = i32(rt.PhysicalWidth()),
-        .height     = i32(rt.PhysicalHeight()),
+        .width      = rt.PhysicalWidth(),
+        .height     = rt.PhysicalHeight(),
         .usage      = TextureUsage::Depth,
         .format     = owe::TextureFormat::D32F,
         .sample     = rt.sample,

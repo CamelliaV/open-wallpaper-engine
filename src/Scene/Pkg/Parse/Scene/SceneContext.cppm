@@ -39,8 +39,8 @@ struct SceneShaderEnvironment {
 };
 
 struct GeometryShaderLimits {
-    std::uint32_t max_output_vertices { 256 };
-    std::uint32_t max_total_output_components { 1024 };
+    u32 max_output_vertices { 256 };
+    u32 max_total_output_components { 1024 };
 };
 
 enum class GeometryStageRequirement
@@ -64,7 +64,7 @@ auto BuildMaterial(fs::VFS&, ShaderCache&, const SceneShaderEnvironment&, const 
     -> Result<MaterialBuild, MaterialBuildError>;
 auto ApplyImageColorBlend(wpscene::Material&, const wpscene::ImageObject&) -> Option<BlendMode>;
 auto NeutralColorUniforms(ShaderValueMap) -> ShaderValueMap;
-auto CountVisibleImageEffects(std::span<const wpscene::ImageEffect>) -> std::int32_t;
+auto CountVisibleImageEffects(std::span<const wpscene::ImageEffect>) -> i32;
 void ParseSpecTexName(std::string&, const wpscene::Material&, const ShaderInfo&, Scene&);
 auto IsLegacyAtmosphereShadowValue(const wpscene::Material&, std::string_view) -> bool;
 void RegisterMaterialBindings(Scene&, const std::shared_ptr<SceneMaterial>&,
@@ -82,8 +82,8 @@ void GenCardMesh(SceneMesh&, array<float, 2>, array<float, 2> = { 1.0f, 1.0f },
                  const Eigen::Vector3f& = Eigen::Vector3f::Zero());
 auto ReadDirectDrawQuad(const wpscene::Material&) -> Option<DirectDrawQuad>;
 void GenDirectDrawQuadMesh(SceneMesh&, float, const DirectDrawQuad&);
-void SetParticleMesh(SceneMesh&, uint32_t, bool);
-void SetRopeParticleMesh(SceneMesh&, const wpscene::Particle&, uint32_t, bool, bool);
+void SetParticleMesh(SceneMesh&, u32, bool);
+void SetRopeParticleMesh(SceneMesh&, const wpscene::Particle&, u32, bool, bool);
 
 struct SceneUniformConfigDraft {
     Arc<SceneNode>         node;
@@ -115,8 +115,8 @@ private:
 struct SceneParseContext {
     ParseSceneHandle                               scene;
     Option<Arc<ParticleRuntime>>                   particle_runtime;
-    std::int32_t                                   ortho_w { 0 };
-    std::int32_t                                   ortho_h { 0 };
+    i32                                            ortho_w { 0 };
+    i32                                            ortho_h { 0 };
     bool                                           orthographic_scene { false };
     wpscene::SceneVersion                          pkg_version { wpscene::kSceneVersionUnknown };
     fs::VFS*                                       vfs { nullptr };
@@ -152,7 +152,7 @@ struct SceneParseContext {
     Vec<ParticleTrailUniformConfigDraft> particle_trail_uniform_configs;
 
     struct NodeRef {
-        std::uint32_t                                  parent_id { 0 };
+        u32                                            parent_id { 0 };
         Option<Arc<SceneNode>>                         node;
         Option<Arc<Puppet>>                            puppet;
         String                                         attachment;
@@ -160,12 +160,12 @@ struct SceneParseContext {
         Option<Box<dyn<FnMut<void(Eigen::Vector3f)>>>> apply_attachment_offset;
         Vec<Arc<SceneNode>>                            ordered_before_nodes;
     };
-    HashMap<std::int32_t, NodeRef>       node_id_map;
-    HashMap<std::int32_t, std::uint32_t> object_parent_ids;
-    HashSet<std::int32_t>                solid_layer_ids;
-    Vec<std::int32_t>                    node_id_order;
-    HashMap<std::int32_t, std::uint64_t> script_initialization_orders;
-    HashMap<std::int32_t, Json>          initial_layer_configs;
+    HashMap<i32, NodeRef>       node_id_map;
+    HashMap<i32, u32>           object_parent_ids;
+    HashSet<i32>                solid_layer_ids;
+    Vec<i32>                    node_id_order;
+    HashMap<i32, std::uint64_t> script_initialization_orders;
+    HashMap<i32, Json>          initial_layer_configs;
 
     i32                             next_synthetic_object_id { -1 };
     Vec<owe::script::FieldScript*>  registered_asset_scripts;
@@ -178,19 +178,19 @@ struct SceneParseContext {
     HashMap<String, wpscene::ParticleObject> dynamic_particle_prototypes;
     wavsen::audio::SoundManager*             sound_manager { nullptr };
 
-    HashMap<std::int32_t, String> system_media_image_fallbacks;
-    HashSet<std::int32_t>         linked_source_ids;
-    HashSet<std::int32_t>         hidden_link_source_ids;
-    bool                          scene_has_scripts { false };
-    bool                          scene_layer_text_writes { false };
+    HashMap<i32, String> system_media_image_fallbacks;
+    HashSet<i32>         linked_source_ids;
+    HashSet<i32>         hidden_link_source_ids;
+    bool                 scene_has_scripts { false };
+    bool                 scene_layer_text_writes { false };
 
-    bool IsLinkedSource(std::int32_t id) const { return linked_source_ids.contains(id); }
+    bool IsLinkedSource(i32 id) const { return linked_source_ids.contains(i32(id)); }
     auto NextSyntheticObjectId() -> i32;
 };
 
 void SetUniformConfig(SceneParseContext&, const Arc<SceneNode>&, UniformNodeConfigDraft);
 auto FindUniformConfig(const SceneParseContext&, const SceneNode&) -> const UniformNodeConfigDraft*;
-void RegisterNodeRef(SceneParseContext&, std::int32_t, SceneParseContext::NodeRef);
+void RegisterNodeRef(SceneParseContext&, i32, SceneParseContext::NodeRef);
 
 bool SceneWritesLayerText(slice<SceneObjectVar>);
 bool SceneHasScripts(slice<SceneObjectVar>);
@@ -198,7 +198,7 @@ auto LoadJsonFile(fs::VFS&, const std::string&) -> Option<Json>;
 bool AppendLayerCompositePassthroughEffect(fs::VFS&, wpscene::ImageObject&);
 auto MakePuppetLayer(Arc<Puppet>, std::span<PuppetLayer::AnimationLayer>) -> Arc<PuppetLayer>;
 void RegisterPuppetLayer(SceneParseContext&, SceneNode*, Arc<PuppetLayer>);
-void MarkHiddenLinkSource(SceneParseContext&, std::int32_t);
+void MarkHiddenLinkSource(SceneParseContext&, i32);
 auto ToSceneUserVisibilityBinding(const wpscene::VisibleUserBinding&) -> SceneUserVisibilityBinding;
 auto Texture0UvScale(const SceneMaterial&, bool = false) -> array<float, 2>;
 auto ParticleTextureRatio(const SceneMaterial&) -> float;
@@ -235,8 +235,8 @@ struct ParticleObjectParseServices {
     GeometryShaderLimits   geometry_shader_limits;
     ShaderValueMap         global_base_uniforms;
     Arc<ParticleRuntime>   particle_runtime;
-    std::int32_t           ortho_w { 0 };
-    std::int32_t           ortho_h { 0 };
+    i32                    ortho_w { 0 };
+    i32                    ortho_h { 0 };
     SceneParseContext*     construction_context { nullptr };
 };
 
@@ -263,9 +263,9 @@ void ParseModelObj(SceneParseContext&, wpscene::ModelObject&);
 void ParseTextObj(SceneParseContext&, wpscene::TextObject&);
 
 struct ExpandedSceneObjects {
-    Vec<SceneObjectVar>   objects;
-    HashSet<std::int32_t> linked_source_ids;
-    HashSet<std::int32_t> hidden_link_source_ids;
+    Vec<SceneObjectVar> objects;
+    HashSet<i32>        linked_source_ids;
+    HashSet<i32>        hidden_link_source_ids;
 };
 
 auto ExpandSceneObjects(ref<wpscene::SceneDocument>, mut_ref<fs::VFS>, Option<ref<rstd::json::Map>>)
@@ -291,7 +291,7 @@ struct ProcessOpts {
 };
 
 SceneParseContext BuildContext(fs::VFS&, ref<str> scene_id, const wpscene::SceneMetadata&,
-                               array<std::int32_t, 2>       ortho_extent,
+                               array<i32, 2>                ortho_extent,
                                Option<ref<rstd::json::Map>> user_properties    = None(),
                                Option<rstd::path::PathBuf>  shader_cache_dir   = None(),
                                GeometryShaderLimits         geometry_limits    = {},

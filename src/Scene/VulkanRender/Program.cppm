@@ -62,13 +62,13 @@ struct PreparedPassDiagnostic {
     Option<rg::PassNode::Type>                pass_type;
     Option<RenderItemId>                      render_item;
     PassInvalidationFlags                     invalidation_flags { PassInvalidationNone };
-    std::optional<PipelineCacheKey>           pipeline_cache_key;
+    Option<PipelineCacheKey>                  pipeline_cache_key;
     bool                                      pipeline_cache_hit { false };
     u64                                       pipeline_cache_observed_count { 0 };
-    std::optional<RenderPassCacheKey>         render_pass_cache_key;
+    Option<RenderPassCacheKey>                render_pass_cache_key;
     bool                                      render_pass_cache_hit { false };
     u64                                       render_pass_cache_observed_count { 0 };
-    std::optional<FramebufferCacheKey>        framebuffer_cache_key;
+    Option<FramebufferCacheKey>               framebuffer_cache_key;
     bool                                      framebuffer_cache_hit { false };
     u64                                       framebuffer_cache_observed_count { 0 };
     std::vector<std::string>                  release_textures;
@@ -307,20 +307,22 @@ struct RenderProgram {
                 release_textures.push_back(rstd::cppstd::to_string(texture.as_str()));
             }
             out.push_back(PreparedPassDiagnostic {
-                .frame_pass                    = record.kind == PreparedPassKind::Frame,
-                .graph_node                    = record.graph_node,
-                .pass_name                     = rstd::cppstd::to_string(record.pass_name.as_str()),
-                .pass_type                     = record.pass_type,
-                .render_item                   = render_item,
-                .invalidation_flags            = record.invalidation_flags,
-                .pipeline_cache_key            = pass ? pass->pipelineCacheKey() : std::nullopt,
-                .pipeline_cache_hit            = pass && pass->pipelineCacheHit(),
+                .frame_pass         = record.kind == PreparedPassKind::Frame,
+                .graph_node         = record.graph_node,
+                .pass_name          = rstd::cppstd::to_string(record.pass_name.as_str()),
+                .pass_type          = record.pass_type,
+                .render_item        = render_item,
+                .invalidation_flags = record.invalidation_flags,
+                .pipeline_cache_key = pass ? pass->pipelineCacheKey() : None<PipelineCacheKey>(),
+                .pipeline_cache_hit = pass && pass->pipelineCacheHit(),
                 .pipeline_cache_observed_count = pass ? pass->pipelineCacheObservedCount() : u64(),
-                .render_pass_cache_key         = pass ? pass->renderPassCacheKey() : std::nullopt,
-                .render_pass_cache_hit         = pass && pass->renderPassCacheHit(),
+                .render_pass_cache_key =
+                    pass ? pass->renderPassCacheKey() : None<RenderPassCacheKey>(),
+                .render_pass_cache_hit = pass && pass->renderPassCacheHit(),
                 .render_pass_cache_observed_count =
                     pass ? pass->renderPassCacheObservedCount() : u64(),
-                .framebuffer_cache_key = pass ? pass->framebufferCacheKey() : std::nullopt,
+                .framebuffer_cache_key =
+                    pass ? pass->framebufferCacheKey() : None<FramebufferCacheKey>(),
                 .framebuffer_cache_hit = pass && pass->framebufferCacheHit(),
                 .framebuffer_cache_observed_count =
                     pass ? pass->framebufferCacheObservedCount() : u64(),
@@ -404,8 +406,9 @@ struct RenderProgram {
             if (target.is_none()) continue;
             auto& rt = **target;
             if (rt.bind.enable && rt.bind.screen) {
-                rt.width  = static_cast<std::int32_t>(rt.bind.scale * extent.width);
-                rt.height = static_cast<std::int32_t>(rt.bind.scale * extent.height);
+                rt.width = rstd::as_cast<i32>(rt.bind.scale * rstd::as_cast<double>(extent.width));
+                rt.height =
+                    rstd::as_cast<i32>(rt.bind.scale * rstd::as_cast<double>(extent.height));
             }
         }
         for (usize index {}; index < names.len(); ++index) {
@@ -418,25 +421,26 @@ struct RenderProgram {
                 rstd_error("unknonw render target bind: {}", rt.bind.name);
                 continue;
             }
-            rt.width  = static_cast<std::int32_t>(rt.bind.scale * (**bind_rt).width);
-            rt.height = static_cast<std::int32_t>(rt.bind.scale * (**bind_rt).height);
+            rt.width = rstd::as_cast<i32>(rt.bind.scale * rstd::as_cast<double>((**bind_rt).width));
+            rt.height =
+                rstd::as_cast<i32>(rt.bind.scale * rstd::as_cast<double>((**bind_rt).height));
         }
         for (usize index {}; index < names.len(); ++index) {
             auto target = scene.RenderTargetMut(names[index].as_str());
             if (target.is_none()) continue;
             auto& rt = **target;
-            if (! names[index].is_empty() && (rt.width <= 0 || rt.height <= 0)) {
+            if (! names[index].is_empty() && (rt.width <= i32() || rt.height <= i32())) {
                 rstd_error("wrong size for render target: {}", names[index].as_str());
             }
 
-            const auto physical_width  = static_cast<std::int32_t>(std::clamp<std::uint32_t>(
-                static_cast<std::uint32_t>(std::max(rt.width, std::int32_t(1))),
-                std::uint32_t(1),
-                max_framebuffer_extent.width));
-            const auto physical_height = static_cast<std::int32_t>(std::clamp<std::uint32_t>(
-                static_cast<std::uint32_t>(std::max(rt.height, std::int32_t(1))),
-                std::uint32_t(1),
-                max_framebuffer_extent.height));
+            const auto physical_width =
+                std::clamp(std::max(rt.width, i32(1)),
+                           i32(1),
+                           rstd::as_cast<i32>(max_framebuffer_extent.width));
+            const auto physical_height =
+                std::clamp(std::max(rt.height, i32(1)),
+                           i32(1),
+                           rstd::as_cast<i32>(max_framebuffer_extent.height));
             const bool physical_size_changed =
                 rt.physical_width != physical_width || rt.physical_height != physical_height;
             rt.physical_width  = physical_width;
@@ -452,10 +456,11 @@ struct RenderProgram {
             }
 
             if (rt.has_mipmap) {
-                rt.mipmap_level = std::max(3u,
-                                           static_cast<unsigned>(std::floor(std::log2(
-                                               std::min(rt.physical_width, rt.physical_height))))) -
-                                  2u;
+                rt.mipmap_level =
+                    std::max(3u,
+                             static_cast<unsigned>(std::floor(std::log2(rstd::as_cast<double>(
+                                 std::min(rt.physical_width, rt.physical_height)))))) -
+                    2u;
             }
         }
         if (msaa_samples != VK_SAMPLE_COUNT_1_BIT) {

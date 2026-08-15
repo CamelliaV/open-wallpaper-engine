@@ -37,8 +37,8 @@ void BuildBloomPostProcess(SceneParseContext& context, fs::VFS& vfs,
 
     auto declare_rt = [&](std::string name, float inv_scale) {
         SceneRenderTarget rt {};
-        rt.width       = 2;
-        rt.height      = 2;
+        rt.width       = i32(2);
+        rt.height      = i32(2);
         rt.allowReuse  = true;
         rt.bind.enable = true;
         rt.bind.screen = true;
@@ -144,7 +144,7 @@ void BuildBloomPostProcess(SceneParseContext& context, fs::VFS& vfs,
 
         if (! add_pass(
                 "materials/util/hdr_downsample_bloom.json",
-                { { "previous", 0 } },
+                { { "previous", i32() } },
                 "_rt_bloom_mip1",
                 [&](wpscene::Material& m) {
                     m.constantshadervalues["bloomstrength"] = { g.bloomhdrstrength };
@@ -166,7 +166,7 @@ void BuildBloomPostProcess(SceneParseContext& context, fs::VFS& vfs,
             return;
 
         if (! add_pass("materials/util/hdr_downsample.json",
-                       { { "_rt_bloom_mip1", 0 } },
+                       { { "_rt_bloom_mip1", i32() } },
                        "_rt_bloom_mip2",
                        nullptr,
                        [&](ShaderInfo& info) {
@@ -176,7 +176,7 @@ void BuildBloomPostProcess(SceneParseContext& context, fs::VFS& vfs,
 
         if (! add_pass(
                 "materials/util/hdr_upsample.json",
-                { { "_rt_bloom_mip2", 0 } },
+                { { "_rt_bloom_mip2", i32() } },
                 "_rt_bloom_mip1",
                 [&](wpscene::Material& m) {
                     m.constantshadervalues["scatter"] = { scatter };
@@ -187,7 +187,7 @@ void BuildBloomPostProcess(SceneParseContext& context, fs::VFS& vfs,
             return;
 
         if (! add_pass("materials/util/combine_hdr_upsample_linear.json",
-                       { { "previous", 0 }, { "_rt_bloom_mip1", 1 } },
+                       { { "previous", i32() }, { "_rt_bloom_mip1", i32(1) } },
                        "_rt_bloom_combine",
                        nullptr,
                        [&](ShaderInfo& info) {
@@ -196,7 +196,7 @@ void BuildBloomPostProcess(SceneParseContext& context, fs::VFS& vfs,
             return;
     } else {
         if (! add_pass("materials/util/downsample_quarter_bloom.json",
-                       { { "previous", 0 } },
+                       { { "previous", i32() } },
                        "_rt_bloom_mip1",
                        [&](wpscene::Material& m) {
                            m.constantshadervalues["bloomstrength"]  = { g.bloomstrength };
@@ -210,16 +210,17 @@ void BuildBloomPostProcess(SceneParseContext& context, fs::VFS& vfs,
             return;
 
         if (! add_pass("materials/util/downsample_eighth_blur_v.json",
-                       { { "_rt_bloom_mip1", 0 } },
+                       { { "_rt_bloom_mip1", i32() } },
                        "_rt_bloom_mip2"))
             return;
 
-        if (! add_pass(
-                "materials/util/blur_h_bloom.json", { { "_rt_bloom_mip2", 0 } }, "_rt_bloom_mip1"))
+        if (! add_pass("materials/util/blur_h_bloom.json",
+                       { { "_rt_bloom_mip2", i32() } },
+                       "_rt_bloom_mip1"))
             return;
 
         if (! add_pass("materials/util/combine_ldr.json",
-                       { { "previous", 0 }, { "_rt_bloom_mip1", 1 } },
+                       { { "previous", i32() }, { "_rt_bloom_mip1", i32(1) } },
                        "_rt_bloom_combine"))
             return;
     }

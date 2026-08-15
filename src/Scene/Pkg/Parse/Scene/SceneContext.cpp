@@ -32,12 +32,11 @@ auto owe::SceneParseContext::NextSyntheticObjectId() -> i32 {
     return id;
 }
 
-void owe::RegisterNodeRef(SceneParseContext& context, std::int32_t id,
-                          SceneParseContext::NodeRef node) {
+void owe::RegisterNodeRef(SceneParseContext& context, i32 id, SceneParseContext::NodeRef node) {
     if (node.node.is_some()) {
         context.scene->RegisterNode(**node.node,
-                                    id >= 0 ? Some(WallpaperLayerId { .value = i32(id) })
-                                            : None<WallpaperLayerId>());
+                                    id >= i32() ? Some(WallpaperLayerId { .value = id })
+                                                : None<WallpaperLayerId>());
     }
     (void)context.node_id_map.insert(id, rstd::move(node));
 }

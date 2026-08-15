@@ -28,6 +28,12 @@ auto IntoJson(T value) -> Json {
         return rstd::into<Json>(static_cast<rstd::f64>(value));
 }
 
+template<typename T>
+    requires requires(T value) { value.to_primitive(); }
+auto IntoJson(T value) -> Json {
+    return IntoJson(value.to_primitive());
+}
+
 bool SetJson(Json& object, std::string_view key, Json value) {
     if (object.is_null()) object = MakeObject();
     auto values = object.as_object_mut();

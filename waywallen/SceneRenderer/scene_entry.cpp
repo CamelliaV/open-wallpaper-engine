@@ -849,8 +849,8 @@ int run(int argc, char** argv) {
             if (opts.initial_scene_document &&
                 opts.initial_scene_document->metadata.canvas_extent) {
                 const auto extent = *opts.initial_scene_document->metadata.canvas_extent;
-                opts.width        = extent[0];
-                opts.height       = extent[1];
+                opts.width        = extent[0].to_primitive();
+                opts.height       = extent[1].to_primitive();
                 rstd_info(
                     "waywallen-wescene-renderer: scene canvas {}x{}", opts.width, opts.height);
             } else {

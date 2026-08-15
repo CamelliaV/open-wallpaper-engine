@@ -1469,7 +1469,7 @@ TEST(ScriptLayerLookup, EffectIndexAndMaterialWritesUseSceneMaterialOwner) {
     owe::SceneShaderVariantDesc variant;
     variant.uniform_aliases["color"]       = "g_TintColor";
     variant.uniform_aliases["channelMask"] = "g_ChannelMask";
-    material.customShader.variant          = std::move(variant);
+    material.customShader.variant          = Some(rstd::move(variant));
     material.customShader.constValues["g_TintColor"] =
         owe::ShaderValue(rstd::array<float, 3> { 1.0f, 0.0f, 0.0f });
     material.customShader.constValues["g_ChannelMask"] =

@@ -110,7 +110,7 @@ void ResolveRegisteredAsset(SceneParseContext& context, ref<str> asset) {
         if (size.is_none()) return;
 
         wpscene::ImageObject image;
-        image.id = context.NextSyntheticObjectId().to_primitive();
+        image.id = context.NextSyntheticObjectId();
         if (! image.FromAsset(asset, *size, *context.vfs, context.pkg_version)) return;
         ParseImageObj(context, image);
         auto parsed = context.node_id_map.get(image.id);
@@ -127,7 +127,7 @@ void ResolveRegisteredAsset(SceneParseContext& context, ref<str> asset) {
     } else if (AssetEndsWith(asset, ".mdl"_str)) {
         if (context.dynamic_model_prototypes.contains_key(asset)) return;
         wpscene::ModelObject model;
-        model.id    = context.NextSyntheticObjectId().to_primitive();
+        model.id    = context.NextSyntheticObjectId();
         model.name  = rstd::cppstd::to_string(asset);
         model.model = model.name;
         ParseModelObj(context, model);
@@ -190,12 +190,12 @@ Option<Arc<SceneNode>> InstantiateResolvedAsset(SceneParseContext& context, Scen
         auto prototype = context.dynamic_particle_prototypes.get(asset);
         if (prototype.is_none()) return None();
         auto particle    = (**prototype).Clone();
-        particle.id      = context.NextSyntheticObjectId().to_primitive();
+        particle.id      = context.NextSyntheticObjectId();
         particle.name    = rstd::cppstd::to_string(asset);
         particle.origin  = { 0.0f, 0.0f, 0.0f };
         particle.scale   = { 1.0f, 1.0f, 1.0f };
         particle.angles  = { 0.0f, 0.0f, 0.0f };
-        particle.parent  = 0;
+        particle.parent  = u32();
         particle.visible = true;
         ParseParticleObj(context, particle);
         auto parsed = context.node_id_map.get(particle.id);
@@ -207,7 +207,7 @@ Option<Arc<SceneNode>> InstantiateResolvedAsset(SceneParseContext& context, Scen
     } else if (AssetEndsWith(asset, ".ogg"_str)) {
         if (! context.sound_manager) return None();
         wpscene::SoundObject sound;
-        sound.id          = context.NextSyntheticObjectId().to_primitive();
+        sound.id          = context.NextSyntheticObjectId();
         sound.name        = rstd::cppstd::to_string(asset);
         sound.startsilent = false;
         sound.sound.push_back(sound.name);
@@ -230,8 +230,7 @@ Option<Arc<SceneNode>> InstantiateRegisteredAsset(SceneParseContext& context, Sc
     return InstantiateResolvedAsset(context, owner, resolved->as_str());
 }
 
-Option<Arc<SceneNode>> AttachCreatedLayer(SceneParseContext& context, SceneNode* owner,
-                                          std::int32_t id) {
+Option<Arc<SceneNode>> AttachCreatedLayer(SceneParseContext& context, SceneNode* owner, i32 id) {
     auto parsed = context.node_id_map.get_mut(id);
     if (parsed.is_none() || (**parsed).node.is_none()) return None();
 
@@ -247,13 +246,13 @@ Option<Arc<SceneNode>> AttachCreatedLayer(SceneParseContext& context, SceneNode*
 
 Option<Arc<SceneNode>> InstantiateLayerConfiguration(SceneParseContext& context, SceneNode* owner,
                                                      const Json& config) {
-    const std::int32_t id = context.NextSyntheticObjectId().to_primitive();
+    const i32 id = context.NextSyntheticObjectId();
 
     if (config.get("text"_str).is_some()) {
         wpscene::TextObject text;
         if (! text.FromJson(config, *context.vfs, context.pkg_version)) return None();
         text.id      = id;
-        text.parent  = 0;
+        text.parent  = u32();
         text.visible = true;
         ParseTextObj(context, text);
         return AttachCreatedLayer(context, owner, id);
@@ -263,7 +262,7 @@ Option<Arc<SceneNode>> InstantiateLayerConfiguration(SceneParseContext& context,
         wpscene::ImageObject image;
         if (! image.FromJson(config, *context.vfs, context.pkg_version)) return None();
         image.id      = id;
-        image.parent  = 0;
+        image.parent  = u32();
         image.visible = true;
         ParseImageObj(context, image);
         return AttachCreatedLayer(context, owner, id);
@@ -286,7 +285,7 @@ Option<Arc<SceneNode>> InstantiateLayerConfiguration(SceneParseContext& context,
     image.name    = "__createLayer";
     image.size    = { size[usize()], size[usize(1)] };
     image.solid   = true;
-    image.parent  = 0;
+    image.parent  = u32();
     image.visible = true;
     owe::GetJsonValue(config, "origin", image.origin, false);
     owe::GetJsonValue(config, "angles", image.angles, false);
@@ -297,7 +296,7 @@ Option<Arc<SceneNode>> InstantiateLayerConfiguration(SceneParseContext& context,
     owe::GetJsonValue(config, "alignment", image.alignment, false);
     owe::GetJsonValue(config, "perspective", image.perspective, false);
     image.alpha = wpscene::NormalizeLayerAlpha(image.alpha);
-    context.solid_layer_ids.insert(id);
+    context.solid_layer_ids.insert(i32(id));
     ParseImageObj(context, image);
     return AttachCreatedLayer(context, owner, id);
 }

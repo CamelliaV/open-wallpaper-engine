@@ -58,10 +58,10 @@ private:
     owe::FrameSurfaceCompletionResult
     AbortRenderTarget(owe::FrameSurfaceIdentity identity) override;
 
-    BridgeProducerCore                m_core;
-    std::optional<BridgeSlotIdentity> m_pending_identity;
-    std::atomic<bool>                 m_frame_request_wake { false };
-    bool                              m_skip_acquire_in_poll { false };
+    BridgeProducerCore               m_core;
+    rstd::Option<BridgeSlotIdentity> m_pending_identity;
+    std::atomic<bool>                m_frame_request_wake { false };
+    bool                             m_skip_acquire_in_poll { false };
 };
 
 } // namespace ww_wescene

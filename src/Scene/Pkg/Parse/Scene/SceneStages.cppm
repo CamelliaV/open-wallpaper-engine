@@ -42,7 +42,6 @@ Vec<SceneObjectVar> ExpandObjects(ref<wpscene::SceneDocument>, mut_ref<fs::VFS>,
                                   Option<ref<rstd::json::Map>> user_props = None());
 
 // Resolves the effective width/height without mutating the parsed metadata.
-array<std::int32_t, 2> ResolveOrthoProjectionExtent(const wpscene::SceneMetadata&,
-                                                    slice<SceneObjectVar>);
+array<i32, 2> ResolveOrthoProjectionExtent(const wpscene::SceneMetadata&, slice<SceneObjectVar>);
 
 } // namespace owe

@@ -25,12 +25,12 @@ std::string LowerAscii(std::string s) {
 
 } // namespace
 
-std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop_dir) {
+rstd::Option<WebManifest> LoadWebManifest(const std::filesystem::path& workshop_dir) {
     auto          pj_path = workshop_dir / "project.json";
     std::ifstream is(pj_path);
     if (! is) {
         std::fprintf(stderr, "weweb: cannot open %s\n", pj_path.c_str());
-        return std::nullopt;
+        return rstd::None();
     }
 
     // Invalid project.json is input data; keep parse failure on the
@@ -44,14 +44,14 @@ std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop
                      pj_path.c_str(),
                      error.line().to_primitive(),
                      error.column().to_primitive());
-        return std::nullopt;
+        return rstd::None();
     }
     auto root = parsed.unwrap();
 
     auto type = root.get("type"_str);
     if (type.is_none() || (*type)->as_str().is_none()) {
         std::fprintf(stderr, "weweb: %s is missing a string \"type\" field\n", pj_path.c_str());
-        return std::nullopt;
+        return rstd::None();
     }
     // WE corpus has both "web" and "Web" for the type field; fold case.
     auto normalized_type = LowerAscii(rstd::cppstd::to_string(*(*type)->as_str()));
@@ -60,7 +60,7 @@ std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop
                      "weweb: %s has type=\"%s\", expected \"web\"\n",
                      pj_path.c_str(),
                      normalized_type.c_str());
-        return std::nullopt;
+        return rstd::None();
     }
 
     WebManifest m;
@@ -77,14 +77,14 @@ std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop
 
     if (auto preview = root.get("preview"_str); preview.is_some()) {
         auto string = (*preview)->as_str();
-        if (string.is_some()) m.preview = rstd::cppstd::to_string(*string);
+        if (string.is_some()) m.preview = rstd::Some(rstd::cppstd::to_string(*string));
     }
 
     if (auto general = root.get("general"_str); general.is_some())
         if (auto properties = (*general)->get("properties"_str); properties.is_some())
             m.user_props = (*properties)->clone();
 
-    return m;
+    return rstd::Some(rstd::move(m));
 }
 
 } // namespace weweb

@@ -40,8 +40,8 @@ struct DeclMatch {
 
 // Try to match `[ws]<storage_kw> <type> <name>[opt-array][ws];` on the line
 // starting at `line_start`. Anchored — leading non-whitespace fails it.
-inline std::optional<DeclMatch> TryParseDeclLine(ref<str> src, usize line_start,
-                                                 std::initializer_list<ref<str>> storage_kws) {
+inline Option<DeclMatch> TryParseDeclLine(ref<str> src, usize line_start,
+                                          std::initializer_list<ref<str>> storage_kws) {
     shader_lex::Cursor source(src, line_start);
     auto               line_end = source.LineEnd();
     shader_lex::Cursor c(*src.get(line_start, line_end));
@@ -56,14 +56,14 @@ inline std::optional<DeclMatch> TryParseDeclLine(ref<str> src, usize line_start,
         }
         c.Restore(s);
     }
-    if (kw.is_empty()) return std::nullopt;
+    if (kw.is_empty()) return None();
     c.SkipHSpace();
     auto tn = shader_lex::ReadTypeName(c);
-    if (! tn) return std::nullopt;
+    if (! tn) return None();
     c.SkipHSpace();
     auto array = c.ReadArraySuffix();
     c.SkipHSpace();
-    if (! c.MatchChar(';')) return std::nullopt;
+    if (! c.MatchChar(';')) return None();
 
     DeclMatch m;
     m.start       = line_start.to_primitive();
@@ -73,7 +73,7 @@ inline std::optional<DeclMatch> TryParseDeclLine(ref<str> src, usize line_start,
     m.type        = tn->type;
     m.name        = tn->name;
     m.array       = array.unwrap_or(ref<str> {});
-    return m;
+    return Some(m);
 }
 
 // Iterate every line; yield one DeclMatch per matching line. `keep_prefix`
@@ -413,15 +413,15 @@ struct ShaderBracketExpr {
     ref<str> expr;
 };
 
-inline std::optional<ShaderBracketExpr> ReadBracketExpr(shader_lex::Lexer& lx, ref<str> src) {
+inline Option<ShaderBracketExpr> ReadBracketExpr(shader_lex::Lexer& lx, ref<str> src) {
     auto open = NextShaderToken(lx);
-    if (! PunctIs(open, '[')) return std::nullopt;
+    if (! PunctIs(open, '[')) return None();
 
     int         depth      = 1;
     std::size_t expr_start = (open.offset + open.text.size()).to_primitive();
     for (;;) {
         auto t = lx.Next();
-        if (t.kind == shader_lex::TokenKind::Eof) return std::nullopt;
+        if (t.kind == shader_lex::TokenKind::Eof) return None();
         if (! PunctIs(t, '[') && ! PunctIs(t, ']')) continue;
 
         if (PunctIs(t, '[')) {
@@ -431,10 +431,10 @@ inline std::optional<ShaderBracketExpr> ReadBracketExpr(shader_lex::Lexer& lx, r
 
         --depth;
         if (depth == 0) {
-            return ShaderBracketExpr {
+            return Some(ShaderBracketExpr {
                 .close_end = t.offset + t.text.size(),
                 .expr      = *src.get(usize(expr_start), t.offset),
-            };
+            });
         }
     }
 }
@@ -492,9 +492,9 @@ inline String NormalizePackedAudioSpectrumAccess(ref<str> src) {
         if (name.kind == shader_lex::TokenKind::Eof) break;
         if (name.kind != shader_lex::TokenKind::Ident || ! IsAudioSpectrumName(name.text)) continue;
 
-        auto save      = lx.Save();
-        auto group     = ReadBracketExpr(lx, src);
-        auto component = group ? ReadBracketExpr(lx, src) : std::nullopt;
+        auto                      save      = lx.Save();
+        auto                      group     = ReadBracketExpr(lx, src);
+        Option<ShaderBracketExpr> component = group.is_some() ? ReadBracketExpr(lx, src) : None();
         if (! group || ! component) {
             lx.Restore(save);
             continue;
@@ -1048,18 +1048,18 @@ inline std::string QualifyGlobalVariablesForHlsl(const std::string& src) {
     return out;
 }
 
-inline std::optional<IODecl> ParseIODecl(const std::string& line) {
+inline Option<IODecl> ParseIODecl(const std::string& line) {
     // Skip leading newline / CR that the capture loops preserved as an anchor.
     std::size_t start = 0;
     while (start < line.size() && shader_lex::IsVSpace(line[start])) ++start;
     auto m = TryParseDeclLine(rstd::cppstd::as_str(line).unwrap(),
                               usize(start),
                               { "attribute"_str, "varying"_str, "in"_str, "out"_str });
-    if (! m) return std::nullopt;
-    return IODecl { StorageCharFor(rstd::cppstd::to_string(m->storage)),
-                    rstd::cppstd::to_string(m->type),
-                    rstd::cppstd::to_string(m->name),
-                    rstd::cppstd::to_string(m->array) };
+    if (m.is_none()) return None();
+    return Some(IODecl { StorageCharFor(rstd::cppstd::to_string(m->storage)),
+                         rstd::cppstd::to_string(m->type),
+                         rstd::cppstd::to_string(m->name),
+                         rstd::cppstd::to_string(m->array) });
 }
 
 enum class IODeclPrecedence
@@ -1952,19 +1952,19 @@ int HexDigit(char value) {
     return -1;
 }
 
-std::optional<ShaderCacheDigest> DecodeShaderCacheDigest(std::string_view value) {
-    if (value.size() != 40) return std::nullopt;
+Option<ShaderCacheDigest> DecodeShaderCacheDigest(std::string_view value) {
+    if (value.size() != 40) return None();
     ShaderCacheDigest digest {};
     for (std::size_t i = 0; i < digest.size(); ++i) {
         const int hi = HexDigit(value[i * 2]);
         const int lo = HexDigit(value[i * 2 + 1]);
-        if (hi < 0 || lo < 0) return std::nullopt;
+        if (hi < 0 || lo < 0) return None();
         digest[i] = static_cast<std::uint8_t>((hi << 4) | lo);
     }
-    return digest;
+    return Some(digest);
 }
 
-std::optional<ShaderCacheDigest> HashShaderCacheBytes(std::span<const std::uint8_t> bytes) {
+Option<ShaderCacheDigest> HashShaderCacheBytes(std::span<const std::uint8_t> bytes) {
     return DecodeShaderCacheDigest(utils::genSha1(
         std::span<const char>(reinterpret_cast<const char*>(bytes.data()), bytes.size())));
 }
@@ -1976,30 +1976,30 @@ struct ShaderCacheIdentity {
     std::string       cache_key_hex;
 };
 
-std::optional<ShaderCacheIdentity> MakeShaderCacheIdentity(std::span<const ShaderUnit> units,
-                                                           const Combos&               combos) {
+Option<ShaderCacheIdentity> MakeShaderCacheIdentity(std::span<const ShaderUnit> units,
+                                                    const Combos&               combos) {
     if (units.size() > kMaxShaderCacheStages || combos.size() > kMaxShaderCacheMapEntries) {
-        return std::nullopt;
+        return None();
     }
 
     ShaderCacheByteWriter source;
     source.U32(static_cast<std::uint32_t>(units.size()));
     for (const auto& unit : units) {
         source.U32(static_cast<std::uint32_t>(unit.stage));
-        if (! source.String(unit.src)) return std::nullopt;
+        if (! source.String(unit.src)) return None();
     }
 
     ShaderCacheByteWriter combo;
     combo.U32(static_cast<std::uint32_t>(combos.size()));
     for (const auto& [name, value] : combos) {
-        if (! combo.String(name) || ! combo.String(value)) return std::nullopt;
+        if (! combo.String(name) || ! combo.String(value)) return None();
     }
 
     auto source_digest = HashShaderCacheBytes(
         std::span<const std::uint8_t>(source.bytes().data(), source.bytes().size()));
     auto combo_digest = HashShaderCacheBytes(
         std::span<const std::uint8_t>(combo.bytes().data(), combo.bytes().size()));
-    if (! source_digest || ! combo_digest) return std::nullopt;
+    if (source_digest.is_none() || combo_digest.is_none()) return None();
 
     ShaderCacheByteWriter key;
     key.String("owe.shader-cache.v3");
@@ -2013,13 +2013,13 @@ std::optional<ShaderCacheIdentity> MakeShaderCacheIdentity(std::span<const Shade
     const std::string key_hex    = utils::genSha1(std::span<const char>(
         reinterpret_cast<const char*>(key.bytes().data()), key.bytes().size()));
     auto              key_digest = DecodeShaderCacheDigest(key_hex);
-    if (! key_digest) return std::nullopt;
-    return ShaderCacheIdentity {
+    if (key_digest.is_none()) return None();
+    return Some(ShaderCacheIdentity {
         .cache_key     = *key_digest,
         .source        = *source_digest,
         .combos        = *combo_digest,
         .cache_key_hex = key_hex,
-    };
+    });
 }
 
 inline rstd::path::PathBuf GetCachePath(ref<rstd::path::Path> cache_dir, std::string_view scene_id,
@@ -2094,18 +2094,18 @@ struct ShaderCacheReadResult {
 
 class ShaderCacheArtifactCodec {
 public:
-    static std::optional<std::vector<std::uint8_t>> Encode(const ShaderCacheIdentity&  identity,
-                                                           std::span<const ShaderUnit> units,
-                                                           std::span<const ShaderCode> codes) {
+    static Option<std::vector<std::uint8_t>> Encode(const ShaderCacheIdentity&  identity,
+                                                    std::span<const ShaderUnit> units,
+                                                    std::span<const ShaderCode> codes) {
         if (units.empty() || units.size() != codes.size() || units.size() > kMaxShaderCacheStages) {
-            return std::nullopt;
+            return None();
         }
 
         ShaderCacheByteWriter payload;
         for (std::size_t i = 0; i < units.size(); ++i) {
             if (static_cast<std::uint32_t>(units[i].stage) >
                 static_cast<std::uint32_t>(ShaderType::FRAGMENT)) {
-                return std::nullopt;
+                return None();
             }
             ShaderCacheByteWriter record;
             record.U32(static_cast<std::uint32_t>(units[i].stage));
@@ -2115,7 +2115,7 @@ public:
                 ! WriteCacheMap(record, units[i].preprocess_info.uniforms) ||
                 ! WriteCacheSlots(record, units[i].preprocess_info.active_tex_slots) ||
                 codes[i].size() > std::numeric_limits<std::uint32_t>::max() / 4) {
-                return std::nullopt;
+                return None();
             }
 
             record.U32(static_cast<std::uint32_t>(codes[i].size() * 4));
@@ -2123,19 +2123,19 @@ public:
             if (record.bytes().size() > kMaxShaderCachePayloadSize - sizeof(std::uint32_t) ||
                 payload.bytes().size() >
                     kMaxShaderCachePayloadSize - sizeof(std::uint32_t) - record.bytes().size()) {
-                return std::nullopt;
+                return None();
             }
             payload.U32(static_cast<std::uint32_t>(record.bytes().size()));
             if (! payload.Bytes(
                     std::span<const std::uint8_t>(record.bytes().data(), record.bytes().size()))) {
-                return std::nullopt;
+                return None();
             }
         }
-        if (payload.bytes().size() > kMaxShaderCachePayloadSize) return std::nullopt;
+        if (payload.bytes().size() > kMaxShaderCachePayloadSize) return None();
 
         auto payload_digest = HashShaderCacheBytes(
             std::span<const std::uint8_t>(payload.bytes().data(), payload.bytes().size()));
-        if (! payload_digest) return std::nullopt;
+        if (payload_digest.is_none()) return None();
 
         ShaderCacheByteWriter artifact;
         artifact.Bytes(
@@ -2157,9 +2157,9 @@ public:
         if (artifact.bytes().size() != kShaderCacheHeaderSize ||
             ! artifact.Bytes(
                 std::span<const std::uint8_t>(payload.bytes().data(), payload.bytes().size()))) {
-            return std::nullopt;
+            return None();
         }
-        return artifact.Take();
+        return Some(artifact.Take());
     }
 
     static ShaderCacheReadResult Decode(const ShaderCacheIdentity&    identity,
@@ -2724,8 +2724,8 @@ bool ShaderParser::CompileToSpv(std::string_view scene_id, std::span<ShaderUnit>
         cache->m_compile_bytes += bytes;
     };
 
-    Option<rstd::path::PathBuf>        cache_file_path;
-    std::optional<ShaderCacheIdentity> cache_identity;
+    Option<rstd::path::PathBuf> cache_file_path;
+    Option<ShaderCacheIdentity> cache_identity;
     if (cache != nullptr) {
         cache_identity = MakeShaderCacheIdentity(units, shader_info->combos);
         if (cache_identity) {
@@ -3254,7 +3254,7 @@ CompileMaterialShaderResult ShaderParser::CompileMaterialShader(const Json&     
     // Combos: material's int combos -> string, then override wins.
     // Inject defaults that ParseImageObj always sets.
     for (const auto& kv : mat.combos) {
-        r.info.combos[kv.first] = std::to_string(kv.second);
+        r.info.combos[kv.first] = std::to_string(kv.second.to_primitive());
     }
     for (const auto& kv : combos_override) {
         r.info.combos[kv.first] = kv.second;

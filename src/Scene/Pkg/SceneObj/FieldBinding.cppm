@@ -1,6 +1,9 @@
 export module wescene.pkg.scene_obj:field_binding;
+import rstd;
 import rstd.cppstd;
 import wescene.json;
+
+using namespace rstd::prelude;
 
 // Property-binding side channel.
 //
@@ -29,11 +32,11 @@ struct AnimKeyframeTangent {
     float y { 0.0f };
     // `magic` is a sometimes-present opaque editor value (unsigned int);
     // captured to keep the schema check honest.
-    std::int32_t magic { 0 };
+    i32 magic { 0 };
 };
 
 struct AnimKeyframe {
-    std::int32_t        frame { 0 };
+    i32                 frame { 0 };
     float               value { 0.0f };
     bool                lockangle { false };
     bool                locklength { false };
@@ -42,12 +45,12 @@ struct AnimKeyframe {
 };
 
 struct AnimOptions {
-    float        fps { 30.0f };
-    std::int32_t length { 0 };
-    std::string  mode;
-    std::string  name;
-    bool         startpaused { false };
-    bool         wraploop { false };
+    float       fps { 30.0f };
+    i32         length { 0 };
+    std::string mode;
+    std::string name;
+    bool        startpaused { false };
+    bool        wraploop { false };
     // `smoothing` may be null/int/float in the corpus; kept as raw json
     // until a renderer consumer needs it.
     owe::Json smoothing;

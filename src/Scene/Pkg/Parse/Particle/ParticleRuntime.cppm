@@ -92,7 +92,7 @@ public:
         return m_state->overColor ? m_state->color : m_state->colorn;
     }
     bool ControlpointsEnabled() const noexcept { return m_controlpoints; }
-    auto Controlpoint(usize index) const noexcept -> const std::optional<std::array<float, 3>>& {
+    auto Controlpoint(usize index) const noexcept -> const Option<std::array<float, 3>>& {
         return m_state->controlpoint[index.to_primitive()];
     }
     auto ControlpointAngle(usize index) const noexcept -> const std::array<float, 3>& {

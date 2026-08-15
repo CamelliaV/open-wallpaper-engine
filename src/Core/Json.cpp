@@ -71,6 +71,12 @@ auto ParseNumber(std::string_view value) -> T {
         return std::stof(text);
     } else if constexpr (same<T, double>) {
         return std::stod(text);
+    } else if constexpr (rstd::num::Float<T>) {
+        return rstd::as_cast<T>(std::stod(text));
+    } else if constexpr (rstd::num::SignedInteger<T>) {
+        return rstd::as_cast<T>(std::stoll(text));
+    } else if constexpr (rstd::num::UnsignedInteger<T>) {
+        return rstd::as_cast<T>(std::stoull(text));
     } else if constexpr (std::is_signed_v<T>) {
         return static_cast<T>(std::stoll(text));
     } else {
@@ -309,13 +315,19 @@ OWE_IMPL_GET_JSON(double);
 OWE_IMPL_GET_JSON(std::string);
 OWE_IMPL_GET_JSON(std::vector<float>);
 OWE_IMPL_GET_JSON(std::vector<std::int32_t>);
+OWE_IMPL_GET_JSON(std::vector<i32>);
+OWE_IMPL_GET_JSON(std::vector<u32>);
 OWE_IMPL_GET_JSON(Vec<float>);
 OWE_IMPL_GET_JSON(Vec<std::int32_t>);
+OWE_IMPL_GET_JSON(Vec<i32>);
+OWE_IMPL_GET_JSON(Vec<u32>);
 
 using IntArray3   = std::array<int, 3>;
+using I32Array3   = std::array<i32, 3>;
 using FloatArray2 = std::array<float, 2>;
 using FloatArray3 = std::array<float, 3>;
 OWE_IMPL_GET_JSON(IntArray3);
+OWE_IMPL_GET_JSON(I32Array3);
 OWE_IMPL_GET_JSON(FloatArray2);
 OWE_IMPL_GET_JSON(FloatArray3);
 

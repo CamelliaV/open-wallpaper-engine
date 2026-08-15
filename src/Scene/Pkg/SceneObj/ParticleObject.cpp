@@ -14,14 +14,14 @@ using namespace rstd::literals;
 namespace
 {
 
-auto LoadAssetJsonFile(owe::fs::VFS& vfs, std::string_view path) -> std::optional<owe::Json> {
+auto LoadAssetJsonFile(owe::fs::VFS& vfs, std::string_view path) -> Option<owe::Json> {
     auto parsed = owe::ReadAssetJsonFile(vfs, path);
     if (parsed.is_err()) {
         auto error = rstd::move(parsed).unwrap_err_unchecked();
         rstd_error("Can't load json {}: {}", path, error.message.as_str());
-        return std::nullopt;
+        return None();
     }
-    return rstd::move(parsed).unwrap_unchecked();
+    return Some(rstd::move(parsed).unwrap_unchecked());
 }
 
 } // namespace
@@ -29,9 +29,9 @@ auto LoadAssetJsonFile(owe::fs::VFS& vfs, std::string_view path) -> std::optiona
 bool ParticleChild::FromJson(const owe::Json& json, fs::VFS& vfs) {
     owe::GetJsonValue(json, "name", name);
 
-    uint32_t raw_flags {};
+    u32 raw_flags {};
     owe::GetJsonValue(json, "flags", raw_flags, false);
-    flags = EFlags(raw_flags);
+    flags = EFlags(raw_flags.to_primitive());
 
     if (json.get("type"_str).is_some()) {
         owe::GetJsonValue(json, "type", type);
@@ -81,9 +81,9 @@ ParticleChild ParticleChild::Clone() const {
 bool ParticleControlpoint::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "id", id);
 
-    uint32_t _raw_flags { 0 };
+    u32 _raw_flags { 0 };
     owe::GetJsonValue(json, "flags", _raw_flags, false);
-    flags = EFlags(_raw_flags);
+    flags = EFlags(_raw_flags.to_primitive());
 
     owe::GetJsonValue(json, "offset", offset, false);
     return true;
@@ -128,15 +128,14 @@ bool Emitter::FromJson(const owe::Json& json) {
     if (controlpoint >= i32(8)) rstd_error("wrong controlpoint {}", controlpoint);
     controlpoint = controlpoint % i32(8); // limited to 0-7
 
-    uint32_t _raw_flags { 0 };
+    u32 _raw_flags { 0 };
     owe::GetJsonValue(json, "flags", _raw_flags, false);
-    flags = EFlags(_raw_flags);
+    flags = EFlags(_raw_flags.to_primitive());
 
-    std::transform(sign.begin(), sign.end(), sign.begin(), [](int32_t v) {
-        if (v != 0)
-            return v / std::abs(v);
-        else
-            return 0;
+    std::transform(sign.begin(), sign.end(), sign.begin(), [](i32 value) {
+        if (value > i32()) return i32(1);
+        if (value < i32()) return i32(-1);
+        return i32();
     });
     return true;
 }
@@ -193,7 +192,7 @@ bool ParticleInstanceoverride::FromJosn(const owe::Json& json) {
             if (value.is_some() && ! (*value)->is_null()) {
                 std::array<float, 3> point {};
                 owe::GetJsonValue(json, cp_keys[i], point, false);
-                controlpoint[i] = point;
+                controlpoint[i] = Some(point);
             }
             bind(rstd::cppstd::as_str(cp_keys[i]).unwrap());
             owe::GetJsonValue(json, cpa_keys[i], controlpointangle[i], false);
@@ -284,9 +283,9 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
     owe::GetJsonValue(json, "maxcount", maxcount);
     owe::GetJsonValue(json, "starttime", starttime);
 
-    uint32_t rawflags { 0 };
+    u32 rawflags { 0 };
     owe::GetJsonValue(json, "flags", rawflags, false);
-    flags = EFlags(rawflags);
+    flags = EFlags(rawflags.to_primitive());
 
     return true;
 }

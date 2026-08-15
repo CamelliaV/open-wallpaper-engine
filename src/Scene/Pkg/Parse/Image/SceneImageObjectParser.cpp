@@ -35,12 +35,12 @@ struct ImageParseGeometry {
 };
 
 // TODO: Confirm WE's exact semantics for zero-height audio-buffer layers.
-std::int32_t NonZeroRenderTargetDimension(float value) {
-    if (! std::isfinite(value) || value < 1.0f) return 1;
-    return static_cast<std::int32_t>(value);
+i32 NonZeroRenderTargetDimension(float value) {
+    if (! std::isfinite(value) || value < 1.0f) return i32(1);
+    return rstd::as_cast<i32>(value);
 }
 
-array<std::int32_t, 2> NonZeroRenderTargetExtent(float width, float height) {
+array<i32, 2> NonZeroRenderTargetExtent(float width, float height) {
     return { NonZeroRenderTargetDimension(width), NonZeroRenderTargetDimension(height) };
 }
 
@@ -60,8 +60,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
     // may be sampled by other layers via `_rt_imageLayerComposite_<id>`. The
     // render-graph builder decides whether to actually emit passes for them.
     if (! wpimgobj.visible) {
-        context.scene->MarkLayerVisibilityElidable(
-            WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
+        context.scene->MarkLayerVisibilityElidable(WallpaperLayerId { .value = wpimgobj.id });
     }
 
     auto& vfs = *context.vfs;
@@ -113,15 +112,15 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
         }
     }
 
-    const bool has_author_effect = CountVisibleImageEffects(wpimgobj.effects) > 0;
+    const bool has_author_effect = CountVisibleImageEffects(wpimgobj.effects) > i32();
     // A solid layer's flat material only produces its source color; a final compositor owns
     // BLENDMODE and the previous-framebuffer input.
     const bool layer_material_is_final =
         (! has_author_effect || has_bones) && ! wpimgobj.solid_layer;
     const bool color_blend_uses_layer_material =
-        wpimgobj.colorBlendMode != 0 && layer_material_is_final;
+        wpimgobj.colorBlendMode != i32() && layer_material_is_final;
     const bool append_color_blend_final_effect =
-        wpimgobj.colorBlendMode != 0 && ! color_blend_uses_layer_material;
+        wpimgobj.colorBlendMode != i32() && ! color_blend_uses_layer_material;
     Option<BlendMode> color_blend_attachment_override;
     if (append_color_blend_final_effect) {
         wpscene::ImageEffect colorEffect;
@@ -131,30 +130,27 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
             return;
         }
         colorMat.FromJson(*json);
-        colorMat.combos[rstd::cppstd::to_string(WE_CB_BONECOUNT)] = 1;
+        colorMat.combos[rstd::cppstd::to_string(WE_CB_BONECOUNT)] = i32(1);
         color_blend_attachment_override = ApplyImageColorBlend(colorMat, wpimgobj);
         colorEffect.materials.push_back(std::move(colorMat));
         wpimgobj.effects.push_back(std::move(colorEffect));
     }
-    const bool is_linked_source =
-        context.linked_source_ids.contains(static_cast<std::int32_t>(wpimgobj.id));
+    const bool is_linked_source = context.linked_source_ids.contains(wpimgobj.id);
     if (! has_author_effect && wpimgobj.composite_layer && ! is_linked_source) {
         AppendLayerCompositePassthroughEffect(vfs, wpimgobj);
     }
 
-    bool hasEffect = CountVisibleImageEffects(wpimgobj.effects) > 0 || is_linked_source;
+    bool hasEffect = CountVisibleImageEffects(wpimgobj.effects) > i32() || is_linked_source;
 
     // No-effect fullscreen / compose layers contribute nothing on their own
     // (they just sample `_rt_default` and write it back). Mark as elidable
     // so the render-graph builder drops them when unreferenced, or routes
     // them to `_rt_link_<id>` when another layer reads their composite.
     if (! hasEffect && wpimgobj.visible && (wpimgobj.fullscreen || isPassthrough)) {
-        context.scene->MarkLayerStaticElidable(
-            WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
+        context.scene->MarkLayerStaticElidable(WallpaperLayerId { .value = wpimgobj.id });
     }
     if (! hasEffect && wpimgobj.visible && wpimgobj.alpha <= 0.0f && ! alpha_can_change) {
-        context.scene->MarkLayerStaticElidable(
-            WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
+        context.scene->MarkLayerStaticElidable(WallpaperLayerId { .value = wpimgobj.id });
     }
 
     // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];
@@ -174,8 +170,8 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
     spImgNode->ID()          = i32(wpimgobj.id);
     const auto image_node_id = context.scene->RegisterNode(
         *spImgNode,
-        wpimgobj.id >= 0 ? Some(WallpaperLayerId { .value = i32(wpimgobj.id) })
-                         : None<WallpaperLayerId>());
+        wpimgobj.id >= i32() ? Some(WallpaperLayerId { .value = wpimgobj.id })
+                             : None<WallpaperLayerId>());
     if (! wpimgobj.visible_user.empty())
         spImgNode->SetVisibleUserBinding(ToSceneUserVisibilityBinding(wpimgobj.visible_user));
     Vec<std::shared_ptr<SceneMaterial>> image_property_materials;
@@ -200,8 +196,8 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
     if (puppet_has_masks && has_bones &&
         context.scene->RenderTarget(as_str(PUPPET_MASK_RT).unwrap()).is_none()) {
         SceneRenderTarget rt {};
-        rt.width       = 2;
-        rt.height      = 2;
+        rt.width       = i32(2);
+        rt.height      = i32(2);
         rt.allowReuse  = true;
         rt.force_clear = true;
         rt.bind.enable = true;
@@ -216,9 +212,10 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
 
     ShaderValueMap    baseConstSvs = context.global_base_uniforms;
     ShaderInfo        shaderInfo;
-    wpscene::Material image_wpmat                                   = wpimgobj.material.clone();
-    image_wpmat.combos[rstd::cppstd::to_string(WE_CB_SCENE_ORTHO)]  = wpimgobj.perspective ? 0 : 1;
-    image_wpmat.combos[rstd::cppstd::to_string(OWE_CB_IMAGE_LAYER)] = 1;
+    wpscene::Material image_wpmat = wpimgobj.material.clone();
+    image_wpmat.combos[rstd::cppstd::to_string(WE_CB_SCENE_ORTHO)] =
+        i32(wpimgobj.perspective ? 0 : 1);
+    image_wpmat.combos[rstd::cppstd::to_string(OWE_CB_IMAGE_LAYER)] = i32(1);
     wpscene::Material image_user_texture_fallback                   = image_wpmat.clone();
     if (color_blend_uses_layer_material && ! hasEffect) ApplyImageColorBlend(image_wpmat, wpimgobj);
     ApplyUserTextureBindings(context, image_wpmat);
@@ -275,7 +272,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
     auto&                 mesh                    = *spMesh;
     const array<float, 2> mapRate                 = Texture0UvScale(material, wpimgobj.nopadding);
     const Vector3f        source_alignment_offset = hasEffect ? Vector3f::Zero() : alignment_offset;
-    auto add_puppet_mask_submeshes = [&](SceneMesh& target, uint32_t first_mask_slot) {
+    auto                  add_puppet_mask_submeshes = [&](SceneMesh& target, u32 first_mask_slot) {
         if (! puppet_has_masks || primary_puppet_mesh == nullptr) return;
         std::set<uint32_t> clipped_indices;
         for (const auto& pmesh : (*puppet)->meshes) {
@@ -297,14 +294,14 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                     if (p.size == 0) continue;
                     if (clipped_indices.count(static_cast<uint32_t>(i.to_primitive())) != 0)
                         continue;
-                    kept.push_back({ p.start, p.size });
+                    kept.push_back({ u32(p.start), u32(p.size) });
                 }
                 target.Submeshes()[smi].draw_ranges = std::move(kept);
                 ++smi;
             }
         }
 
-        uint32_t slot = first_mask_slot;
+        u32 slot = first_mask_slot;
         for (const auto& pmesh : (*puppet)->meshes) {
             if (&pmesh != primary_puppet_mesh) continue;
             for (const auto& mb : pmesh.masks) {
@@ -340,7 +337,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                                           *primary_puppet_mesh,
                                           { mapRate[usize()], mapRate[usize(1)] });
             }
-            if (has_bones) add_puppet_mask_submeshes(effct_final_mesh, 1);
+            if (has_bones) add_puppet_mask_submeshes(effct_final_mesh, u32(1));
 
             if (has_bones) {
                 wpscene::ImageEffect puppet_effect;
@@ -402,8 +399,8 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
         if (supplemental_wpmat.is_none()) continue;
 
         supplemental_wpmat->combos[rstd::cppstd::to_string(WE_CB_SCENE_ORTHO)] =
-            wpimgobj.perspective ? 0 : 1;
-        supplemental_wpmat->combos[rstd::cppstd::to_string(OWE_CB_IMAGE_LAYER)] = 1;
+            i32(wpimgobj.perspective ? 0 : 1);
+        supplemental_wpmat->combos[rstd::cppstd::to_string(OWE_CB_IMAGE_LAYER)] = i32(1);
 
         auto supplemental_user_texture_fallback = supplemental_wpmat->clone();
         ApplyUserTextureBindings(context, *supplemental_wpmat);
@@ -427,7 +424,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
         LoadConstvalue(supplemental_material, *supplemental_wpmat, supplemental_shader_info);
 
         const auto supplemental_uv_scale = Texture0UvScale(supplemental_material);
-        const auto supplemental_slot     = static_cast<uint32_t>(mesh.MaterialSlots().size());
+        const auto supplemental_slot     = rstd::as_cast<u32>(usize(mesh.MaterialSlots().size()));
         mesh.AddMaterial(std::move(supplemental_material));
         track_image_property_material(mesh.MaterialSlots().back());
         RegisterMaterialBindings(
@@ -483,7 +480,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                     if (p.size == 0) continue;
                     if (clipped_indices.count(static_cast<uint32_t>(i.to_primitive())) != 0)
                         continue;
-                    kept.push_back({ p.start, p.size });
+                    kept.push_back({ u32(p.start), u32(p.size) });
                 }
                 mesh.Submeshes()[smi].draw_ranges = std::move(kept);
                 ++smi;
@@ -520,10 +517,10 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                     rstd_warn("load mask pre-pass material failed for '{}'", wpimgobj.name);
                     continue;
                 }
-                auto mask_build   = rstd::move(mask_result).unwrap_unchecked();
-                mask_scene_mat    = rstd::move(mask_build.material);
-                mask_shaderInfo   = rstd::move(mask_build.shader_info);
-                uint32_t pre_slot = (uint32_t)mesh.MaterialSlots().size();
+                auto mask_build     = rstd::move(mask_result).unwrap_unchecked();
+                mask_scene_mat      = rstd::move(mask_build.material);
+                mask_shaderInfo     = rstd::move(mask_build.shader_info);
+                const auto pre_slot = rstd::as_cast<u32>(usize(mesh.MaterialSlots().size()));
                 mesh.AddMaterial(std::move(mask_scene_mat));
                 track_image_property_material(mesh.MaterialSlots().back());
                 mesh.Submeshes().emplace_back();
@@ -537,8 +534,8 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
 
                 // (2) clipped-main submesh: main material + CLIPPINGTARGET
                 wpscene::Material clip_wpmat        = image_wpmat.clone();
-                clip_wpmat.combos["CLIPPINGTARGET"] = 1;
-                clip_wpmat.combos["CLIPPINGUVS"]    = 1;
+                clip_wpmat.combos["CLIPPINGTARGET"] = i32(1);
+                clip_wpmat.combos["CLIPPINGUVS"]    = i32(1);
                 if (clip_wpmat.textures.size() < 9) clip_wpmat.textures.resize(9);
                 clip_wpmat.textures[8] = std::string(PUPPET_MASK_RT);
                 MdlParser::AddPuppetMatInfo(clip_wpmat, **puppet);
@@ -560,7 +557,7 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                 clip_scene_mat  = rstd::move(clip_build.material);
                 clip_shaderInfo = rstd::move(clip_build.shader_info);
                 LoadConstvalue(clip_scene_mat, clip_wpmat, clip_shaderInfo);
-                uint32_t clip_slot = (uint32_t)mesh.MaterialSlots().size();
+                const auto clip_slot = rstd::as_cast<u32>(usize(mesh.MaterialSlots().size()));
                 mesh.AddMaterial(std::move(clip_scene_mat));
                 track_image_property_material(mesh.MaterialSlots().back());
                 mesh.Submeshes().emplace_back();
@@ -590,7 +587,10 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
             isPassthrough ? Arc<SceneCamera>::make(SceneCamera::MakeOrthographic(
                                 (**active).Width(), (**active).Height(), -1.0, 1.0))
                           : Arc<SceneCamera>::make(SceneCamera::MakeOrthographic(
-                                effect_extent[usize()], effect_extent[usize(1)], -1.0, 1.0));
+                                rstd::as_cast<double>(effect_extent[usize()]),
+                                rstd::as_cast<double>(effect_extent[usize(1)]),
+                                -1.0,
+                                1.0));
         if (isPassthrough) {
             auto attached = (**active).GetAttachedNode();
             if (attached.is_some()) layer_camera->AttatchNode(attached.unwrap());
@@ -607,13 +607,16 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
         scene.RegisterCamera(String::make(rstd::cppstd::as_str(nodeAddr).unwrap()),
                              layer_camera.clone());
         if (wpimgobj.composite_layer) {
-            const std::string group_camera = nodeAddr + "_group";
-            auto group_camera_owner        = Arc<SceneCamera>::make(SceneCamera::MakeOrthographic(
-                effect_extent[usize()], effect_extent[usize(1)], -1.0, 1.0));
+            const std::string group_camera       = nodeAddr + "_group";
+            auto              group_camera_owner = Arc<SceneCamera>::make(
+                SceneCamera::MakeOrthographic(rstd::as_cast<double>(effect_extent[usize()]),
+                                              rstd::as_cast<double>(effect_extent[usize(1)]),
+                                              -1.0,
+                                              1.0));
             group_camera_owner->AttatchNode(spImgNode.as_ptr());
             scene.RegisterCamera(String::make(rstd::cppstd::as_str(group_camera).unwrap()),
                                  rstd::move(group_camera_owner));
-            scene.RegisterRenderGroup(WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) },
+            scene.RegisterRenderGroup(WallpaperLayerId { .value = wpimgobj.id },
                                       String::make(rstd::cppstd::as_str(group_camera).unwrap()));
         }
         spImgNode->SetCamera(nodeAddr);
@@ -622,8 +625,8 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
         // set image effect
         auto imgEffectLayer =
             std::make_shared<SceneNodeLayer>(spImgNode.as_ptr(),
-                                             static_cast<float>(effect_extent[usize()]),
-                                             static_cast<float>(effect_extent[usize(1)]),
+                                             rstd::as_cast<float>(effect_extent[usize()]),
+                                             rstd::as_cast<float>(effect_extent[usize(1)]),
                                              effect_composite);
         image_effect_layer = imgEffectLayer.get();
         {
@@ -691,42 +694,42 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                         scene.EffectResourceKey(effect_id, as_str(wpfbo.name).unwrap()).as_str());
                     if (wpimgobj.fullscreen) {
                         SceneRenderTarget target {
-                            .width      = 2,
-                            .height     = 2,
+                            .width      = i32(2),
+                            .height     = i32(2),
                             .allowReuse = ! wpfbo.unique,
                         };
                         target.bind = {
                             .enable = true,
                             .screen = true,
-                            .scale  = 1.0 / wpfbo.scale,
+                            .scale  = 1.0 / static_cast<double>(wpfbo.scale.to_primitive()),
                         };
                         scene.RegisterRenderTarget(String::make(as_str(rtname).unwrap()),
                                                    rstd::move(target));
                     } else {
-                        auto fbo_size = [&]() -> std::array<uint16_t, 2> {
-                            if (wpfbo.fit > 0) {
+                        auto fbo_size = [&]() -> array<i32, 2> {
+                            if (wpfbo.fit > u32()) {
                                 const float max_size = std::max(effect_target_size[usize()],
                                                                 effect_target_size[usize(1)]);
                                 if (max_size > 0.0f) {
                                     const float fit_scale =
-                                        static_cast<float>(wpfbo.fit) / max_size;
+                                        static_cast<float>(wpfbo.fit.to_primitive()) / max_size;
                                     const auto fit_extent = NonZeroRenderTargetExtent(
                                         std::round(effect_target_size[usize()] * fit_scale),
                                         std::round(effect_target_size[usize(1)] * fit_scale));
-                                    return { static_cast<uint16_t>(fit_extent[usize()]),
-                                             static_cast<uint16_t>(fit_extent[usize(1)]) };
+                                    return fit_extent;
                                 }
                             }
                             const auto scaled_extent = NonZeroRenderTargetExtent(
-                                effect_target_size[usize()] / static_cast<float>(wpfbo.scale),
-                                effect_target_size[usize(1)] / static_cast<float>(wpfbo.scale));
-                            return { static_cast<uint16_t>(scaled_extent[usize()]),
-                                     static_cast<uint16_t>(scaled_extent[usize(1)]) };
+                                effect_target_size[usize()] /
+                                    static_cast<float>(wpfbo.scale.to_primitive()),
+                                effect_target_size[usize(1)] /
+                                    static_cast<float>(wpfbo.scale.to_primitive()));
+                            return scaled_extent;
                         }();
                         scene.RegisterRenderTarget(
                             String::make(as_str(rtname).unwrap()),
-                            SceneRenderTarget { .width      = fbo_size[0],
-                                                .height     = fbo_size[1],
+                            SceneRenderTarget { .width      = fbo_size[usize()],
+                                                .height     = fbo_size[usize(1)],
                                                 .allowReuse = ! wpfbo.unique });
                     }
                     (void)render_targets.insert(String::make(as_str(wpfbo.name).unwrap()),
@@ -833,8 +836,9 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                     svData.parallax_depth            = { wpimgobj.parallaxDepth[0],
                                                          wpimgobj.parallaxDepth[1] };
                     svData.effect_projection_node    = Some(spImgNode.clone());
-                    svData.effect_projection_size = { static_cast<float>(effect_extent[usize()]),
-                                                      static_cast<float>(effect_extent[usize(1)]) };
+                    svData.effect_projection_size = { rstd::as_cast<float>(effect_extent[usize()]),
+                                                      rstd::as_cast<float>(
+                                                          effect_extent[usize(1)]) };
                     if (puppet.is_some() && wpmat.use_puppet) {
                         auto effect_puppet_layer =
                             MakePuppetLayer((*(*puppet)->puppet).clone(), wpimgobj.puppet_layers);
@@ -904,8 +908,8 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
                             track_image_property_material(spMesh->MaterialSlots().back());
 
                             wpscene::Material clip_wpmat        = wpmat.clone();
-                            clip_wpmat.combos["CLIPPINGTARGET"] = 1;
-                            clip_wpmat.combos["CLIPPINGUVS"]    = 1;
+                            clip_wpmat.combos["CLIPPINGTARGET"] = i32(1);
+                            clip_wpmat.combos["CLIPPINGUVS"]    = i32(1);
                             if (clip_wpmat.textures.size() < 9) clip_wpmat.textures.resize(9);
                             clip_wpmat.textures[8] = std::string(PUPPET_MASK_RT);
                             MdlParser::AddPuppetMatInfo(clip_wpmat, **puppet);
@@ -1175,7 +1179,7 @@ void ParseShapeObj(SceneParseContext& context, wpscene::ShapeObject& shape_obj) 
     auto direct_draw_material = first_effect->materials.front().clone();
     direct_draw_material.MergePass(first_effect->passes.front());
     auto direct_draw = direct_draw_material.combos.find("DIRECTDRAW");
-    if (direct_draw == direct_draw_material.combos.end() || direct_draw->second == 0) {
+    if (direct_draw == direct_draw_material.combos.end() || direct_draw->second == i32()) {
         rstd_error("shape '{}' first effect is not direct draw", shape_obj.name);
         return;
     }
@@ -1185,7 +1189,7 @@ void ParseShapeObj(SceneParseContext& context, wpscene::ShapeObject& shape_obj) 
         return;
     }
 
-    const auto edge = static_cast<float>(context.ortho_h);
+    const auto edge = static_cast<float>(context.ortho_h.to_primitive());
     SceneMesh  direct_draw_mesh;
     GenDirectDrawQuadMesh(direct_draw_mesh, edge, *points);
 

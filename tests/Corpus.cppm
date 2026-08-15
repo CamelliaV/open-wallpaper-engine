@@ -441,7 +441,7 @@ Json dump_particle_object(const Json& obj, owe::fs::VFS& vfs) {
     SetSnapshot(out, "renderer_count", static_cast<int>(po.particleObj.renderers.size()));
     SetSnapshot(out, "controlpoint_count", static_cast<int>(po.particleObj.controlpoints.size()));
     SetSnapshot(out, "child_count", static_cast<int>(po.particleObj.children.size()));
-    SetSnapshot(out, "maxcount", static_cast<int>(po.particleObj.maxcount));
+    SetSnapshot(out, "maxcount", po.particleObj.maxcount);
     SetSnapshot(out, "starttime", static_cast<int>(po.particleObj.starttime));
     SetSnapshot(out, "animationmode", po.particleObj.animationmode);
     return out;

@@ -293,7 +293,7 @@ bool ApplyShaderCombos(Scene& scene, const std::string& key, const Json& propert
             continue;
         }
         auto& material = *binding.material;
-        if (! material.customShader.variant) {
+        if (material.customShader.variant.is_none()) {
             rstd_warn("user property '{}' skipped: material '{}' has no shader variant descriptor",
                       key,
                       material.name);
@@ -352,7 +352,7 @@ bool MaterialHasUniform(const SceneMaterial& material, ref<str> uniform_name) {
     if (material.customShader.shader &&
         material.customShader.shader->default_uniforms.contains(name))
         return true;
-    return material.customShader.variant &&
+    return material.customShader.variant.is_some() &&
            material.customShader.variant->default_uniforms.contains(name);
 }
 

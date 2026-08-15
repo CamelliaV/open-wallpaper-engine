@@ -21,7 +21,7 @@ using Combos = Map<std::string, std::string>;
 // ui material name to gl uniform name
 using AliasValueDict = Map<std::string, std::string>;
 
-using DefaultTexs = std::vector<std::pair<std::int32_t, std::string>>;
+using DefaultTexs = std::vector<std::pair<i32, std::string>>;
 
 // Staged direct-route u_* uniforms (shader annotation's `material` field
 // equals the wallpaper-level project.json key). BuildMaterial fills this

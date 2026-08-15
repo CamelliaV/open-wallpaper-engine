@@ -14,17 +14,17 @@ class MaterialPassBindItem {
 public:
     bool        FromJson(const owe::Json&);
     std::string name;
-    int32_t     index;
+    i32         index;
 };
 
 class MaterialPass {
 public:
     bool                                                FromJson(const owe::Json&);
     void                                                Update(const MaterialPass&);
-    std::uint32_t                                       id { 0 }; // pass id (PKGV0001+)
+    u32                                                 id { 0 }; // pass id (PKGV0001+)
     std::vector<std::string>                            textures;
     rstd::json::Array                                   usertextures; // PKGV0018+; polymorphic
-    std::unordered_map<std::string, int32_t>            combos;
+    std::unordered_map<std::string, i32>                combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     // scene.json instance-level user binding:
     //   "constantshadervalues": { "Opacity": {"user":"luzopacidad","value":1} }
@@ -52,9 +52,9 @@ public:
     bool        FromJson(const owe::Json&, SceneVersion); // canonical
     auto        clone() const -> Material;
     void        MergePass(const MaterialPass&);
-    void        MergeBindingOverrides(const std::vector<std::string>&                 textures,
-                                      const rstd::json::Array&                        usertextures,
-                                      const std::unordered_map<std::string, int32_t>& combos);
+    void        MergeBindingOverrides(const std::vector<std::string>&             textures,
+                                      const rstd::json::Array&                    usertextures,
+                                      const std::unordered_map<std::string, i32>& combos);
     std::string blending { "translucent" };
     std::string cullmode { "nocull" };
     std::string shader;
@@ -62,7 +62,7 @@ public:
     std::string depthwrite { "disabled" };
     std::vector<std::string>                            textures;
     rstd::json::Array                                   usertextures;
-    std::unordered_map<std::string, int32_t>            combos;
+    std::unordered_map<std::string, i32>                combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     std::unordered_map<std::string, std::string>        constantshadervalues_user;
     std::unordered_map<std::string, AnimCurve>          constantshadervalues_animations;

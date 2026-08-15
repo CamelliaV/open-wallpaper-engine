@@ -607,7 +607,7 @@ void ParticleSubSystem::UpdateControlpoints(ParticleInstanceRef current) {
         controlpoint.offset = controlpoint.base_offset;
         if (m_instance_modifiers.is_some() && (*m_instance_modifiers).ControlpointsEnabled()) {
             const auto& position_override = (*m_instance_modifiers).Controlpoint(index);
-            if (position_override.has_value()) {
+            if (position_override.is_some()) {
                 Eigen::Vector3d position =
                     Eigen::Vector3f { position_override->data() }.cast<double>();
                 if (controlpoint.worldspace) {

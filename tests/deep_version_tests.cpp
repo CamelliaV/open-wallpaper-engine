@@ -26,13 +26,13 @@ struct FixturePick {
     const char* fixture_path;
 };
 
-std::optional<std::string> FirstDifference(const Json& expected, const Json& actual,
-                                           std::string path = "$") {
-    if (expected == actual) return std::nullopt;
+rstd::Option<std::string> FirstDifference(const Json& expected, const Json& actual,
+                                          std::string path = "$") {
+    if (expected == actual) return rstd::None();
     if (auto expected_values = expected.as_array(); expected_values.is_some()) {
         auto actual_values = actual.as_array();
         if (actual_values.is_none() || (*expected_values)->len() != (*actual_values)->len())
-            return path;
+            return rstd::Some(rstd::move(path));
         for (rstd::usize i; i < (*expected_values)->len(); ++i) {
             if (auto difference =
                     FirstDifference((**expected_values)[i],
@@ -40,18 +40,18 @@ std::optional<std::string> FirstDifference(const Json& expected, const Json& act
                                     path + "[" + std::to_string(i.to_primitive()) + "]"))
                 return difference;
         }
-        return path;
+        return rstd::Some(rstd::move(path));
     }
     if (expected.is_object() && actual.is_object()) {
-        std::optional<std::string> difference;
-        auto                       expected_object = expected.as_object();
+        rstd::Option<std::string> difference;
+        auto                      expected_object = expected.as_object();
         (*expected_object)->iter().for_each([&](auto entry) {
             auto [entry_key, entry_value] = entry;
             if (difference) return;
             const auto& expected_value = *entry_value;
             auto        actual_value   = actual.get(entry_key->as_str());
             if (actual_value.is_none()) {
-                difference = path + "." + rstd::cppstd::to_string(entry_key->as_str());
+                difference = rstd::Some(path + "." + rstd::cppstd::to_string(entry_key->as_str()));
                 return;
             }
             difference = FirstDifference(expected_value,
@@ -63,11 +63,12 @@ std::optional<std::string> FirstDifference(const Json& expected, const Json& act
         (*actual_object)->iter().for_each([&](auto entry) {
             auto [entry_key, entry_value] = entry;
             if (! difference && expected.get(entry_key->as_str()).is_none())
-                difference = path + "." + rstd::cppstd::to_string(entry_key->as_str());
+                difference = rstd::Some(path + "." + rstd::cppstd::to_string(entry_key->as_str()));
         });
-        return difference.value_or(path);
+        if (difference.is_some()) return difference;
+        return rstd::Some(rstd::move(path));
     }
-    return path;
+    return rstd::Some(rstd::move(path));
 }
 
 inline void VerifyFixture(const FixturePick& pick) {
@@ -92,7 +93,8 @@ inline void VerifyFixture(const FixturePick& pick) {
     auto difference = FirstDifference(expected, actual);
     ADD_FAILURE() << "snapshot drift for workshop " << pick.workshop_id << "\n"
                   << "fixture:  " << pick.fixture_path << "\n"
-                  << "first unequal path: " << difference.value_or("$") << "\n";
+                  << "first unequal path: "
+                  << (difference.is_some() ? *difference : std::string("$")) << "\n";
 }
 
 } // namespace owe::testing

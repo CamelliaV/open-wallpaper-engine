@@ -51,9 +51,9 @@ BlendMode ParseBlendMode(std::string_view str) {
 
 Option<BlendMode> ApplyImageColorBlend(wpscene::Material&          material,
                                        const wpscene::ImageObject& image) {
-    if (image.colorBlendMode == 0) return None<BlendMode>();
+    if (image.colorBlendMode == i32()) return None<BlendMode>();
 
-    if (image.colorBlendMode == 31) {
+    if (image.colorBlendMode == i32(31)) {
         material.combos.erase(rstd::cppstd::to_string(WE_CB_BLENDMODE));
         material.blending = "additive";
         return Some(BlendMode::Additive);
@@ -71,10 +71,10 @@ ShaderValueMap NeutralColorUniforms(ShaderValueMap values) {
     return values;
 }
 
-std::int32_t CountVisibleImageEffects(std::span<const wpscene::ImageEffect> effects) {
-    std::int32_t count = 0;
+i32 CountVisibleImageEffects(std::span<const wpscene::ImageEffect> effects) {
+    i32 count {};
     for (const auto& effect : effects) {
-        if (effect.visible || ! effect.visible_user.empty()) ++count;
+        if (effect.visible || ! effect.visible_user.empty()) count += i32(1);
     }
     return count;
 }
@@ -143,7 +143,9 @@ SceneShaderTextureCompileInfo ToSceneShaderTextureCompileInfo(const ShaderTexInf
 
 owe::Map<std::string, std::string> MaterialCombosToShaderCombos(const wpscene::Material& material) {
     owe::Map<std::string, std::string> combos;
-    for (const auto& [key, value] : material.combos) combos[key] = std::to_string(value);
+    for (const auto& [key, value] : material.combos) {
+        combos[key] = std::to_string(value.to_primitive());
+    }
     return combos;
 }
 
@@ -352,7 +354,7 @@ auto BuildMaterial(fs::VFS& vfs, ShaderCache& shader_cache,
     ApplyLegacyAtmosphereShaderCompat(wpmat, sd_units);
 
     for (const auto& el : wpmat.combos) {
-        shader_info_ref.combos[el.first] = std::to_string(el.second);
+        shader_info_ref.combos[el.first] = std::to_string(el.second.to_primitive());
     }
     if (blend_mode == BlendMode::AlphaToCoverage) {
         shader_info_ref.combos["ALPHATOCOVERAGE"] = "1";
@@ -363,7 +365,7 @@ auto BuildMaterial(fs::VFS& vfs, ShaderCache& shader_cache,
     auto textures = wpmat.textures;
     if (shader_info_ref.defTexs.size() > 0) {
         for (auto& t : shader_info_ref.defTexs) {
-            const auto index = static_cast<std::size_t>(t.first);
+            const auto index = rstd::as_cast<usize>(t.first).to_primitive();
             if (textures.size() > index) {
                 if (! textures.at(index).empty()) continue;
             } else {
@@ -383,15 +385,15 @@ auto BuildMaterial(fs::VFS& vfs, ShaderCache& shader_cache,
             continue;
         }
 
-        std::array<std::int32_t, 4> resolution {};
-        auto                        texture_name = as_str(name).unwrap();
+        std::array<i32, 4> resolution {};
+        auto               texture_name = as_str(name).unwrap();
         if (IsSpecTex(texture_name)) {
             auto target = scene.RenderTarget(as_str(name).unwrap());
             if (! IsSpecLinkTex(texture_name) && target.is_none()) {
                 rstd_error("{} not found in render targes", name);
             } else if (target.is_some()) {
                 const auto& rt = **target;
-                resolution     = { rt.width, rt.height, rt.width, rt.height };
+                resolution     = { i32(rt.width), i32(rt.height), i32(rt.width), i32(rt.height) };
             }
         } else {
             auto texh = [&] {
@@ -408,16 +410,20 @@ auto BuildMaterial(fs::VFS& vfs, ShaderCache& shader_cache,
                     shader_info_ref.combos["TEX0FORMAT"] = "FORMAT_RG88";
             }
             if (texh.mipmap_larger) {
-                resolution = { texh.width, texh.height, texh.mapWidth, texh.mapHeight };
+                resolution = {
+                    i32(texh.width), i32(texh.height), i32(texh.mapWidth), i32(texh.mapHeight)
+                };
             } else {
-                resolution = { texh.mapWidth, texh.mapHeight, texh.mapWidth, texh.mapHeight };
+                resolution = {
+                    i32(texh.mapWidth), i32(texh.mapHeight), i32(texh.mapWidth), i32(texh.mapHeight)
+                };
             }
             material.texture_metadata.back() = SceneMaterialTextureMetadata {
                 .has_extent    = true,
-                .source_extent = { static_cast<float>(resolution[0]),
-                                   static_cast<float>(resolution[1]) },
-                .sample_extent = { static_cast<float>(resolution[2]),
-                                   static_cast<float>(resolution[3]) },
+                .source_extent = { rstd::as_cast<float>(resolution[0]),
+                                   rstd::as_cast<float>(resolution[1]) },
+                .sample_extent = { rstd::as_cast<float>(resolution[2]),
+                                   rstd::as_cast<float>(resolution[3]) },
             };
 
             auto scene_texture = scene.Texture(rstd::cppstd::as_str(name).unwrap());
@@ -440,14 +446,16 @@ auto BuildMaterial(fs::VFS& vfs, ShaderCache& shader_cache,
                 if (wpmat.shader == "genericparticle" || wpmat.shader == "genericropeparticle") {
                     shader_info_ref.combos[rstd::cppstd::to_string(WE_CB_SPRITESHEET)]  = "1";
                     shader_info_ref.combos[rstd::cppstd::to_string(WE_CB_THICK_FORMAT)] = "1";
-                    if (algorism::IsPowOfTwo(u32(static_cast<std::uint32_t>(texh.width))) &&
-                        algorism::IsPowOfTwo(u32(static_cast<std::uint32_t>(texh.height)))) {
+                    if (algorism::IsPowOfTwo(rstd::as_cast<u32>(texh.width)) &&
+                        algorism::IsPowOfTwo(rstd::as_cast<u32>(texh.height))) {
                         shader_info_ref
                             .combos[rstd::cppstd::to_string(WE_CB_SPRITESHEETBLENDNPOT)] = "1";
-                        resolution[2] = resolution[0] - resolution[0] % (int)f1.width;
-                        resolution[3] = resolution[1] - resolution[1] % (int)f1.height;
+                        resolution[2] =
+                            resolution[0] - resolution[0] % rstd::as_cast<i32>(f1.width);
+                        resolution[3] =
+                            resolution[1] - resolution[1] % rstd::as_cast<i32>(f1.height);
                         material.texture_metadata.back().sample_extent = {
-                            static_cast<float>(resolution[2]), static_cast<float>(resolution[3])
+                            rstd::as_cast<float>(resolution[2]), rstd::as_cast<float>(resolution[3])
                         };
                     }
                     materialShader.constValues[rstd::cppstd::to_string(G_RENDERVAR1)] =
@@ -529,7 +537,7 @@ auto BuildMaterial(fs::VFS& vfs, ShaderCache& shader_cache,
     }
 
     material.customShader         = rstd::move(materialShader);
-    material.customShader.variant = std::move(variant_desc);
+    material.customShader.variant = Some(rstd::move(variant_desc));
     material.name                 = wpmat.shader;
 
     return Ok(rstd::move(build));
@@ -559,13 +567,13 @@ bool IsShaderPositionUniform(const ShaderInfo& info, const std::string& glname) 
 bool UsesEffectPositionSpace(const wpscene::Material& wpmat) {
     if (wpmat.shader != "effects/spin" && wpmat.shader != "effects/transform") return false;
     auto mode_it = wpmat.combos.find("MODE");
-    return mode_it != wpmat.combos.end() && mode_it->second == 1;
+    return mode_it != wpmat.combos.end() && mode_it->second == i32(1);
 }
 
 bool UsesUnitFinalQuad(const wpscene::Material& wpmat) {
     if (wpmat.shader != "effects/transform") return false;
     auto mode_it = wpmat.combos.find("MODE");
-    return mode_it != wpmat.combos.end() && mode_it->second == 1;
+    return mode_it != wpmat.combos.end() && mode_it->second == i32(1);
 }
 
 bool CanCompositeFinalEffectShader(std::string_view shader) {
@@ -592,10 +600,10 @@ bool HasShaderTextureMaterial(const ShaderInfo& info, std::string_view material_
 bool HasSolidCompositeContext(const SceneParseContext& context, const wpscene::ImageObject& obj) {
     if (obj.solid || context.solid_layer_ids.contains(obj.id)) return true;
 
-    HashSet<std::int32_t> seen;
-    std::uint32_t         parent = obj.parent;
-    while (parent != 0 && seen.insert(static_cast<std::int32_t>(parent))) {
-        const auto parent_id = static_cast<std::int32_t>(parent);
+    HashSet<i32> seen;
+    u32          parent = obj.parent;
+    while (parent != u32() && seen.insert(rstd::as_cast<i32>(parent))) {
+        const auto parent_id = rstd::as_cast<i32>(parent);
         if (context.solid_layer_ids.contains(parent_id)) return true;
 
         auto found = context.object_parent_ids.get(parent_id);
@@ -719,7 +727,7 @@ std::string ResolveMaterialTextureFallback(Scene& scene, const wpscene::Material
     }
     if (fallback.empty()) {
         for (const auto& [index, texture] : shader_info.defTexs) {
-            if (usize(static_cast<std::size_t>(index)) == slot) {
+            if (rstd::as_cast<usize>(index) == slot) {
                 fallback = texture;
                 break;
             }
@@ -747,7 +755,7 @@ void RegisterMaterialUserTextureIndex(Scene*                                pSce
             rstd::move(*key),
             Scene::MaterialTextureUserBinding {
                 .material = stable_mat,
-                .slot     = u32(static_cast<uint32_t>(i.to_primitive())),
+                .slot     = rstd::as_cast<u32>(i),
                 .fallback = String::make(as_str(fallback).unwrap()),
             });
     }
@@ -778,7 +786,7 @@ void ApplyTextureBindsImpl(wpscene::Material&                             wpmat,
             rstd_error("fbo {} not found", el.name);
             continue;
         }
-        const auto index = static_cast<std::size_t>(el.index);
+        const auto index = rstd::as_cast<usize>(el.index).to_primitive();
         if (wpmat.textures.size() <= index) wpmat.textures.resize(index + 1);
         wpmat.textures[index] = rstd::cppstd::to_string((**target).as_str());
     }
@@ -831,7 +839,7 @@ std::string ResolveMaterialTextureSlot(const SceneParseContext& context,
 bool CanUseImageAsSystemMediaFallback(const wpscene::ImageObject& image) {
     if (! image.puppet.empty()) return false;
     if (image.fullscreen || image.config.passthrough) return false;
-    return CountVisibleImageEffects(image.effects) == 0;
+    return CountVisibleImageEffects(image.effects) == i32();
 }
 
 std::string ResolveLinkedImageFallback(const SceneParseContext& context, std::string_view texture) {
@@ -842,8 +850,7 @@ std::string ResolveLinkedImageFallback(const SceneParseContext& context, std::st
     }
     if (! linked_id) return {};
 
-    auto fallback =
-        context.system_media_image_fallbacks.get(rstd::as_cast<std::int32_t>(*linked_id));
+    auto fallback = context.system_media_image_fallbacks.get(rstd::as_cast<i32>(*linked_id));
     return fallback.is_some() ? rstd::cppstd::to_string((**fallback).as_str()) : std::string {};
 }
 
@@ -1021,7 +1028,7 @@ void RegisterLayerPreviousBindings(Scene& scene, SceneMaterial& material,
             continue;
         }
         (void)scene.SetMaterialLayerPreviousSource(
-            material, u32(rstd::as_cast<rstd::uint32_t>(index)), layer, composite_target);
+            material, rstd::as_cast<u32>(index), layer, composite_target);
     }
 }
 

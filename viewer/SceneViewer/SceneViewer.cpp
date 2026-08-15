@@ -206,18 +206,18 @@ void cursor_enter_callback(GLFWwindow* win, int entered) {
 }
 }
 
-std::optional<std::array<double, 2>> parseMousePosition(const std::string& value) {
-    if (value.empty()) return std::nullopt;
+Option<std::array<double, 2>> parseMousePosition(const std::string& value) {
+    if (value.empty()) return None();
     const auto comma = value.find(',');
-    if (comma == std::string::npos) return std::nullopt;
+    if (comma == std::string::npos) return None();
     double x  = 0.0;
     double y  = 0.0;
     auto   xs = value.substr(0, comma);
     auto   ys = value.substr(comma + 1);
     auto   xr = std::from_chars(xs.data(), xs.data() + xs.size(), x);
     auto   yr = std::from_chars(ys.data(), ys.data() + ys.size(), y);
-    if (xr.ec != std::errc {} || yr.ec != std::errc {}) return std::nullopt;
-    return std::array { std::clamp(x, 0.0, 1.0), std::clamp(y, 0.0, 1.0) };
+    if (xr.ec != std::errc {} || yr.ec != std::errc {}) return None();
+    return Some(std::array { std::clamp(x, 0.0, 1.0), std::clamp(y, 0.0, 1.0) });
 }
 
 int main(int argc, char** argv) {
@@ -334,7 +334,7 @@ int main(int argc, char** argv) {
     glfwSetCursorEnterCallback(window, cursor_enter_callback);
 
     auto locked_mouse          = parseMousePosition(args.mouse_position);
-    data.mouse_position_locked = locked_mouse.has_value();
+    data.mouse_position_locked = locked_mouse.is_some();
     auto apply_locked_mouse    = [&]() {
         if (! locked_mouse) return;
         psw->mouseEnter(true);

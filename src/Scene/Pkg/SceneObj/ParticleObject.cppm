@@ -57,34 +57,34 @@ public:
 
 class Emitter {
 public:
-    enum class FlagEnum : uint32_t
+    enum class FlagEnum : rstd::uint32_t
     {
         one_per_frame = 1,
     };
     using EFlags = BitFlags<FlagEnum>;
 
 public:
-    bool                   FromJson(const owe::Json&);
-    std::array<float, 3>   directions { 1.0f, 1.0f, 0.0f };
-    std::array<float, 3>   distancemax { 256.0f, 256.0f, 256.0f };
-    std::array<float, 3>   distancemin { 0.0f, 0.0f, 0.0f };
-    std::array<float, 3>   origin { 0, 0, 0 };
-    std::array<int32_t, 3> sign { 0, 0, 0 };
-    u32                    instantaneous { 0 };
-    u32                    max_emit_per_period { 0 };
-    float                  speedmin { 0 };
-    float                  speedmax { 0 };
-    u32                    audioprocessingmode { 0 };
-    float                  audioamount { 1.0f };
-    float                  audioexponent { 1.0f };
-    std::array<float, 2>   audiofrequency { 0.0f, 15.0f };
-    std::array<float, 2>   audiobounds { 0.0f, 1.0f };
-    i32                    controlpoint { 0 };
-    i32                    id;
-    EFlags                 flags;
-    std::string            name;
-    float                  rate { 5.0f };
-    float                  duration { 0.0f };
+    bool                 FromJson(const owe::Json&);
+    std::array<float, 3> directions { 1.0f, 1.0f, 0.0f };
+    std::array<float, 3> distancemax { 256.0f, 256.0f, 256.0f };
+    std::array<float, 3> distancemin { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> origin { 0, 0, 0 };
+    std::array<i32, 3>   sign {};
+    u32                  instantaneous { 0 };
+    u32                  max_emit_per_period { 0 };
+    float                speedmin { 0 };
+    float                speedmax { 0 };
+    u32                  audioprocessingmode { 0 };
+    float                audioamount { 1.0f };
+    float                audioexponent { 1.0f };
+    std::array<float, 2> audiofrequency { 0.0f, 15.0f };
+    std::array<float, 2> audiobounds { 0.0f, 1.0f };
+    i32                  controlpoint { 0 };
+    i32                  id;
+    EFlags               flags;
+    std::string          name;
+    float                rate { 5.0f };
+    float                duration { 0.0f };
 };
 
 class ParticleChild;
@@ -119,7 +119,7 @@ public:
 
     std::string animationmode;
     float       sequencemultiplier { 1.0f };
-    uint32_t    maxcount { 1 };
+    u32         maxcount { 1 };
     float       starttime { 0.0f };
     EFlags      flags { 0 };
 };
@@ -167,14 +167,14 @@ public:
     float                speed { 1.0f };
     float                size { 1.0f };
     float                brightness { 1.0f };
-    std::int32_t         id { 0 };
+    i32                  id { 0 };
     std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
     std::array<float, 3> colorn { 1.0f, 1.0f, 1.0f };
 
     // Presence distinguishes an absent override from an explicit world-space origin.
-    std::array<std::optional<std::array<float, 3>>, 8> controlpoint;
-    std::array<std::array<float, 3>, 8>                controlpointangle {};
-    std::shared_ptr<const FieldBindings>               field_bindings;
+    std::array<Option<std::array<float, 3>>, 8> controlpoint;
+    std::array<std::array<float, 3>, 8>         controlpointangle {};
+    std::shared_ptr<const FieldBindings>        field_bindings;
 
     // field name (e.g. "alpha", "size", "color", "colorn", "lifetime",
     // "rate", "speed", "count", "brightness") -> user-property key when the
@@ -191,7 +191,7 @@ public:
     bool                     FromJson(const owe::Json&, fs::VFS&, SceneVersion); // canonical
     bool                     FromAsset(ref<str>, fs::VFS&);
     ParticleObject           Clone() const;
-    int32_t                  id { 0 };
+    i32                      id { 0 };
     std::string              name;
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3>     scale { 1.0f, 1.0f, 1.0f };
@@ -203,17 +203,17 @@ public:
     ParticleInstanceoverride instanceoverride;
 
     // Common cross-kind metadata.
-    bool                      locktransforms { false };
-    bool                      muteineditor { false };
-    bool                      nointerpolation { false };
-    bool                      reflected { true };
-    std::uint32_t             parent { 0 };
-    std::string               attachment;
-    std::vector<std::int32_t> dependencies;
-    owe::Json                 instance;
-    owe::Json                 particlesrc;                       // PKGV0001+; always null in corpus
-    std::array<float, 3>      controlpoint { 0.0f, 0.0f, 0.0f }; // PKGV0019+
-    FieldBindings             field_bindings;
+    bool                 locktransforms { false };
+    bool                 muteineditor { false };
+    bool                 nointerpolation { false };
+    bool                 reflected { true };
+    u32                  parent { 0 };
+    std::string          attachment;
+    std::vector<i32>     dependencies;
+    owe::Json            instance;
+    owe::Json            particlesrc;                       // PKGV0001+; always null in corpus
+    std::array<float, 3> controlpoint { 0.0f, 0.0f, 0.0f }; // PKGV0019+
+    FieldBindings        field_bindings;
 
     VisibleUserBinding visible_user;
     std::string        visible_user_key;

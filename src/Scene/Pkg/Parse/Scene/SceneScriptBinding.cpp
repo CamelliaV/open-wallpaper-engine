@@ -141,8 +141,8 @@ SceneNode* RootOf(SceneNode* node) {
     return node;
 }
 
-void MarkHiddenLinkSource(SceneParseContext& context, std::int32_t id) {
-    if (context.hidden_link_source_ids.contains(id))
+void MarkHiddenLinkSource(SceneParseContext& context, i32 id) {
+    if (context.hidden_link_source_ids.contains(i32(id)))
         context.scene->MarkLayerVisibilityElidable(WallpaperLayerId { .value = i32(id) });
 }
 
@@ -185,7 +185,7 @@ void RegisterImageAlignmentBinding(SceneParseContext& context, SceneNode* node, 
 
 Option<Arc<PuppetLayer>> FindPuppetLayerWithBone(const Arc<PuppetLayerRegistry>& layers,
                                                  SceneNode* node, std::string_view name,
-                                                 uint32_t& index) {
+                                                 std::uint32_t& index) {
     if (! node) return None();
     if (auto layer = layers->by_node.get(node); layer.is_some()) {
         index = (**layer)->boneIndex(rstd::cppstd::as_str(name).unwrap());
@@ -206,11 +206,11 @@ script::ScriptScene& EnsureScriptScene(SceneParseContext& context) {
         (*context.script_scene)
             ->runtime()
             .SetBoneResolvers(
-                [layers](SceneNode* node, std::string_view name) -> uint32_t {
-                    auto     layer = LookupPuppetLayer(layers.value, node);
-                    uint32_t index = layer.is_some()
-                                         ? (*layer)->boneIndex(rstd::cppstd::as_str(name).unwrap())
-                                         : 0;
+                [layers](SceneNode* node, std::string_view name) -> std::uint32_t {
+                    auto          layer = LookupPuppetLayer(layers.value, node);
+                    std::uint32_t index =
+                        layer.is_some() ? (*layer)->boneIndex(rstd::cppstd::as_str(name).unwrap())
+                                        : 0;
                     if (index != 0) return index;
 
                     if (auto fallback =
@@ -221,19 +221,19 @@ script::ScriptScene& EnsureScriptScene(SceneParseContext& context) {
                     }
                     return 0;
                 },
-                [layers](SceneNode* node,
-                         uint32_t   index,
-                         double     time) -> std::optional<script::BoneTranslation> {
+                [layers](SceneNode*    node,
+                         std::uint32_t index,
+                         double        time) -> Option<script::BoneTranslation> {
                     auto layer = LookupPuppetLayer(layers.value, node);
-                    if (layer.is_none()) return std::nullopt;
+                    if (layer.is_none()) return None();
                     auto bone = (*layer)->boneTransform(index, time);
-                    if (bone.is_none()) return std::nullopt;
+                    if (bone.is_none()) return None();
 
                     node->UpdateTrans();
                     Eigen::Affine3f world = Eigen::Affine3f::Identity();
                     world.matrix()        = node->ModelTrans().cast<float>();
                     Eigen::Vector3f t     = (world * *bone).translation();
-                    return script::BoneTranslation { t.x(), t.y(), t.z() };
+                    return Some(script::BoneTranslation { t.x(), t.y(), t.z() });
                 });
         if (context.user_properties.is_some())
             (*context.user_properties)->iter().for_each([&](auto entry) {
@@ -254,7 +254,7 @@ script::ScriptScene& EnsureScriptScene(SceneParseContext& context) {
 void SetScriptInitializationOrder(SceneParseContext& context, script::FieldScript& script,
                                   const SceneNode* node) {
     if (node == nullptr) return;
-    auto order = context.script_initialization_orders.get(node->ID().to_primitive());
+    auto order = context.script_initialization_orders.get(node->ID());
     if (order.is_none()) return;
     EnsureScriptScene(context).runtime().SetInitializationOrder(script, **order);
 }

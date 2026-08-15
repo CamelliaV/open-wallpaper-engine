@@ -184,7 +184,7 @@ public:
 
     using BoneIndexResolver = std::function<uint32_t(owe::SceneNode*, std::string_view)>;
     using BoneTransformResolver =
-        std::function<std::optional<BoneTranslation>(owe::SceneNode*, uint32_t, double)>;
+        std::function<Option<BoneTranslation>(owe::SceneNode*, uint32_t, double)>;
     void SetBoneResolvers(BoneIndexResolver     index_resolver,
                           BoneTransformResolver transform_resolver);
 

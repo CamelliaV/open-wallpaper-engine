@@ -24,15 +24,15 @@ auto FsError(rstd::io::error::ErrorKind::Entity kind) -> rstd::io::error::Error 
     return rstd::io::error::Error::from_kind(rstd::io::error::ErrorKind { kind });
 }
 
-std::optional<std::string> ReadSizedString(BinaryReader& file, usize max_len) {
+Option<std::string> ReadSizedString(BinaryReader& file, usize max_len) {
     auto signed_len = file.ReadInt32();
-    if (signed_len < 0) return std::nullopt;
+    if (signed_len < 0) return None();
 
     auto len = usize(static_cast<rstd::size_t>(signed_len));
-    if (len > max_len) return std::nullopt;
+    if (len > max_len) return None();
     std::string result(len.to_primitive(), '\0');
-    if (file.Read(result.data(), len.to_primitive()) != len.to_primitive()) return std::nullopt;
-    return result;
+    if (file.Read(result.data(), len.to_primitive()) != len.to_primitive()) return None();
+    return Some(rstd::move(result));
 }
 
 bool IsPkgVersionStamp(std::string_view stamp) {

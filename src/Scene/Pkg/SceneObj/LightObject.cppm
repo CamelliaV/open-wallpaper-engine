@@ -20,7 +20,7 @@ class LightObject {
 public:
     bool                 FromJson(const owe::Json&, fs::VFS&);               // legacy
     bool                 FromJson(const owe::Json&, fs::VFS&, SceneVersion); // canonical
-    int32_t              id { 0 };
+    i32                  id { 0 };
     std::string          name;
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
@@ -36,13 +36,13 @@ public:
     std::string          visible_user_key;
 
     // Common cross-kind metadata.
-    bool                      locktransforms { false };
-    bool                      muteineditor { false };
-    bool                      nointerpolation { false };
-    std::uint32_t             parent { 0 };
-    std::vector<std::int32_t> dependencies;
-    owe::Json                 instance;
-    FieldBindings             field_bindings;
+    bool             locktransforms { false };
+    bool             muteineditor { false };
+    bool             nointerpolation { false };
+    u32              parent { 0 };
+    std::vector<i32> dependencies;
+    owe::Json        instance;
+    FieldBindings    field_bindings;
 
     // Light-kind specifics.
     bool  ledsource { false };          // PKGV0006+

@@ -74,25 +74,25 @@ public:
         // pipeline
         VkClearValue clear_value;
         // Scene clear color snapshot; None keeps the pass-owned clear value.
-        Option<array<float, 3>>            clear_value_src;
-        bool                               blending { false };
-        bool                               clear_output { false };
-        bool                               transparent_clear { false };
-        bool                               clear_depth { false };
-        float                              depth_clear_value { 1.0f };
-        bool                               preserve_output { false };
-        VkAttachmentLoadOp                 color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
-        VkAttachmentLoadOp                 depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
-        rstd::vec::Vec<DescriptorSetUse>   descriptor_bindings;
-        std::optional<PipelineCacheKey>    pipeline_cache_key;
-        std::optional<RenderPassCacheKey>  render_pass_cache_key;
-        std::optional<FramebufferCacheKey> framebuffer_cache_key;
-        bool                               pipeline_cache_hit { false };
-        u64                                pipeline_cache_observed_count { 0 };
-        bool                               render_pass_cache_hit { false };
-        u64                                render_pass_cache_observed_count { 0 };
-        bool                               framebuffer_cache_hit { false };
-        u64                                framebuffer_cache_observed_count { 0 };
+        Option<array<float, 3>>          clear_value_src;
+        bool                             blending { false };
+        bool                             clear_output { false };
+        bool                             transparent_clear { false };
+        bool                             clear_depth { false };
+        float                            depth_clear_value { 1.0f };
+        bool                             preserve_output { false };
+        VkAttachmentLoadOp               color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
+        VkAttachmentLoadOp               depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
+        rstd::vec::Vec<DescriptorSetUse> descriptor_bindings;
+        Option<PipelineCacheKey>         pipeline_cache_key;
+        Option<RenderPassCacheKey>       render_pass_cache_key;
+        Option<FramebufferCacheKey>      framebuffer_cache_key;
+        bool                             pipeline_cache_hit { false };
+        u64                              pipeline_cache_observed_count { 0 };
+        bool                             render_pass_cache_hit { false };
+        u64                              render_pass_cache_observed_count { 0 };
+        bool                             framebuffer_cache_hit { false };
+        u64                              framebuffer_cache_observed_count { 0 };
     };
 
     CustomShaderPass(Desc&&);
@@ -111,13 +111,13 @@ public:
     bool prepareResourceStates(
         rstd::mut_ref<rstd::dyn<resource_registry::TextureStatePreparer>>) override;
     Option<RenderItemId>                      renderItemId() const override;
-    std::optional<PipelineCacheKey>           pipelineCacheKey() const override;
+    Option<PipelineCacheKey>                  pipelineCacheKey() const override;
     bool                                      pipelineCacheHit() const override;
     u64                                       pipelineCacheObservedCount() const override;
-    std::optional<RenderPassCacheKey>         renderPassCacheKey() const override;
+    Option<RenderPassCacheKey>                renderPassCacheKey() const override;
     bool                                      renderPassCacheHit() const override;
     u64                                       renderPassCacheObservedCount() const override;
-    std::optional<FramebufferCacheKey>        framebufferCacheKey() const override;
+    Option<FramebufferCacheKey>               framebufferCacheKey() const override;
     bool                                      framebufferCacheHit() const override;
     u64                                       framebufferCacheObservedCount() const override;
     std::vector<PassTextureRequestDiagnostic> textureRequestDiagnostics() const override;

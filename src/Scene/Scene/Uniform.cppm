@@ -40,7 +40,7 @@ struct UniformValueLayout {
     UniformMatrixStorage matrix_storage { UniformMatrixStorage::ColumnMajor };
 
     static auto Linear(usize elements) -> UniformValueLayout {
-        return { .columns = u32(static_cast<rstd::uint32_t>(elements.to_primitive())) };
+        return { .columns = rstd::as_cast<u32>(elements) };
     }
 
     static auto Matrix(u32 rows, u32 columns, usize array_count, UniformMatrixStorage storage)
@@ -182,7 +182,7 @@ struct UniformSourceId {
 
 struct UniformSourceAttachment {
     UniformSourceId source;
-    rstd::int32_t   priority { 0 };
+    i32             priority {};
 };
 
 enum class UniformBlockScope : rstd::uint8_t
@@ -396,10 +396,10 @@ struct UniformAttachmentWriter {
     struct Api {
         using Trait = UniformAttachmentWriter;
 
-        bool AttachGlobal(UniformSourceId source, rstd::int32_t priority = 0) {
+        bool AttachGlobal(UniformSourceId source, i32 priority = i32()) {
             return rstd::trait_call<0>(this, source, priority);
         }
-        bool AttachNode(SceneNodeId node, UniformSourceId source, rstd::int32_t priority = 0) {
+        bool AttachNode(SceneNodeId node, UniformSourceId source, i32 priority = i32()) {
             return rstd::trait_call<1>(this, node, source, priority);
         }
     };
@@ -469,12 +469,12 @@ public:
         return Some(m_sources[rstd::as_cast<usize>(id.index)].as_ref());
     }
 
-    bool AttachGlobal(UniformSourceId source, rstd::int32_t priority = 0) {
+    bool AttachGlobal(UniformSourceId source, i32 priority = i32()) {
         if (Resolve(source).is_none()) return false;
         return AttachUnique(m_global_sources, source, priority);
     }
 
-    bool AttachNode(SceneNodeId node, UniformSourceId source, rstd::int32_t priority = 0) {
+    bool AttachNode(SceneNodeId node, UniformSourceId source, i32 priority = i32()) {
         if (! node.Valid() || Resolve(source).is_none()) return false;
         auto key         = IdKey(node);
         auto attachments = m_node_sources.get_mut(key);
@@ -537,7 +537,7 @@ private:
     }
 
     static bool AttachUnique(Vec<UniformSourceAttachment>& attachments, UniformSourceId source,
-                             rstd::int32_t priority) {
+                             i32 priority) {
         for (auto& attachment : attachments) {
             if (attachment.source != source) continue;
             attachment.priority = priority;

@@ -18,7 +18,7 @@ namespace wpscene
 {
 
 struct SoundObject {
-    std::int32_t             id { 0 };
+    i32                      id { 0 };
     std::string              playbackmode { "loop" };
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3>     angles { 0.0f, 0.0f, 0.0f };
@@ -31,13 +31,13 @@ struct SoundObject {
     std::vector<std::string> sound;
 
     // Common cross-kind metadata.
-    bool                      locktransforms { false };
-    bool                      muteineditor { false };
-    bool                      nointerpolation { false };
-    std::uint32_t             parent { 0 };
-    std::vector<std::int32_t> dependencies;
-    owe::Json                 instance;
-    FieldBindings             field_bindings;
+    bool             locktransforms { false };
+    bool             muteineditor { false };
+    bool             nointerpolation { false };
+    u32              parent { 0 };
+    std::vector<i32> dependencies;
+    owe::Json        instance;
+    FieldBindings    field_bindings;
 
     // Sound-kind specifics.
     bool        startsilent { false };    // PKGV0002+

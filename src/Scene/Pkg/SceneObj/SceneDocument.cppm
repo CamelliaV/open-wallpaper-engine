@@ -37,10 +37,10 @@ SceneJsonVersion DetectSceneJsonVersion(const owe::Json& root);
 
 class Orthogonalprojection {
 public:
-    bool    FromJson(const owe::Json&);
-    int32_t width;
-    int32_t height;
-    bool    auto_ { false };
+    bool FromJson(const owe::Json&);
+    i32  width;
+    i32  height;
+    bool auto_ { false };
 };
 
 class SceneCamera {
@@ -56,13 +56,13 @@ public:
 // (per WE editor configuration). All entries default to 0 if absent.
 class SceneLightConfig {
 public:
-    bool          FromJson(const owe::Json&);
-    std::uint32_t directional { 0 };
-    std::uint32_t directionalshadow { 0 };
-    std::uint32_t point { 0 };
-    std::uint32_t pointshadow { 0 };
-    std::uint32_t spot { 0 };
-    std::uint32_t spotshadow { 0 };
+    bool FromJson(const owe::Json&);
+    u32  directional { 0 };
+    u32  directionalshadow { 0 };
+    u32  point { 0 };
+    u32  pointshadow { 0 };
+    u32  spot { 0 };
+    u32  spotshadow { 0 };
 };
 
 class SceneGeneral {
@@ -80,7 +80,7 @@ public:
     float                cameraparallaxdelay { 0.0f };
     float                cameraparallaxmouseinfluence { 0.0f };
     bool                 isOrtho { false };
-    Orthogonalprojection orthogonalprojection { 1920, 1080 };
+    Orthogonalprojection orthogonalprojection { i32(1920), i32(1080) };
     float                zoom { 1.0f };
     float                fov { 50.0f };
     float                nearz { 0.01f };
@@ -101,13 +101,13 @@ public:
     std::unordered_map<std::string, std::string> user_bindings;
 
     // ---- PKGV0010+ ------------------------------------------------------
-    bool          hdr { false };
-    bool          norecompile { false };
-    float         bloomhdrfeather { 0.0f };
-    std::uint32_t bloomhdriterations { 0 };
-    float         bloomhdrscatter { 0.0f };
-    float         bloomhdrstrength { 0.0f };
-    float         bloomhdrthreshold { 0.0f };
+    bool  hdr { false };
+    bool  norecompile { false };
+    float bloomhdrfeather { 0.0f };
+    u32   bloomhdriterations { 0 };
+    float bloomhdrscatter { 0.0f };
+    float bloomhdrstrength { 0.0f };
+    float bloomhdrthreshold { 0.0f };
 
     // ---- PKGV0020+ ------------------------------------------------------
     std::array<float, 3> bloomtint { 1.0f, 1.0f, 1.0f };
@@ -141,13 +141,13 @@ public:
 
 class SceneMetadata {
 public:
-    bool             FromJson(const owe::Json&); // legacy: defaults to unknown version
-    bool             FromJson(const owe::Json&, SceneVersion); // canonical entry
-    SceneVersion     pkg_version { kSceneVersionUnknown };
-    SceneJsonVersion scene_json_version { kSceneJsonVersionDefault };
-    SceneCamera      camera;
-    SceneGeneral     general;
-    std::optional<std::array<uint32_t, 2>> canvas_extent;
+    bool                       FromJson(const owe::Json&); // legacy: defaults to unknown version
+    bool                       FromJson(const owe::Json&, SceneVersion); // canonical entry
+    SceneVersion               pkg_version { kSceneVersionUnknown };
+    SceneJsonVersion           scene_json_version { kSceneJsonVersionDefault };
+    SceneCamera                camera;
+    SceneGeneral               general;
+    Option<std::array<u32, 2>> canvas_extent;
 };
 
 enum class SceneObjectKind
@@ -166,16 +166,16 @@ enum class SceneObjectKind
 
 class SceneObjectMetadata {
 public:
-    SceneObjectKind                     kind { SceneObjectKind::Unknown };
-    std::size_t                         raw_index { 0 };
-    std::int32_t                        id { 0 };
-    bool                                has_id { false };
-    std::string                         name;
-    bool                                visible { true };
-    VisibleUserBinding                  visible_user;
-    std::uint32_t                       parent { 0 };
-    bool                                solid { false };
-    std::optional<std::array<float, 2>> size;
+    SceneObjectKind              kind { SceneObjectKind::Unknown };
+    std::size_t                  raw_index { 0 };
+    i32                          id { 0 };
+    bool                         has_id { false };
+    std::string                  name;
+    bool                         visible { true };
+    VisibleUserBinding           visible_user;
+    u32                          parent { 0 };
+    bool                         solid { false };
+    Option<std::array<float, 2>> size;
 };
 
 struct SceneObjectRecord {
@@ -190,12 +190,12 @@ public:
     bool                   objects_are_array { true };
 };
 
-std::optional<SceneDocument> ParseSceneDocumentValue(owe::Json, SceneVersion);
-Vec<SceneObjectRecord>       ParseSceneObjectRecords(const owe::Json&, bool& objects_are_array);
-std::optional<SceneDocument> ParseSceneDocumentJson(std::string_view, SceneVersion);
-std::optional<SceneDocument> LoadSceneDocumentFromVfs(fs::VFS&, std::string_view, SceneVersion);
-std::optional<SceneDocument> LoadSceneDocumentFromPkg(std::string_view);
-std::optional<SceneDocument> LoadSceneDocumentFromSource(std::string_view);
+Option<SceneDocument>  ParseSceneDocumentValue(owe::Json, SceneVersion);
+Vec<SceneObjectRecord> ParseSceneObjectRecords(const owe::Json&, bool& objects_are_array);
+Option<SceneDocument>  ParseSceneDocumentJson(std::string_view, SceneVersion);
+Option<SceneDocument>  LoadSceneDocumentFromVfs(fs::VFS&, std::string_view, SceneVersion);
+Option<SceneDocument>  LoadSceneDocumentFromPkg(std::string_view);
+Option<SceneDocument>  LoadSceneDocumentFromSource(std::string_view);
 
 } // namespace wpscene
 } // namespace owe

@@ -83,13 +83,13 @@ bool MaterialPassBindItem::FromJson(const owe::Json& json) {
 }
 
 void MaterialPass::Update(const MaterialPass& p) {
-    int32_t i = -1;
+    std::size_t i = 0;
     for (const auto& el : p.textures) {
-        i++;
         if (p.textures.size() > textures.size()) textures.resize(p.textures.size());
         if (! el.empty()) {
             textures[i] = el;
         }
+        ++i;
     }
     for (const auto& el : p.constantshadervalues) {
         constantshadervalues[el.first] = el.second;
@@ -127,9 +127,9 @@ void Material::MergePass(const MaterialPass& p) {
     }
 }
 
-void Material::MergeBindingOverrides(const std::vector<std::string>&                 textures,
-                                     const rstd::json::Array&                        usertextures,
-                                     const std::unordered_map<std::string, int32_t>& combos) {
+void Material::MergeBindingOverrides(const std::vector<std::string>&             textures,
+                                     const rstd::json::Array&                    usertextures,
+                                     const std::unordered_map<std::string, i32>& combos) {
     if (textures.size() > this->textures.size()) this->textures.resize(textures.size());
     for (std::size_t i = 0; i < textures.size(); ++i) {
         if (! textures[i].empty()) this->textures[i] = textures[i];
@@ -176,7 +176,7 @@ bool MaterialPass::FromJson(const owe::Json& json) {
         if (object.is_some())
             (*object)->iter().for_each([&](auto entry) {
                 auto [entry_key, entry_value] = entry;
-                std::int32_t value { 0 };
+                i32 value { 0 };
                 owe::GetJsonValue(*entry_value, value);
                 combos[rstd::cppstd::to_string(entry_key->as_str())] = value;
             });
@@ -252,7 +252,7 @@ bool Material::FromJson(const owe::Json& json, SceneVersion /*v*/) {
         if (object.is_some())
             (*object)->iter().for_each([&](auto entry) {
                 auto [entry_key, entry_value] = entry;
-                std::int32_t value { 0 };
+                i32 value { 0 };
                 owe::GetJsonValue(*entry_value, value);
                 combos[rstd::cppstd::to_string(entry_key->as_str())] = value;
             });

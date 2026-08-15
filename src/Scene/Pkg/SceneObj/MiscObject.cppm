@@ -26,7 +26,7 @@ export namespace owe::wpscene
 // can decode either path without re-parsing.
 struct TextObject {
     // Common positional/metadata (mirrors ImageObject prefix).
-    std::int32_t         id { 0 };
+    i32                  id { 0 };
     std::string          name;
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
@@ -34,32 +34,32 @@ struct TextObject {
     std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
     bool                 visible { true };
 
-    bool                      locktransforms { false };
-    bool                      muteineditor { false };
-    bool                      nointerpolation { false };
-    std::uint32_t             parent { 0 };
-    std::string               attachment;
-    std::vector<std::int32_t> dependencies;
-    owe::Json                 instance;
-    FieldBindings             field_bindings;
+    bool             locktransforms { false };
+    bool             muteineditor { false };
+    bool             nointerpolation { false };
+    u32              parent { 0 };
+    std::string      attachment;
+    std::vector<i32> dependencies;
+    owe::Json        instance;
+    FieldBindings    field_bindings;
 
     // Text-specific.
     owe::Json        text; // string | {script: ...} | {user: ..., value: ...}
     UserValueBinding text_user;
     owe::Json        font; // string | {value: ...}
     float            pointsize { 12.0f };
-    std::uint32_t    padding { 0 };
+    u32              padding { 0 };
     std::string      horizontalalign;
     std::string      verticalalign;
     std::string      anchor;
     std::string      alignment { "center" };
 
     // Text-flow controls (PKGV0018+).
-    std::uint32_t maxrows { 0 };
-    float         maxwidth { 0.0f };
-    bool          limitrows { false };
-    bool          limitwidth { false };
-    bool          limituseellipsis { false };
+    u32   maxrows { 0 };
+    float maxwidth { 0.0f };
+    bool  limitrows { false };
+    bool  limitwidth { false };
+    bool  limituseellipsis { false };
 
     VisibleUserBinding visible_user;
     std::string        visible_user_key;
@@ -68,7 +68,7 @@ struct TextObject {
     std::array<float, 3>     color { 1.0f, 1.0f, 1.0f };
     float                    alpha { 1.0f };
     float                    brightness { 1.0f };
-    int32_t                  colorBlendMode { 0 };
+    i32                      colorBlendMode { 0 };
     std::array<float, 2>     size { 0.0f, 0.0f };
     bool                     perspective { false };
     bool                     reflected { true };
@@ -147,7 +147,7 @@ struct TextObject {
 // non-null string. WE links to a `.mdl` file under /assets and optionally
 // names a sub-attachment to overlay.
 struct ModelObject {
-    std::int32_t         id { 0 };
+    i32                  id { 0 };
     std::string          name;
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
@@ -155,20 +155,20 @@ struct ModelObject {
     std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
     bool                 visible { true };
 
-    bool                      locktransforms { false };
-    bool                      muteineditor { false };
-    bool                      nointerpolation { false };
-    std::uint32_t             parent { 0 };
-    std::vector<std::int32_t> dependencies;
-    owe::Json                 instance;
-    FieldBindings             field_bindings;
+    bool             locktransforms { false };
+    bool             muteineditor { false };
+    bool             nointerpolation { false };
+    u32              parent { 0 };
+    std::vector<i32> dependencies;
+    owe::Json        instance;
+    FieldBindings    field_bindings;
 
-    std::string   model;
-    std::string   attachment;
-    std::uint32_t skin { 0 };
-    bool          perspective { false };
-    bool          reflected { true };
-    bool          castshadow { true };
+    std::string model;
+    std::string attachment;
+    u32         skin { 0 };
+    bool        perspective { false };
+    bool        reflected { true };
+    bool        castshadow { true };
 
     std::vector<PuppetLayer::AnimationLayer> puppet_layers;
     VisibleUserBinding                       visible_user;
@@ -209,7 +209,7 @@ struct ModelObject {
 // a non-null string. Carries camera animation paths and per-camera
 // projection overrides.
 struct CameraObject {
-    std::int32_t         id { 0 };
+    i32                  id { 0 };
     std::string          name;
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
@@ -217,13 +217,13 @@ struct CameraObject {
     std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
     bool                 visible { true };
 
-    bool                      locktransforms { false };
-    bool                      muteineditor { false };
-    bool                      nointerpolation { false };
-    std::uint32_t             parent { 0 };
-    std::vector<std::int32_t> dependencies;
-    owe::Json                 instance;
-    FieldBindings             field_bindings;
+    bool             locktransforms { false };
+    bool             muteineditor { false };
+    bool             nointerpolation { false };
+    u32              parent { 0 };
+    std::vector<i32> dependencies;
+    owe::Json        instance;
+    FieldBindings    field_bindings;
 
     std::string camera; // camera name reference
     std::string path;   // animation path .json

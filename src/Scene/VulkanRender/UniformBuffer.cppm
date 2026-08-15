@@ -117,7 +117,7 @@ struct BoundUniformOutput {
 
 struct BoundUniformSource {
     ref<dyn<UniformSource>>               source;
-    rstd::int32_t                         priority { 0 };
+    i32                                   priority {};
     Vec<BoundUniformOutput>               outputs;
     Option<Box<dyn<UniformBindingLease>>> lease;
     u64                                   version { 0 };

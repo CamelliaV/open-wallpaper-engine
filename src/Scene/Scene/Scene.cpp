@@ -165,23 +165,23 @@ float cubic(float p0, float p1, float p2, float p3, float t) {
 
 struct AnimationFrame {
     float current { 0.0f };
-    int   end { 0 };
+    i32   end {};
     bool  wraps { false };
 };
 
 AnimationFrame animation_frame(const SceneAnimationCurve& curve, double runtime) {
     float fps         = curve.fps > 0.0f ? curve.fps : 30.0f;
     float frame       = static_cast<float>(runtime) * fps;
-    int   end         = curve.length;
+    i32   end         = curve.length;
     auto  absorb_last = [&end](slice<SceneAnimationKey> keys) {
         if (! keys.is_empty()) end = std::max(end, keys[keys.len() - usize(1)].frame);
     };
     absorb_last(curve.c0.as_slice());
     absorb_last(curve.c1.as_slice());
     absorb_last(curve.c2.as_slice());
-    if (end <= 0) return { .current = frame, .end = end };
+    if (end <= i32()) return { .current = frame, .end = end };
 
-    const float ef = static_cast<float>(end);
+    const float ef = rstd::as_cast<float>(end);
     if (curve.mode == "mirror"_str) {
         float period = 2.0f * ef;
         float m      = std::fmod(frame, period);
@@ -199,14 +199,14 @@ AnimationFrame animation_frame(const SceneAnimationCurve& curve, double runtime)
 }
 
 float eval_segment(const SceneAnimationKey& a, const SceneAnimationKey& b, float frame) {
-    float dt = static_cast<float>(b.frame - a.frame);
+    float dt = rstd::as_cast<float>(b.frame - a.frame);
     if (dt <= 0.0f) return b.value;
-    float linear_t = std::clamp((frame - static_cast<float>(a.frame)) / dt, 0.0f, 1.0f);
+    float linear_t = std::clamp((frame - rstd::as_cast<float>(a.frame)) / dt, 0.0f, 1.0f);
     bool  has_tan  = a.front_enabled || b.back_enabled;
     if (! has_tan) return std::lerp(a.value, b.value, linear_t);
 
-    float p0x = static_cast<float>(a.frame);
-    float p3x = static_cast<float>(b.frame);
+    float p0x = rstd::as_cast<float>(a.frame);
+    float p3x = rstd::as_cast<float>(b.frame);
     float p1x = a.front_enabled ? p0x + a.front_x : p0x + dt / 3.0f;
     float p2x = b.back_enabled ? p3x + b.back_x : p3x - dt / 3.0f;
     float p0y = a.value;
@@ -233,14 +233,14 @@ float eval_axis(slice<SceneAnimationKey> keys, const AnimationFrame& frame) {
     const auto& first = keys[usize()];
     const auto& last  = keys[keys.len() - usize(1)];
 
-    if (frame.wraps && frame.current < static_cast<float>(first.frame)) {
+    if (frame.wraps && frame.current < rstd::as_cast<float>(first.frame)) {
         auto previous = last;
         previous.frame -= frame.end;
         if (previous.frame < first.frame) return eval_segment(previous, first, frame.current);
     }
-    if (frame.current <= static_cast<float>(first.frame)) return first.value;
+    if (frame.current <= rstd::as_cast<float>(first.frame)) return first.value;
     for (usize i(1); i < keys.len(); ++i) {
-        if (frame.current <= static_cast<float>(keys[i].frame))
+        if (frame.current <= rstd::as_cast<float>(keys[i].frame))
             return eval_segment(keys[i - usize(1)], keys[i], frame.current);
     }
     if (frame.wraps) {
@@ -485,7 +485,7 @@ void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
         const auto& parts   = mesh->Submeshes();
         for (std::size_t smi = 0; smi < parts.size(); ++smi) {
             const auto& submesh    = parts[smi];
-            auto        slot_index = submesh.material_slot;
+            auto        slot_index = submesh.material_slot.to_primitive();
             if (slot_index >= slots.size() || ! slots[slot_index]) continue;
 
             SceneMaterialId material_id   = register_material(*slots[slot_index]);
@@ -835,7 +835,7 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
                       node->WallpaperIdentity().unwrap_or(WallpaperLayerId { .value = i32(-1) }))
                 : WallpaperLayerId { .value = i32(-1) };
         (void)m_render_item_ids.insert(scene_id_key(item.id), id);
-        append_render_item(m_source_layer_items, source_layer.value.to_primitive(), id);
+        append_render_item(m_source_layer_items, source_layer.value, id);
         append_render_item(m_material_render_items, scene_id_key(item.material), id);
         append_render_item(m_mesh_render_items, scene_id_key(item.mesh), id);
         m_render_items.push(RenderItemRecord { .id              = id,
@@ -866,7 +866,7 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
         if (! desc_id) continue;
 
         auto record_index = rstd::as_cast<u32>(m_link_sources.len());
-        (void)m_link_source_ids.insert(id.to_primitive(), record_index);
+        (void)m_link_source_ids.insert(id, record_index);
         m_link_sources.push(RenderLinkSourceRecord {
             .source_layer      = WallpaperLayerId { .value = id },
             .scene_node        = scene.RegisteredLayerLinkSourceId(WallpaperLayerId { .value = id })
@@ -911,7 +911,7 @@ Option<RenderTargetDescId> RenderSceneSnapshot::renderTargetDescId(ref<str> key)
 }
 
 slice<RenderItemId> RenderSceneSnapshot::renderItemsFor(WallpaperLayerId id) const {
-    auto items = m_source_layer_items.get(id.value.to_primitive());
+    auto items = m_source_layer_items.get(id.value);
     return items.is_some() ? (**items).as_slice() : slice<RenderItemId> {};
 }
 
@@ -926,7 +926,7 @@ slice<RenderItemId> RenderSceneSnapshot::renderItemsFor(SceneMeshId id) const {
 }
 
 const RenderLinkSourceRecord* RenderSceneSnapshot::linkSource(WallpaperLayerId id) const {
-    auto index = m_link_source_ids.get(id.value.to_primitive());
+    auto index = m_link_source_ids.get(id.value);
     if (index.is_none()) return nullptr;
     return &m_link_sources[index_from_id(**index)];
 }
@@ -1375,7 +1375,7 @@ auto SceneMaterialCustomShader::Clone() const -> SceneMaterialCustomShader {
     SceneMaterialCustomShader cloned {
         .shader        = shader,
         .constValues   = constValues,
-        .variant       = variant,
+        .variant       = variant.is_some() ? Some<SceneShaderVariantDesc>(*variant) : None(),
         .value_version = value_version,
     };
     valueAnimations.iter().for_each([&](auto entry) {
@@ -1636,7 +1636,7 @@ bool Scene::SetMaterialShaderValue(SceneMaterial& material, ref<str> uniform_nam
 bool Scene::SetMaterialShaderValueByKey(SceneMaterial& material, ref<str> material_key,
                                         const ShaderValue& value) {
     auto uniform_name = rstd::cppstd::to_string(material_key);
-    if (material.customShader.variant.has_value()) {
+    if (material.customShader.variant.is_some()) {
         const auto& aliases = material.customShader.variant->uniform_aliases;
         if (auto alias = aliases.find(uniform_name); alias != aliases.end()) {
             uniform_name = alias->second;
@@ -2090,10 +2090,8 @@ void Scene::UpdateLinkedCamera(ref<str> name) {
 bool Scene::ResizeRenderTarget(ref<str> name, i32 width, i32 height) {
     auto target = RenderTargetMut(name);
     if (target.is_none()) return false;
-    auto& value       = **target;
-    auto  next_width  = width.to_primitive();
-    auto  next_height = height.to_primitive();
-    if (value.width == next_width && value.height == next_height) return false;
+    auto& value = **target;
+    if (value.width == width && value.height == height) return false;
 
     auto event = m_render_target_dirty_events.get_mut(name);
     if (event.is_none()) {
@@ -2102,8 +2100,8 @@ bool Scene::ResizeRenderTarget(ref<str> name, i32 width, i32 height) {
         (void)m_render_target_dirty_events.insert(rstd::move(event_key),
                                                   SceneRenderTargetDirtyEvent {
                                                       .name       = rstd::move(event_name),
-                                                      .old_width  = i32(value.width),
-                                                      .old_height = i32(value.height),
+                                                      .old_width  = value.width,
+                                                      .old_height = value.height,
                                                       .width      = width,
                                                       .height     = height,
                                                   });
@@ -2111,8 +2109,8 @@ bool Scene::ResizeRenderTarget(ref<str> name, i32 width, i32 height) {
         (**event).width  = width;
         (**event).height = height;
     }
-    value.width  = next_width;
-    value.height = next_height;
+    value.width  = width;
+    value.height = height;
     return true;
 }
 
@@ -2265,9 +2263,9 @@ void Scene::EnablePlanarReflection() {
     const auto key              = rstd::cppstd::to_string(WE_REFLECTION_PREFIX);
     if (RenderTarget(as_str(key).unwrap()).is_some()) return;
 
-    std::int32_t width   = m_ortho[usize()].to_primitive();
-    std::int32_t height  = m_ortho[usize(1)].to_primitive();
-    auto         primary = RenderTarget(SpecTex_Default);
+    i32  width   = m_ortho[usize()];
+    i32  height  = m_ortho[usize(1)];
+    auto primary = RenderTarget(SpecTex_Default);
     if (primary.is_some()) {
         width  = (**primary).width;
         height = (**primary).height;
@@ -2296,8 +2294,8 @@ std::string Scene::EnsureLinkRenderTarget(WallpaperLayerId source_layer,
                                                              : m_ortho[usize(1)].to_primitive());
         RegisterRenderTarget(String::make(as_str(link_key).unwrap()),
                              SceneRenderTarget {
-                                 .width                  = width.to_primitive(),
-                                 .height                 = height.to_primitive(),
+                                 .width                  = width,
+                                 .height                 = height,
                                  .allowReuse             = false,
                                  .initialize_transparent = true,
                              });
