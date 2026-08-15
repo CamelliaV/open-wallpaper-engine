@@ -105,8 +105,11 @@ void CollectLinkedSourceIds(const wpscene::Particle& particle, HashSet<std::int3
 }
 
 template<typename Dependencies>
-void CollectDependencies(const Dependencies& dependencies, HashSet<std::int32_t>& out) {
-    for (auto id : dependencies) out.insert(id);
+void CollectExternalDependencies(const Dependencies& dependencies, std::int32_t owner,
+                                 HashSet<std::int32_t>& out) {
+    for (auto id : dependencies) {
+        if (id != owner) out.insert(id);
+    }
 }
 
 HashSet<std::int32_t> CollectLinkedSourceIds(slice<SceneObjectVar> objects) {
@@ -115,11 +118,11 @@ HashSet<std::int32_t> CollectLinkedSourceIds(slice<SceneObjectVar> objects) {
         const auto& object = objects[index];
         RSTD_MATCH(object) {
             RSTD_CASE(Container, value) {
-                CollectDependencies(value.dependencies, out);
+                CollectExternalDependencies(value.dependencies, std::int32_t(value.id), out);
                 CollectLinkedSourceIdsFromValue(value.instance, out);
             }
             RSTD_CASE(Image, value) {
-                CollectDependencies(value.dependencies, out);
+                CollectExternalDependencies(value.dependencies, std::int32_t(value.id), out);
                 CollectLinkedSourceIds(value.material, out);
                 for (const auto& effect : value.effects)
                     CollectLinkedSourceIds(effect, out, Some(std::int32_t(value.id)));
@@ -129,36 +132,36 @@ HashSet<std::int32_t> CollectLinkedSourceIds(slice<SceneObjectVar> objects) {
                     CollectLinkedSourceIdsFromValue(binding, out);
             }
             RSTD_CASE(Shape, value) {
-                CollectDependencies(value.dependencies, out);
+                CollectExternalDependencies(value.dependencies, std::int32_t(value.id), out);
                 for (const auto& effect : value.effects)
                     CollectLinkedSourceIds(effect, out, Some(std::int32_t(value.id)));
             }
             RSTD_CASE(Particle, value) {
-                CollectDependencies(value.dependencies, out);
+                CollectExternalDependencies(value.dependencies, std::int32_t(value.id), out);
                 CollectLinkedSourceIds(value.particleObj, out);
                 CollectLinkedSourceIdsFromValue(value.instance, out);
                 CollectLinkedSourceIdsFromValue(value.particlesrc, out);
             }
             RSTD_CASE(Sound, value) {
-                CollectDependencies(value.dependencies, out);
+                CollectExternalDependencies(value.dependencies, std::int32_t(value.id), out);
                 CollectLinkedSourceIdsFromValue(value.instance, out);
             }
             RSTD_CASE(Light, value) {
-                CollectDependencies(value.dependencies, out);
+                CollectExternalDependencies(value.dependencies, std::int32_t(value.id), out);
                 CollectLinkedSourceIdsFromValue(value.instance, out);
             }
             RSTD_CASE(Text, value) {
-                CollectDependencies(value.dependencies, out);
+                CollectExternalDependencies(value.dependencies, std::int32_t(value.id), out);
                 CollectLinkedSourceIdsFromValue(value.instance, out);
                 for (const auto& effect : value.effects)
                     CollectLinkedSourceIds(effect, out, Some(std::int32_t(value.id)));
             }
             RSTD_CASE(Model, value) {
-                CollectDependencies(value.dependencies, out);
+                CollectExternalDependencies(value.dependencies, std::int32_t(value.id), out);
                 CollectLinkedSourceIdsFromValue(value.instance, out);
             }
             RSTD_CASE(Camera, value) {
-                CollectDependencies(value.dependencies, out);
+                CollectExternalDependencies(value.dependencies, std::int32_t(value.id), out);
                 CollectLinkedSourceIdsFromValue(value.instance, out);
             }
         }

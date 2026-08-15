@@ -407,6 +407,7 @@ TEST(SceneLinkedSources, EffectSelfCompositeStaysInOwningLayer) {
                 "name": "Self Composite",
                 "image": "models/util/fullscreenlayer.json",
                 "copybackground": true,
+                "dependencies": [568],
                 "effects": [{
                     "file": "effects/godrays/effect.json",
                     "visible": true,
