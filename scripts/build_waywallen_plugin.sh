@@ -10,9 +10,9 @@ WAYWALLEN_REF="${WAYWALLEN_REF:-main}"
 WAYWALLEN_SRC="${WAYWALLEN_SRC:-$PROJECT_DIR/build/waywallen-src}"
 BRIDGE_BUILD_DIR="${BRIDGE_BUILD_DIR:-$PROJECT_DIR/build/waywallen-bridge}"
 BRIDGE_INSTALL_DIR="${BRIDGE_INSTALL_DIR:-$PROJECT_DIR/build/waywallen-bridge-install}"
-OWE_BUILD_DIR="${OWE_BUILD_DIR:-$PROJECT_DIR/build/waywallen-plugin}"
-INSTALL_DIR="${INSTALL_DIR:-$PROJECT_DIR/build/waywallen-plugin-install}"
+BUNDLE_DIR="$PROJECT_DIR/build/waywallen-plugin-bundle"
 DIST_DIR="${DIST_DIR:-$PROJECT_DIR/dist}"
+PLUGIN_ID="org.waywallen.open-wallpaper-engine"
 
 info() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -56,15 +56,10 @@ if [[ ! -f "$CONDARC" ]]; then
     } > "$CONDARC"
 fi
 
-case "$INSTALL_DIR" in
-    "$PROJECT_DIR"/build/*) ;;
-    *) fail "INSTALL_DIR must stay under $PROJECT_DIR/build" ;;
-esac
 case "$BRIDGE_INSTALL_DIR" in
     "$PROJECT_DIR"/build/*) ;;
     *) fail "BRIDGE_INSTALL_DIR must stay under $PROJECT_DIR/build" ;;
 esac
-
 info "Writing merged conda env: $ENV_MERGED_FILE"
 mkdir -p "$(dirname "$ENV_MERGED_FILE")"
 python3 - "$ENV_FILE" "$ENV_MERGED_FILE" "${CONDA_TARGET_PACKAGES[@]}" <<'PY'
@@ -148,9 +143,9 @@ fi
 
 THREAD_ARGS=(-DCMAKE_C_FLAGS_INIT=-pthread -DCMAKE_CXX_FLAGS_INIT=-pthread)
 
-info "Cleaning install prefix"
-rm -rf "$BRIDGE_INSTALL_DIR" "$INSTALL_DIR"
-mkdir -p "$BRIDGE_INSTALL_DIR" "$INSTALL_DIR" "$DIST_DIR"
+info "Cleaning install prefixes"
+rm -rf "$BRIDGE_INSTALL_DIR" "$BUNDLE_DIR"
+mkdir -p "$BRIDGE_INSTALL_DIR" "$BUNDLE_DIR" "$DIST_DIR"
 
 info "Configuring waywallen bridge"
 cmake -S "$WAYWALLEN_SRC/bridge" -B "$BRIDGE_BUILD_DIR" -G Ninja \
@@ -168,44 +163,21 @@ info "Building waywallen bridge"
 cmake --build "$BRIDGE_BUILD_DIR" --parallel
 cmake --install "$BRIDGE_BUILD_DIR"
 
-info "Configuring open-wallpaper-engine"
-cmake -S "$PROJECT_DIR" -B "$OWE_BUILD_DIR" -G Ninja \
-    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_C_COMPILER=clang \
-    -DCMAKE_CXX_COMPILER=clang++ \
-    -DCMAKE_LINKER_TYPE=LLD \
-    "${SYSROOT_ARGS[@]}" \
-    "${THREAD_ARGS[@]}" \
-    -DCMAKE_PREFIX_PATH="$BRIDGE_INSTALL_DIR;$CONDA_PREFIX" \
-    -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-    -DOWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT=ON \
-    -DBUILD_WAYWALLEN=ON \
-    -DBUILD_WEWEB=ON \
-    -DBUILD_VIEWER=OFF \
-    -DBUILD_TESTS=OFF
-
 info "Building open-wallpaper-engine"
-cmake --build "$OWE_BUILD_DIR" --parallel
-cmake --install "$OWE_BUILD_DIR"
+OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT=ON lito install -p owe-waywallen-plugin \
+    --no-config \
+    --prefix "$BUNDLE_DIR" \
+    --config toolchain.stdlib=libstdc++ \
+    --config 'build.options=["-pthread"]' \
+    --config "cmake.search-path=[\"$BRIDGE_INSTALL_DIR\",\"$CONDA_PREFIX\"]"
 
-info "Validating plugin install"
-plugin_dir="$INSTALL_DIR"
-files_txt="$plugin_dir/files.txt"
-test -f "$plugin_dir/plugin.toml"
-test -f "$files_txt"
-while IFS= read -r rel || [[ -n "$rel" ]]; do
-    [[ -n "$rel" ]] || continue
-    test -e "$plugin_dir/$rel"
-done < "$files_txt"
-
-info "Packaging with CPack"
+info "Packaging plugin bundle"
 rm -f "$DIST_DIR"/*.zip
-cpack --config "$OWE_BUILD_DIR/CPackConfig.cmake" -B "$DIST_DIR"
-shopt -s nullglob
-packages=("$DIST_DIR"/*.zip)
-shopt -u nullglob
-[[ ${#packages[@]} -eq 1 ]] || fail "CPack did not produce exactly one zip"
-package_path="${packages[0]}"
+plugin_version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' "$BUNDLE_DIR/plugin.toml")"
+[[ -n "$plugin_version" ]] || fail "plugin version not found in $BUNDLE_DIR/plugin.toml"
+system_name="$(uname -s | tr '[:upper:]' '[:lower:]')"
+package_path="$DIST_DIR/$PLUGIN_ID-$plugin_version-$system_name-$host_arch.zip"
+cmake -E chdir "$BUNDLE_DIR" cmake -E tar cf "$package_path" --format=zip .
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     output_path="$package_path"

@@ -80,6 +80,7 @@ git = "https://github.com/litocpp/vvk.git"
 
 [workspace.dependencies.spirv-reflect]
 git = "https://github.com/hypengw/SPIRV-Reflect.git"
+branch = "toml"
 
 [workspace.external-dependencies.pkg-config.glfw]
 module = "glfw3"
