@@ -15,7 +15,7 @@ sources = [
 
 [usage]
 public-include-directories = ["."]
-private-options = [
+options = [
   "-Wextra",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",

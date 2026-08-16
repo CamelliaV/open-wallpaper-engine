@@ -25,12 +25,13 @@ sources = [
 [usage]
 public-include-directories = ["third_party", "src", "src/Core"]
 public-definitions = ["FT_SIZEOF_LONG=8"]
-private-options = [
+options = [
   "-Wextra",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]
-private-linker-options = ["-pthread", "-ldl"]
+threads = true
+system-libraries = ["dl"]
 
 [dependencies.rstd-std]
 workspace = true

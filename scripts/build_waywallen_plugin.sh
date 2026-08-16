@@ -167,8 +167,6 @@ info "Building open-wallpaper-engine"
 OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT=ON lito install -p owe-waywallen-plugin \
     --no-config \
     --prefix "$BUNDLE_DIR" \
-    --config toolchain.stdlib=libstdc++ \
-    --config 'build.options=["-pthread"]' \
     --config "cmake.search-path=[\"$BRIDGE_INSTALL_DIR\",\"$CONDA_PREFIX\"]"
 
 info "Packaging plugin bundle"

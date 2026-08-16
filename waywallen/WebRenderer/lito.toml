@@ -14,12 +14,13 @@ sources = [
 ]
 
 [usage]
-private-options = [
+options = [
   "-Wextra",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]
-private-linker-options = ["-pthread", "-ldl", "-Wl,-rpath,$ORIGIN"]
+threads = true
+linker-options = ["-Wl,-rpath,$ORIGIN"]
 
 [dependencies.owe-audio]
 workspace = true

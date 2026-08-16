@@ -1,8 +1,8 @@
 export module viewer.audio;
 
+export import wavsen.audio;
 import owe.audio_response;
 import rstd;
-import wavsen.audio;
 
 export namespace viewer
 {

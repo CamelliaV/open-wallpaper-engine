@@ -16,12 +16,12 @@ sources = [
 ]
 
 [usage]
-private-options = [
+options = [
   "-Wextra",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]
-private-linker-options = ["-pthread", "-ldl"]
+threads = true
 
 [dependencies.owe-core]
 workspace = true

@@ -3,15 +3,16 @@ module;
 
 export module wescene.scene_wallpaper;
 import rstd;
-import wescene.core;
-import wescene.json;
-import rstd.cppstd;
 
+export import wescene.core;
+export import wescene.json;
+export import rstd.cppstd;
 export import wescene.load_bench;
 export import wescene.scene;
 export import wescene.vulkan_render;
 export import wescene.vulkan;
 export import wescene.types;
+export import wescene.utils;
 export import wescene.pkg.parse;
 export import owe.audio_response;
 

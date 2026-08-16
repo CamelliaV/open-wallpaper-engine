@@ -7,12 +7,15 @@ name = "SceneViewer"
 sources = ["SceneViewer.cpp"]
 
 [usage]
-private-options = [
+options = [
   "-Wextra",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
 ]
-private-linker-options = ["-pthread", "-ldl"]
+
+[dependencies.rstd-log]
+workspace = true
+visibility = "public"
 
 [dependencies.owe-core]
 workspace = true
@@ -20,8 +23,8 @@ visibility = "private"
 
 [dependencies.owe-viewer-common]
 workspace = true
-visibility = "private"
+visibility = "public"
 
 [dependencies.owe-scene]
 workspace = true
-visibility = "private"
+visibility = "public"

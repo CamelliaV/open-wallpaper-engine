@@ -1,7 +1,7 @@
 export module viewer.common:arg;
 
+export import rstd.cppstd;
 import rstd.argparse;
-import rstd.cppstd;
 import wescene.cli;
 
 using namespace rstd::prelude;

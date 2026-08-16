@@ -12,7 +12,7 @@ sources = [
 ]
 
 [usage]
-private-options = [
+options = [
   "-Wextra",
   "-Wno-missing-field-initializers",
   "-Wno-gnu-zero-variadic-macro-arguments",
