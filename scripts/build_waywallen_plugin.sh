@@ -121,6 +121,7 @@ fi
 set +u
 conda activate "$ENV_PREFIX"
 set -u
+command -v llvm-strip >/dev/null || fail "llvm-strip not found in conda environment"
 
 if [[ ! -d "$WAYWALLEN_SRC/.git" ]]; then
     if [[ -e "$WAYWALLEN_SRC" ]]; then
@@ -174,6 +175,11 @@ OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT=ON "$LITO_BIN" install -p owe-waywallen-plugi
     --no-config \
     --prefix "$BUNDLE_DIR" \
     --config "cmake.search-path=[\"$BRIDGE_INSTALL_DIR\",\"$CONDA_PREFIX\"]"
+
+info "Stripping bundled web libraries"
+web_libraries=("$BUNDLE_DIR"/bin/weweb/*.so*)
+[[ -e "${web_libraries[0]}" ]] || fail "no shared libraries found under $BUNDLE_DIR/bin/weweb"
+llvm-strip --strip-unneeded "${web_libraries[@]}"
 
 info "Packaging plugin bundle"
 rm -f "$DIST_DIR"/*.zip
