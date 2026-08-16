@@ -105,7 +105,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -122,7 +122,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -146,7 +146,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -162,7 +162,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -188,7 +188,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -203,7 +203,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -220,7 +220,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -238,7 +238,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -259,7 +259,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [],
@@ -273,7 +273,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -289,7 +289,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -309,7 +309,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -330,7 +330,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -345,7 +345,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -365,7 +365,7 @@
         "kind": "path",
         "path": "."
       },
-      "version": "0.2.3"
+      "version": "0.2.5"
     },
     {
       "dependencies": [

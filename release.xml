@@ -1,8 +1,8 @@
-<release version="0.2.4" date="2026-08-16">
+<release version="0.2.5" date="2026-08-16">
   <description>
     <p>Changed:</p>
     <ul>
-      <li>Switch to Lito to build, install and packaging.</li>
+      <li>Switch to Lito for building, installing and packaging.</li>
       <li>Move type and content rating filter to multi selectors for waywallen discovery.</li>
     </ul>
     <p>Fixes:</p>
