@@ -27,31 +27,21 @@ M.TYPE_WP = {
     Web = "web",
 }
 
-local RATING_TAGS = { Questionable = true, Mature = true }
+local RATING_TAGS = { Everyone = true, Questionable = true, Mature = true }
 
 M.filters = {
     {
         id = "type",
         title = "Type",
-        type = "select",
+        type = "multi_select",
         values = { "Scene", "Video", "Web" },
     },
     {
-        id = "questionable",
-        title = "Questionable content",
-        type = "toggle",
-        values = { "Questionable" },
-        description = "Include Workshop items tagged as questionable.",
-    },
-    {
-        id = "mature",
-        title = "Mature content (NSFW)",
-        type = "toggle",
-        values = { "Mature" },
-        description = "Include mature-tagged Workshop items.",
-        confirmation =
-            "This shows wallpapers tagged as mature / NSFW. " ..
-            "You must be 18 or older to enable this. Continue?",
+        id = "content_rating",
+        title = "Content rating",
+        type = "multi_select",
+        values = { "Everyone", "Questionable", "Mature" },
+        description = "Defaults to Everyone when nothing is selected. Mature includes NSFW wallpapers.",
     },
     {
         id = "miscellaneous",
@@ -139,18 +129,40 @@ function M.search(ctx, params)
     local sort = SORTS[params.sort] or SORTS.trend_week
 
     -- Only wallpapers: never return applications, presets or asset packs.
-    -- Ratings are excluded unless the user opted them in via a tag.
+    -- Content rating defaults to Everyone; explicit selections replace that default.
     local excluded = {
-        Questionable = true, Mature = true,
         Application = true, Preset = true, Asset = true, ["Asset Pack"] = true,
     }
     local required = {}
+    local selected_types = {}
+    local selected_ratings = {}
+    local selected_rating_count = 0
     for _, tag in ipairs(params.tags or {}) do
-        if RATING_TAGS[tag] then
-            excluded[tag] = nil
+        if M.TYPE_WP[tag] then
+            selected_types[tag] = true
+        elseif RATING_TAGS[tag] then
+            if not selected_ratings[tag] then
+                selected_ratings[tag] = true
+                selected_rating_count = selected_rating_count + 1
+            end
         else
             table.insert(required, tag)
         end
+    end
+    if next(selected_types) then
+        for tag in pairs(M.TYPE_WP) do
+            if not selected_types[tag] then excluded[tag] = true end
+        end
+    end
+    if selected_rating_count == 0 then
+        selected_ratings.Everyone = true
+        selected_rating_count = 1
+    end
+    for tag in pairs(RATING_TAGS) do
+        if not selected_ratings[tag] then excluded[tag] = true end
+    end
+    if selected_rating_count == 1 then
+        for tag in pairs(selected_ratings) do table.insert(required, tag) end
     end
 
     local query = {

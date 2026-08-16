@@ -23,6 +23,13 @@ local function truthy(value, message)
     if not value then error(message or "expected a truthy value", 2) end
 end
 
+local function has_indexed_value(values, prefix, expected)
+    for key, value in pairs(values) do
+        if key:match("^" .. prefix .. "%[%d+%]$") and value == expected then return true end
+    end
+    return false
+end
+
 local function fake_context()
     local queued = {}
     local requests = {}
@@ -303,14 +310,14 @@ equal(info.capabilities.discover.subscription, true, "subscription capability")
 equal(info.capabilities.discover.download, nil, "download capability must be absent")
 equal(info.capabilities.discover.resolve, nil, "resolve capability must be absent")
 equal(info.capabilities.discover.remote_hint, nil, "remote hint must be absent")
-equal(#info.capabilities.discover.filters, 6, "discover filter count")
+equal(#info.capabilities.discover.filters, 5, "discover filter count")
 equal(info.capabilities.discover.filters[1].id, "type", "type filter")
-equal(info.capabilities.discover.filters[1].type, "select", "type filter control")
-equal(info.capabilities.discover.filters[3].values[1], "Mature", "mature filter value")
-truthy(
-    info.capabilities.discover.filters[3].confirmation:find("18 or older", 1, true),
-    "mature filter confirmation"
-)
+equal(info.capabilities.discover.filters[1].type, "multi_select", "type filter control")
+equal(info.capabilities.discover.filters[2].id, "content_rating", "content rating filter")
+equal(info.capabilities.discover.filters[2].type, "multi_select", "content rating control")
+equal(info.capabilities.discover.filters[2].values[1], "Everyone", "everyone value")
+equal(info.capabilities.discover.filters[2].values[2], "Questionable", "questionable value")
+equal(info.capabilities.discover.filters[2].values[3], "Mature", "mature value")
 equal(info.actions[1].label, "Log in to Steam", "Steam login label")
 equal(info.actions[1].browse_button_label, "Log in to Steam", "Steam browse login button label")
 equal(info.actions[1].description, nil, "Steam manage action description")
@@ -580,6 +587,16 @@ request = discover_ctx.request_at(before_search + 1)
 equal(request.method, "GET", "QueryFiles method")
 equal(request.query_data.access_token, "header.community.signature", "QueryFiles Community token")
 equal(request.query_data.appid, "431960", "QueryFiles appid")
+truthy(has_indexed_value(request.query_data, "excludedtags", "Video"), "Video type excluded")
+truthy(has_indexed_value(request.query_data, "excludedtags", "Web"), "Web type excluded")
+equal(has_indexed_value(request.query_data, "requiredtags", "Scene"), false,
+    "selected type must not become an AND tag")
+truthy(has_indexed_value(request.query_data, "requiredtags", "Everyone"),
+    "empty rating selection defaults to Everyone")
+truthy(has_indexed_value(request.query_data, "excludedtags", "Questionable"),
+    "default rating excludes Questionable")
+truthy(has_indexed_value(request.query_data, "excludedtags", "Mature"),
+    "default rating excludes Mature")
 equal(
     discover_ctx.request_at(before_search + 2).url,
     "https://steamcommunity.com/profiles/76561198000000001/?xml=1",
@@ -588,9 +605,44 @@ equal(
 -- A name already looked up costs nothing: a second search that asked Steam
 -- again would run out of queued responses and fail here.
 discover_ctx.queue(fixtures.query_files)
-local cached_search = main.discover.search(discover_ctx, { sort = "trend_week", page = 1 })
+local cached_search = main.discover.search(discover_ctx, {
+    sort = "trend_week",
+    page = 1,
+    tags = { "Scene", "Video", "Questionable", "Anime" },
+})
 equal(cached_search.items[1].author, "Fixture & Author", "cached author reused")
 equal(discover_ctx.queued_count(), 0, "cached author must not be looked up again")
+local cached_query = discover_ctx.request_at(discover_ctx.request_count()).query_data
+truthy(has_indexed_value(cached_query, "excludedtags", "Web"), "unselected type excluded")
+equal(has_indexed_value(cached_query, "excludedtags", "Scene"), false, "Scene type included")
+equal(has_indexed_value(cached_query, "excludedtags", "Video"), false, "Video type included")
+truthy(has_indexed_value(cached_query, "excludedtags", "Everyone"),
+    "Questionable-only rating excludes Everyone")
+equal(has_indexed_value(cached_query, "excludedtags", "Questionable"), false,
+    "Questionable-only rating included")
+truthy(has_indexed_value(cached_query, "excludedtags", "Mature"),
+    "Questionable-only rating excludes Mature")
+truthy(has_indexed_value(cached_query, "requiredtags", "Questionable"),
+    "single selected rating remains required")
+truthy(has_indexed_value(cached_query, "requiredtags", "Anime"), "genre remains required")
+
+discover_ctx.queue(fixtures.query_files)
+main.discover.search(discover_ctx, {
+    sort = "trend_week",
+    page = 1,
+    tags = { "Questionable", "Mature" },
+})
+local multi_rating_query = discover_ctx.request_at(discover_ctx.request_count()).query_data
+truthy(has_indexed_value(multi_rating_query, "excludedtags", "Everyone"),
+    "multiple ratings exclude Everyone")
+equal(has_indexed_value(multi_rating_query, "excludedtags", "Questionable"), false,
+    "multiple ratings include Questionable")
+equal(has_indexed_value(multi_rating_query, "excludedtags", "Mature"), false,
+    "multiple ratings include Mature")
+equal(has_indexed_value(multi_rating_query, "requiredtags", "Questionable"), false,
+    "multiple ratings must not require Questionable")
+equal(has_indexed_value(multi_rating_query, "requiredtags", "Mature"), false,
+    "multiple ratings must not require Mature")
 local request_count = discover_ctx.request_count()
 local details = main.discover.details(discover_ctx, "3765064055")
 equal(details.size, "4096", "cached details size")
