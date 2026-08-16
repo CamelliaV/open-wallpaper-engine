@@ -1,13 +1,13 @@
 {
-  "version": "0.2.3",
+  "version": "0.2.5",
   "entry_version": 3,
   "spawn_version": 10,
   "x86_64": {
-    "zip_url": "https://github.com/waywallen/open-wallpaper-engine/releases/download/v0.2.3/org.waywallen.open-wallpaper-engine-0.2.3-linux-x86_64.zip",
-    "sha256": "a1133a685b395db6e60f9aca698011b3940d62e97d4f2170975c35aa342f329a"
+    "zip_url": "https://github.com/waywallen/open-wallpaper-engine/releases/download/v0.2.5/org.waywallen.open-wallpaper-engine-0.2.5-linux-x86_64.zip",
+    "sha256": "e28521b67b11e9df59d326368378a11f3bc72906a920f4085604b2199db9eec1"
   },
   "aarch64": {
-    "zip_url": "https://github.com/waywallen/open-wallpaper-engine/releases/download/v0.2.3/org.waywallen.open-wallpaper-engine-0.2.3-linux-aarch64.zip",
-    "sha256": "fcc2fe3c6b811057347412f6e70e8d4d87355bbad1b592e5b63dd72b3f2d9320"
+    "zip_url": "https://github.com/waywallen/open-wallpaper-engine/releases/download/v0.2.5/org.waywallen.open-wallpaper-engine-0.2.5-linux-aarch64.zip",
+    "sha256": "8969e76ae6ae602335a0c59a071d442e0b87ea81253e0141a3d4f00258ad08af"
   }
 }
