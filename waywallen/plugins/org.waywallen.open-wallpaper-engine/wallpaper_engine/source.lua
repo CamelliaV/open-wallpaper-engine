@@ -36,6 +36,7 @@ local function scan_container(ctx, steam_root, container, name_prefix, is_worksh
 
         local wp_type, resource = project_util.classify(ctx, dir, project, project_type)
         if wp_type and resource then
+            local external_id = is_workshop and workshop.subscription_id(id) or nil
             table.insert(entries, {
                 name = (project and project.title) or (name_prefix .. id),
                 wp_type = wp_type,
@@ -45,7 +46,9 @@ local function scan_container(ctx, steam_root, container, name_prefix, is_worksh
                 description = project and project.description or nil,
                 tags = (project and project.tags) or {},
                 content_rating = project and project.contentrating or nil,
-                external_id = is_workshop and workshop.subscription_id(id) or nil,
+                external_id = external_id,
+                web_url = external_id and
+                    ("https://steamcommunity.com/sharedfiles/filedetails/?id=" .. external_id) or nil,
                 -- Steam measured the item when it unpacked it; without that the
                 -- daemon stats `resource` alone and calls a web wallpaper's
                 -- directory inode the size of the wallpaper.

@@ -801,7 +801,13 @@ equal(classify_calls, 2, "explicit source scan must classify local projects")
 equal(#source_items, 2, "source scan item count")
 equal(source_items[1].resource, item_dir .. "/scene.pkg", "source scan resource")
 equal(source_items[1].external_id, "3765064055", "source Workshop subscription id")
+equal(
+    source_items[1].web_url,
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=3765064055",
+    "source Workshop web URL"
+)
 equal(source_items[2].external_id, nil, "local project must not expose a subscription id")
+equal(source_items[2].web_url, nil, "local project must not expose a remote URL")
 
 local video_dir = "/fixture/video"
 local video_ctx = {
@@ -880,9 +886,15 @@ end
 local recorded_items = main.source.scan(workshop_ctx(fixtures.workshop_acf))
 equal(#recorded_items, 4, "scan item count with Steam's record")
 equal(recorded_items[1].external_id, "3765064055", "recorded subscription keeps its id")
+equal(
+    recorded_items[1].web_url,
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=3765064055",
+    "recorded subscription keeps its web URL"
+)
 equal(recorded_items[1].size, 4096, "recorded item reports the size Steam measured")
 equal(recorded_items[2].name, "Workshop 2589297069", "hand-placed Workshop directory")
 equal(recorded_items[2].external_id, nil, "hand-placed directory must not offer unsubscribe")
+equal(recorded_items[2].web_url, nil, "hand-placed directory must not expose a remote URL")
 equal(recorded_items[2].size, nil, "hand-placed directory was never measured by Steam")
 equal(recorded_items[3].size, nil, "record without a size leaves the item unmeasured")
 equal(recorded_items[4].size, nil, "local project is outside Steam's Workshop record")
