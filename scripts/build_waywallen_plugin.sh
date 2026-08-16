@@ -38,9 +38,15 @@ CONDA_TARGET_PACKAGES=(
 )
 
 command -v conda >/dev/null || fail "conda not found"
+command -v curl >/dev/null || fail "curl not found"
 command -v git >/dev/null || fail "git not found"
 command -v python3 >/dev/null || fail "python3 not found"
 [[ -f "$ENV_FILE" ]] || fail "missing $ENV_FILE"
+
+info "Installing lito"
+curl -fsSL https://raw.githubusercontent.com/litocpp/lito/main/install.sh | bash
+LITO_BIN="$HOME/.local/bin/lito"
+[[ -x "$LITO_BIN" ]] || fail "lito installer did not create $LITO_BIN"
 
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$PROJECT_DIR/build/.cache}"
 export CONDARC="${CONDARC:-$PROJECT_DIR/build/condarc}"
@@ -164,7 +170,7 @@ cmake --build "$BRIDGE_BUILD_DIR" --parallel
 cmake --install "$BRIDGE_BUILD_DIR"
 
 info "Building open-wallpaper-engine"
-OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT=ON lito install -p owe-waywallen-plugin \
+OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT=ON "$LITO_BIN" install -p owe-waywallen-plugin \
     --no-config \
     --prefix "$BUNDLE_DIR" \
     --config "cmake.search-path=[\"$BRIDGE_INSTALL_DIR\",\"$CONDA_PREFIX\"]"

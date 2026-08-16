@@ -1,3 +1,23 @@
+<release version="0.2.4" date="2026-08-16">
+  <description>
+    <p>Changed:</p>
+    <ul>
+      <li>Switch to Lito to build, install and packaging.</li>
+      <li>Move type and content rating filter to multi selectors for waywallen discovery.</li>
+    </ul>
+    <p>Fixes:</p>
+    <ul>
+      <li>VAAPI hardware decoding no longer stalls between frames when looped video restarts.</li>
+      <li>Vulkan hardware decoding no longer intermittently displays stale frames.</li>
+      <li>Missing scene textures use a fallback image instead of suppressing the frame. #96 by @GemeWolf</li>
+      <li>Runtime media thumbnails refresh correctly through image effect chains. #102 by @Waseem27-art</li>
+      <li>NVIDIA crashes caused by oversized cross-stage shader interfaces.</li>
+      <li>Self-referential scene dependencies and stale anonymous buffers across render-graph rebuilds.</li>
+      <li>Audio-response shutdown crashes.</li>
+      <li>Steam library path diagnostics.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.2.3" date="2026-08-09">
   <description>
     <p>Added:</p>

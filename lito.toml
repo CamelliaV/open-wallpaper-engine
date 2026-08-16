@@ -20,7 +20,7 @@ members = [
 default-members = ["viewer/SceneViewer", "viewer/WebViewer"]
 
 [workspace.package]
-version = "0.2.3"
+version = "0.2.4"
 
 [workspace.dependencies.owe-core]
 path = "src/Core"
@@ -132,6 +132,7 @@ cache = { BUILD_SHARED_LIBS = false, QJS_BUILD_EXAMPLES = false, QJS_BUILD_CLI_S
 [workspace.external-dependencies.cmake.cef]
 find-package = "CEF"
 integration = "build-tree"
+add-subdirectory = false
 adapter = "src/Web/cmake/CEF.cmake"
 
 [workspace.external-dependencies.cmake.cef.archives.x86_64]
