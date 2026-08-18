@@ -132,19 +132,25 @@ void AppHandler::OnBeforeCommandLineProcessing(const CefString&          process
         cmd->AppendSwitchWithValue("render-node-override", m_render_node_override);
     }
 
-    cmd->AppendSwitch("enable-gpu");
-    cmd->AppendSwitch("ignore-gpu-blocklist");
-    cmd->AppendSwitch("enable-gpu-rasterization");
-    cmd->AppendSwitch("enable-gpu-compositing");
-    cmd->AppendSwitch("disable-software-rasterizer");
     cmd->AppendSwitch("off-screen-rendering-enabled");
+    if (m_shared_texture_enabled) {
+        cmd->AppendSwitch("enable-gpu");
+        cmd->AppendSwitch("ignore-gpu-blocklist");
+        cmd->AppendSwitch("enable-gpu-rasterization");
+        cmd->AppendSwitch("enable-gpu-compositing");
+        cmd->AppendSwitch("disable-software-rasterizer");
 
-    // hw decode
-    cmd->AppendSwitch("enable-accelerated-video-decode");
-    cmd->AppendSwitch("enable-native-gpu-memory-buffers");
-
-    // cmd->AppendSwitch("disable-gpu-compositing");
-    // cmd->AppendSwitch("disable-gpu-vsync");
+        // Hardware decode and native GPU buffers only make sense on the
+        // accelerated paint path. The CPU fallback must not force GPU
+        // acceleration: NVIDIA/Wayland CEF otherwise selects an incompatible
+        // Vulkan surface path and never emits OnPaint.
+        cmd->AppendSwitch("enable-accelerated-video-decode");
+        cmd->AppendSwitch("enable-native-gpu-memory-buffers");
+    } else {
+        cmd->AppendSwitch("disable-gpu");
+        cmd->AppendSwitch("disable-gpu-compositing");
+        cmd->AppendSwitch("disable-gpu-rasterization");
+    }
 
     cmd->AppendSwitchWithValue("enable-features", features);
     cmd->AppendSwitchWithValue("disable-features", dis_features);
