@@ -93,4 +93,17 @@ function M.scan(ctx)
     return entries
 end
 
+-- Remove the item's backing directory. The daemon calls this after the user
+-- picks Remove; it deletes the DB row itself once this returns. `resource` is
+-- the project file for video/scene and the project dir for web, so resolve
+-- the item dir first. ctx.remove_dir is daemon-guarded to the plugin's
+-- registered libraries and remote dir.
+function M.remove(ctx, item)
+    local dir = project_util.project_dir_of(item)
+    if not dir or dir == "" then
+        error("missing item path")
+    end
+    ctx.remove_dir(dir)
+end
+
 return M
