@@ -103,7 +103,10 @@ function M.remove(ctx, item)
     if not dir or dir == "" then
         error("missing item path")
     end
-    ctx.remove_dir(dir)
+    -- Already-deleted content must not fail the daemon's DB-row cleanup.
+    if ctx.fs.exists(dir) then
+        ctx.remove_dir(dir)
+    end
 end
 
 return M
